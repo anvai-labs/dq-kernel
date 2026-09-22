@@ -128,9 +128,7 @@ Examples:
 
     except ImportError as e:
         logger.error(f"Missing dependency: {e}")
-        logger.error(
-            "Install Spark support with: pip install dq-kernel[spark]"
-        )
+        logger.error("Install Spark support with: pip install dq-kernel[spark]")
         return 1
     except Exception as e:
         logger.error(f"Error running data quality checks: {e}")

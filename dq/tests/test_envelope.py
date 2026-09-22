@@ -138,12 +138,14 @@ def test_envelope_evaluates_mixed_rulesets():
                     MetricKind.GROUP_MAX_DISTINCT,
                 }
             ),
-            SEMANTIC_RANGES_VERSION := "groups/v1",
+            "groups/v1",
         ),
         "ranges/v1": CapabilitySet(
             "c",
             "1",
-            frozenset({MetricKind.COLUMN_COUNT, MetricKind.COLUMN_MIN, MetricKind.COLUMN_MAX}),
+            frozenset(
+                {MetricKind.COLUMN_COUNT, MetricKind.COLUMN_MIN, MetricKind.COLUMN_MAX}
+            ),
             "ranges/v1",
         ),
     }
