@@ -38,7 +38,7 @@ requests = "^2.33.0"             # HTTP requests (for remote config)
 pywin32-ctypes = {version = "^0.2.0", markers = "sys_platform == 'win32'"}
 
 # Optional heavy dependencies (install with poetry install -E <extra>)
-pyspark = {version = "3.5.9", optional = true}
+pyspark = {version = "4.2.0", optional = true}
 pydeequ = {version = "1.7.0", optional = true}
 boto3 = {version = "^1.26.0", optional = true}
 cron-schedule-triggers = {version = "^0.0.11", optional = true}
