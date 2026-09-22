@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 157 raise sites across the modules below; the contract
+The framework raises 158 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -80,14 +80,16 @@ the evidence store refused an unsafe write.
 
 == dq/spark_adapter.py
 
-*Content:* 7 `ConfigurationError` sites.
+*Content:* 8 `ConfigurationError` sites.
 
 * Cause: bindings do not exactly match plan datasets, bound objects are not
   Spark DataFrames, or columns fail exact case-sensitive resolution
   (including duplicates and case-insensitive collisions); infinite range
-  bounds fail closed.
+  bounds fail closed; `execute_envelope` is handed a bare plan instead of a
+  `RulesetEnvelope`.
 * Fix: align binding names with the plan, pass DataFrames, and use the
-  exact column casing listed in the error.
+  exact column casing listed in the error; execute single-semantics plans
+  with `execute_plan`.
 
 == dq/dq_framework.py
 

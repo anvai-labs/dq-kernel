@@ -83,6 +83,38 @@ def execute_plan(
     capabilities = _capabilities_for(plan)
     plan.validate_for(capabilities)
     bindings = _validated_bindings(plan, datasets)
+    values = _compute_values(plan, bindings)
+    return plan.evaluate(values, capabilities)
+
+
+def execute_envelope(
+    envelope, datasets: Mapping[str, DataFrame]
+) -> tuple[CheckOutcome, ...]:
+    """Execute every subplan of a :class:`RulesetEnvelope` with Spark.
+
+    Mixed-semantics rulesets get one entry point: each subplan's metrics are
+    computed with its own semantics and capabilities, and the envelope
+    dispatches evaluation into one aggregate verdict (ADR-004/005).
+    """
+    from dq.envelope import RulesetEnvelope
+
+    if not isinstance(envelope, RulesetEnvelope):
+        raise ConfigurationError(
+            "execute_envelope requires a RulesetEnvelope, not a bare plan; "
+            "use execute_plan for single-semantics execution"
+        )
+    capabilities_by_version = {}
+    values = {}
+    for plan in envelope.plans:
+        capabilities = _capabilities_for(plan)
+        plan.validate_for(capabilities)
+        capabilities_by_version.setdefault(plan.semantic_version, capabilities)
+        bindings = _validated_bindings(plan, datasets)
+        values.update(_compute_values(plan, bindings))
+    return tuple(envelope.evaluate(values, capabilities_by_version))
+
+
+def _compute_values(plan: ExecutionPlan, bindings: dict) -> dict:
     values = {}
     for name in sorted(bindings):
         if plan.semantic_version == SEMANTIC_GROUPS_VERSION:
@@ -91,7 +123,7 @@ def execute_plan(
             values.update(_dataset_range_metrics(name, bindings[name], plan))
         else:
             values.update(_dataset_counts(name, bindings[name], plan))
-    return plan.evaluate(values, capabilities)
+    return values
 
 
 def _validated_bindings(plan: ExecutionPlan, datasets) -> dict[str, DataFrame]:

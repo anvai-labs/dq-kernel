@@ -32,7 +32,9 @@ bound to dataset and rule-set digests as `dq-report/v1`.
 | ranges/v1 | Value-range bounds | All values ≥ 0 and ≤ 100 |
 
 Plans are single-semantics: compose them with `RulesetEnvelope` for mixed
-rulesets.
+rulesets and execute the whole ruleset with one call —
+`dq.spark_adapter.execute_envelope(envelope, datasets)` returns the
+aggregate verdict.
 
 ## Documentation
 
