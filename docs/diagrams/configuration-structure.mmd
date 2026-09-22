@@ -1,0 +1,67 @@
+graph TD
+    subgraph "Configuration Sources"
+        File[File System<br/>file://path/config.conf]
+        S3[S3 Bucket<br/>s3://bucket/config.conf]
+        ADLS[Azure ADLS Gen2<br/>abfss://container@acct/config.conf]
+        HTTP[HTTP/HTTPS<br/>https://url/config.conf]
+        String[Inline String<br/>HOCON Format]
+    end
+    
+    subgraph "Configuration Structure"
+        Root[dqframework]
+        DataFrames[dataframes<br/>DataFrame Definitions]
+        Rules[dqrules<br/>Validation Rules]
+        Repository[repository<br/>Storage Configuration]
+    end
+    
+    subgraph "Rule Components"
+        RuleName[name<br/>Rule Identifier]
+        Engine[engine<br/>Engine Type]
+        Async[async<br/>Execution Mode]
+        Checks[checks<br/>Constraint Definitions]
+        DataFrameList[dataframes<br/>Target DataFrames]
+    end
+    
+    subgraph "Check Definition"
+        ConstraintName[constraint_name<br/>Check Identifier]
+        Constraint[constraint<br/>Validation Type]
+        Columns[columns<br/>Target Columns]
+        GroupBy[group_by<br/>Grouping Columns]
+        Level[level<br/>Error/Warning]
+        Thresholds[min/max<br/>Threshold Values]
+        CustomParams[Custom Parameters<br/>Engine-specific]
+    end
+    
+    File --> Root
+    S3 --> Root
+    ADLS --> Root
+    HTTP --> Root
+    String --> Root
+    
+    Root --> DataFrames
+    Root --> Rules
+    Root --> Repository
+    
+    Rules --> RuleName
+    Rules --> Engine
+    Rules --> Async
+    Rules --> Checks
+    Rules --> DataFrameList
+    
+    Checks --> ConstraintName
+    Checks --> Constraint
+    Checks --> Columns
+    Checks --> GroupBy
+    Checks --> Level
+    Checks --> Thresholds
+    Checks --> CustomParams
+    
+    classDef sourceLayer fill:#e3f2fd
+    classDef structureLayer fill:#f1f8e9
+    classDef ruleLayer fill:#fff8e1
+    classDef checkLayer fill:#fce4ec
+    
+    class File,S3,ADLS,HTTP,String sourceLayer
+    class Root,DataFrames,Rules,Repository structureLayer
+    class RuleName,Engine,Async,Checks,DataFrameList ruleLayer
+    class ConstraintName,Constraint,Columns,GroupBy,Level,Thresholds,CustomParams checkLayer

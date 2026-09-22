@@ -1,0 +1,129 @@
+[tool.poetry]
+name = "dq-kernel"
+version = "0.1.0"
+description = "A flexible data quality framework with engine extensibility using Python reflection"
+authors = ["Data Quality Framework Contributors"]
+license = "Apache-2.0"
+readme = "README.md"
+homepage = "https://github.com/anvai-labs/dq-kernel"
+repository = "https://github.com/anvai-labs/dq-kernel"
+documentation = "https://github.com/anvai-labs/dq-kernel#documentation"
+keywords = ["data-quality", "spark", "deequ", "great-expectations", "data-validation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering",
+]
+packages = [{include = "dq"}]
+
+# Poetry performance configuration (applied via CLI/env vars)
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.14"
+
+# ULTRA-LIGHT CORE DEPENDENCIES ONLY
+# Essential for framework functionality
+pyhocon = "^0.3.59"              # Configuration parsing (HOCON format)
+pyyaml = "^6.0"                  # YAML configuration support
+requests = "^2.33.0"             # HTTP requests (for remote config)
+
+# Windows compatibility (lightweight)
+pywin32-ctypes = {version = "^0.2.0", markers = "sys_platform == 'win32'"}
+
+# Optional heavy dependencies (install with poetry install -E <extra>)
+pyspark = {version = "3.5.9", optional = true}
+pydeequ = {version = "1.7.0", optional = true}
+boto3 = {version = "^1.26.0", optional = true}
+cron-schedule-triggers = {version = "^0.0.11", optional = true}
+databricks-sdk = {version = "^0.123.0", optional = true}
+
+[tool.poetry.extras]
+spark = ["pyspark"]
+deequ = ["pydeequ"]
+aws = ["boto3"]
+cron = ["cron-schedule-triggers"]
+databricks = ["databricks-sdk", "cron-schedule-triggers"]
+
+# Minimal development dependencies (only for CI)
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0.3"
+pytest-cov = "^6.0.0"           # Branch coverage gate
+black = "26.3.1"                  # Formatting (lint runs on 3.13)
+flake8 = "^6.0.0"               # Linting only
+bandit = "^1.7.5"               # Security scanning only
+pip-audit = "^2.10.1"             # Audit lane runs on 3.13
+diff-cover = "10.5.1"
+
+[tool.poetry.scripts]
+dq-kernel = "dq.cli:main"
+dq-validate = "dq.validate:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+# Optimized tool configurations for CI performance
+[tool.black]
+line-length = 88
+target-version = ['py312', 'py313']
+fast = true                     # Fast mode for CI
+quiet = true                    # Reduce output
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+faulthandler_timeout = 60
+testpaths = ["dq/tests"]
+addopts = "-v --tb=short --no-header --no-summary -q"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "spark: Spark integration tests",
+    "slow: Slow running tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = "E203,W503"
+jobs = 4                        # Parallel processing
+statistics = false              # Reduce output
+count = true                    # Count errors only
+
+[tool.bandit]
+exclude_dirs = ["tests", "build", "dist", ".venv"]
+skips = ["B101"]                # Skip assert_used test
+quiet = true                    # Reduce output
+
+[tool.coverage.run]
+source = ["dq"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "build/*",
+    "dist/*",
+    ".venv/*",
+]
+parallel = true                 # Parallel coverage collection
+
+[tool.coverage.report]
+fail_under = 55
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+show_missing = false            # Reduce output
+skip_empty = true               # Skip empty files

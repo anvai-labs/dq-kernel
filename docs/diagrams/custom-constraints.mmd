@@ -1,0 +1,69 @@
+graph LR
+    subgraph "Custom Constraint Types"
+        RateOfChange[Rate of Change<br/>Time Series Analysis]
+        DistinctnessByGroup[Distinctness by Group<br/>Cardinality Validation]
+        LookupValidation[Lookup Validation<br/>Reference Data Check]
+        NegativeValues[Negative Value Check<br/>Data Quality Validation]
+    end
+    
+    subgraph "Rate of Change Logic"
+        ROC_Input[Input: Time Series Data]
+        ROC_Window[Window Function<br/>Partition by Group<br/>Order by Date]
+        ROC_Calc[Calculate Percentage Change<br/>abs of current-previous/previous * 100]
+        ROC_Threshold[Compare vs Threshold<br/>min/max values]
+        ROC_Result[Result: Pass/Fail]
+    end
+    
+    subgraph "Distinctness by Group Logic"
+        DBG_Input[Input: Grouped Data]
+        DBG_Group[Group by Specified Columns]
+        DBG_Count[Count Distinct Values<br/>per Group]
+        DBG_Threshold[Compare vs Threshold<br/>min/max values]
+        DBG_Result[Result: Pass/Fail]
+    end
+    
+    subgraph "Lookup Validation Logic"
+        LV_Input[Input: DataFrame Columns]
+        LV_Reference[Reference Table Query<br/>SELECT ref_columns FROM ref_table]
+        LV_Compare[Column Name Matching<br/>Check if column exists in reference]
+        LV_Result[Result: Found/Not Found]
+    end
+    
+    subgraph "Negative Value Check Logic"
+        NV_Input[Input: Numeric Columns]
+        NV_Filter[Filter Ignore Columns]
+        NV_Count[Count Negative Values<br/>SUM where column less than 0]
+        NV_Evaluate[Evaluate Counts<br/>Any negatives = Fail]
+        NV_Result[Result: Pass/Fail]
+    end
+    
+    RateOfChange --> ROC_Input
+    ROC_Input --> ROC_Window
+    ROC_Window --> ROC_Calc
+    ROC_Calc --> ROC_Threshold
+    ROC_Threshold --> ROC_Result
+    
+    DistinctnessByGroup --> DBG_Input
+    DBG_Input --> DBG_Group
+    DBG_Group --> DBG_Count
+    DBG_Count --> DBG_Threshold
+    DBG_Threshold --> DBG_Result
+    
+    LookupValidation --> LV_Input
+    LV_Input --> LV_Reference
+    LV_Reference --> LV_Compare
+    LV_Compare --> LV_Result
+    
+    NegativeValues --> NV_Input
+    NV_Input --> NV_Filter
+    NV_Filter --> NV_Count
+    NV_Count --> NV_Evaluate
+    NV_Evaluate --> NV_Result
+    
+    classDef constraintType fill:#e8f5e8
+    classDef logicFlow fill:#fff3e0
+    classDef resultNode fill:#fce4ec
+    
+    class RateOfChange,DistinctnessByGroup,LookupValidation,NegativeValues constraintType
+    class ROC_Input,ROC_Window,ROC_Calc,ROC_Threshold,DBG_Input,DBG_Group,DBG_Count,DBG_Threshold,LV_Input,LV_Reference,LV_Compare,NV_Input,NV_Filter,NV_Count,NV_Evaluate logicFlow
+    class ROC_Result,DBG_Result,LV_Result,NV_Result resultNode

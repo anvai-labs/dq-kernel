@@ -1,0 +1,88 @@
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor': '#2E86AB', 'primaryTextColor': '#FFFFFF', 'primaryBorderColor': '#1B4F72', 'lineColor': '#34495E', 'secondaryColor': '#A23B72', 'tertiaryColor': '#F18F01', 'background': '#FFFFFF', 'mainBkg': '#EBF5FB', 'secondBkg': '#FADBD8', 'tertiaryBkg': '#FEF9E7'}}}%%
+graph TB
+    subgraph "Spark Environment" 
+        SparkSession[Spark Session
+        🔧 Entry Point]
+        SparkContext[Spark Context
+         Distributed Computing]
+        SparkCatalog[Spark Catalog
+        🗂 Metadata Management]
+        DataFrame[DataFrame API
+         Data Abstraction]
+    end
+    
+    subgraph "DQ Framework Integration"
+        DQFramework[DQ Framework
+         Main Orchestrator]
+        DataFrameManager[DataFrame Manager
+        📁 Data Source Handler]
+        EngineCoordinator[Engine Coordinator
+         Engine Management]
+    end
+    
+    subgraph "Data Sources"
+        HiveMetastore[Hive Metastore
+        🏪 Table Registry]
+        HDFS[HDFS
+         Distributed Storage]
+        S3[S3 Storage
+         Cloud Storage]
+        JDBC[JDBC Sources
+         Database Connectivity]
+    end
+    
+    subgraph "Deequ Integration"
+        DeequJAR[Deequ JAR
+        📦 deequ-2.0.21-spark-3.5.jar]
+        VerificationSuite[Verification Suite
+         Quality Checks]
+        MetricsRepository[Metrics Repository
+         Historical Data]
+    end
+    
+    subgraph "Execution Flow"
+        DataLoad[Data Loading
+        📥 Source → DataFrame]
+        QualityChecks[Quality Execution
+         Rule Processing]
+        ResultAggregation[Result Collection
+         Metrics Aggregation]
+    end
+    
+    %% Connections
+    SparkSession --> SparkContext
+    SparkSession --> SparkCatalog
+    SparkSession --> DataFrame
+    
+    DQFramework --> SparkSession
+    DQFramework --> DataFrameManager
+    DQFramework --> EngineCoordinator
+    
+    DataFrameManager --> SparkCatalog
+    DataFrameManager --> DataFrame
+    
+    SparkCatalog --> HiveMetastore
+    DataFrame --> HDFS
+    DataFrame --> S3
+    DataFrame --> JDBC
+    
+    EngineCoordinator --> DeequJAR
+    DeequJAR --> VerificationSuite
+    VerificationSuite --> MetricsRepository
+    
+    DataFrameManager --> DataLoad
+    EngineCoordinator --> QualityChecks
+    QualityChecks --> ResultAggregation
+    
+    %% Styling
+    classDef sparkLayer fill:#EBF5FB,stroke:#2E86AB,stroke-width:2px,color:#1B4F72
+    classDef frameworkLayer fill:#FADBD8,stroke:#A23B72,stroke-width:2px,color:#6C3483
+    classDef dataLayer fill:#FEF9E7,stroke:#F18F01,stroke-width:2px,color:#B7950B
+    classDef deequLayer fill:#EAFAF1,stroke:#27AE60,stroke-width:2px,color:#1E8449
+    classDef executionLayer fill:#F4F6F7,stroke:#34495E,stroke-width:2px,color:#2C3E50
+    
+    class SparkSession,SparkContext,SparkCatalog,DataFrame sparkLayer
+    class DQFramework,DataFrameManager,EngineCoordinator frameworkLayer
+    class HiveMetastore,HDFS,S3,JDBC dataLayer
+    class DeequJAR,VerificationSuite,MetricsRepository deequLayer
+    class DataLoad,QualityChecks,ResultAggregation executionLayer

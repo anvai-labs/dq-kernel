@@ -1,0 +1,75 @@
+graph TB
+    subgraph "Data Quality Results"
+        MetricsDF[Metrics DataFrame<br/>entity, instance, name, value]
+        VerificationDF[Verification DataFrame<br/>check, check_level, check_status,<br/>constraint, constraint_status, constraint_message]
+    end
+    
+    subgraph "Repository Configuration"
+        RepoConfig[Repository Config<br/>Storage Settings]
+        TimeStamp[Timestamp Generation<br/>ResultKey.current_milli_time]
+        JobID[Job Identification<br/>Spark Application ID]
+    end
+    
+    subgraph "Storage Destinations"
+        FileSystem[File System<br/>Local/HDFS Storage]
+        S3Storage[S3 Storage<br/>Distributed Storage]
+        Database[Database Storage<br/>JDBC Connections]
+        Catalog[Spark Catalog<br/>Hive Metastore]
+    end
+    
+    subgraph "Repository Utils"
+        SaveMetrics[save_to_repository<br/>Metrics Storage]
+        SaveVerifications[save_to_repository<br/>Verification Storage]
+        TableCreation[Dynamic Table Creation]
+        DataAppend[Data Append/Overwrite]
+    end
+    
+    subgraph "Historical Tracking"
+        TimeSeriesData[Time Series Analysis<br/>Trend Monitoring]
+        ResultHistory[Result History<br/>Success/Failure Tracking]
+        MetricsEvolution[Metrics Evolution<br/>Data Quality Trends]
+    end
+    
+    MetricsDF --> SaveMetrics
+    VerificationDF --> SaveVerifications
+    
+    RepoConfig --> SaveMetrics
+    RepoConfig --> SaveVerifications
+    TimeStamp --> SaveMetrics
+    TimeStamp --> SaveVerifications
+    JobID --> SaveMetrics
+    JobID --> SaveVerifications
+    
+    SaveMetrics --> FileSystem
+    SaveMetrics --> S3Storage
+    SaveMetrics --> Database
+    SaveMetrics --> Catalog
+    
+    SaveVerifications --> FileSystem
+    SaveVerifications --> S3Storage
+    SaveVerifications --> Database
+    SaveVerifications --> Catalog
+    
+    SaveMetrics --> TableCreation
+    SaveVerifications --> TableCreation
+    TableCreation --> DataAppend
+    
+    FileSystem --> TimeSeriesData
+    S3Storage --> TimeSeriesData
+    Database --> TimeSeriesData
+    Catalog --> TimeSeriesData
+    
+    TimeSeriesData --> ResultHistory
+    TimeSeriesData --> MetricsEvolution
+    
+    classDef dataLayer fill:#e3f2fd
+    classDef configLayer fill:#f1f8e9
+    classDef storageLayer fill:#fff8e1
+    classDef utilLayer fill:#fce4ec
+    classDef trackingLayer fill:#e8f5e8
+    
+    class MetricsDF,VerificationDF dataLayer
+    class RepoConfig,TimeStamp,JobID configLayer
+    class FileSystem,S3Storage,Database,Catalog storageLayer
+    class SaveMetrics,SaveVerifications,TableCreation,DataAppend utilLayer
+    class TimeSeriesData,ResultHistory,MetricsEvolution trackingLayer

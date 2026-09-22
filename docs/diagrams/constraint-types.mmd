@@ -1,0 +1,66 @@
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor': '#2E86AB', 'primaryTextColor': '#FFFFFF', 'primaryBorderColor': '#1B4F72', 'lineColor': '#34495E', 'secondaryColor': '#A23B72', 'tertiaryColor': '#F18F01', 'background': '#FFFFFF', 'mainBkg': '#EBF5FB', 'secondBkg': '#FADBD8', 'tertiaryBkg': '#FEF9E7'}}}%%
+graph LR
+    subgraph "Deequ Constraints"
+        DC1[Completeness<br/>Null & hasCompleteness]
+        DC2[Uniqueness<br/>Duplicate & hasUniqueness]
+        DC3[Compliance<br/>Rule & satisfies]
+        DC4[Consistency<br/>Cross-field & hasCorrelation]
+    end
+    
+    subgraph "Great Expectations"
+        GE1[Statistical Tests<br/> Distribution & expect_column_mean_to_be_between]
+        GE2[Range Validations<br/> Boundary & expect_column_values_to_be_between]
+        GE3[Pattern Matching<br/> Format & expect_column_values_to_match_regex]
+    end
+    
+    subgraph "Schema Validation"
+        SV1[Data Type Validation<br/> Type & Integer,]
+        SV2[Foreign Key Constraints<br/> Referential & Parent-child]
+        SV3[Not Null Constraints<br/> Mandatory & Required]
+        SV4[Unique Constraints<br/> Primary & Single]
+    end
+    
+    subgraph "Custom Constraints"
+        CC1[Rate of Change<br/> Time & Percentage]
+        CC2[Distinctness by Group<br/> Cardinality & Group-wise]
+        CC3[Lookup Validation<br/> Reference & Master]
+        CC4[Negative Value Check<br/> Value & Negative]
+    end
+    
+    subgraph "Validation Levels"
+        Error[Error Level<br/> Critical & Stops]
+        Warning[Warning Level<br/> Advisory & Continues]
+    end
+    
+    %% Connections to validation levels
+    DC1 --> Error
+    DC2 --> Error
+    DC3 --> Warning
+    DC4 --> Warning
+    
+    GE1 --> Warning
+    GE2 --> Error
+    GE3 --> Error
+    
+    SV1 --> Error
+    SV2 --> Error
+    SV3 --> Error
+    SV4 --> Error
+    
+    CC1 --> Warning
+    CC2 --> Error
+    CC3 --> Warning
+    CC4 --> Warning
+    
+    %% Styling
+    classDef deequStyle fill:#EBF5FB,stroke:#2E86AB,stroke-width:2px,color:#1B4F72
+    classDef geStyle fill:#FADBD8,stroke:#A23B72,stroke-width:2px,color:#6C3483
+    classDef schemaStyle fill:#FEF9E7,stroke:#F18F01,stroke-width:2px,color:#B7950B
+    classDef customStyle fill:#EAFAF1,stroke:#27AE60,stroke-width:2px,color:#1E8449
+    classDef levelStyle fill:#F4F6F7,stroke:#34495E,stroke-width:2px,color:#2C3E50
+    
+    class DC1,DC2,DC3,DC4 deequStyle
+    class GE1,GE2,GE3 geStyle
+    class SV1,SV2,SV3,SV4 schemaStyle
+    class CC1,CC2,CC3,CC4 customStyle
+    class Error,Warning levelStyle

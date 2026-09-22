@@ -1,0 +1,79 @@
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor': '#2E86AB', 'primaryTextColor': '#FFFFFF', 'primaryBorderColor': '#1B4F72', 'lineColor': '#34495E', 'secondaryColor': '#A23B72', 'tertiaryColor': '#F18F01', 'background': '#FFFFFF', 'mainBkg': '#EBF5FB', 'secondBkg': '#FADBD8', 'tertiaryBkg': '#FEF9E7'}}}%%
+graph TB
+    subgraph "Development Environment"
+        Dev_Jupyter[Jupyter Notebooks<br/>📓 Interactive & Prototyping]
+        Dev_PyCharm[PyCharm/VS Code<br/>IDE & Code]
+        Dev_LocalSpark[Local Spark<br/>Local & Unit]
+    end
+    
+    subgraph "Batch Processing"
+        Batch_Scheduler[Job Scheduler<br/>⏰ Automated & Cron]
+        Batch_SparkSubmit[Spark Submit<br/>Cluster & YARN/Mesos]
+        Batch_Config[Configuration Files<br/>Rule & HOCON]
+    end
+    
+    subgraph "Streaming Processing"
+        Stream_Kafka[Kafka Integration<br/>📡 Real-time & Message]
+        Stream_StructuredStreaming[Structured Streaming<br/>🌊 Continuous & Micro-batches]
+        Stream_DeltaLake[Delta Lake<br/>🏞 Streaming & ACID]
+    end
+    
+    subgraph "Cloud Deployments"
+        Cloud_Databricks[Databricks<br/>Managed & Auto-scaling]
+        Cloud_EMR[AWS EMR<br/> Elastic & S3]
+        Cloud_Dataproc[Google Dataproc<br/>Managed & BigQuery]
+    end
+    
+    subgraph "Monitoring & Observability"
+        Monitor_Metrics[Metrics Collection<br/>Performance & Spark]
+        Monitor_Logging[Centralized Logging<br/>📝 Log & ELK]
+        Monitor_Alerting[Alert Management<br/>Incident & Threshold]
+    end
+    
+    subgraph "Data Quality Repository"
+        Repo_Results[Results Storage<br/>Historical & Time]
+        Repo_Dashboard[Quality Dashboard<br/>Visualization & Trend]
+        Repo_API[REST API<br/>🔌 Programmatic & Metrics]
+    end
+    
+    %% Flow connections
+    Dev_Jupyter --> Batch_Config
+    Dev_PyCharm --> Batch_Config
+    Dev_LocalSpark --> Batch_SparkSubmit
+    
+    Batch_Scheduler --> Batch_SparkSubmit
+    Batch_Config --> Batch_SparkSubmit
+    
+    Stream_Kafka --> Stream_StructuredStreaming
+    Stream_StructuredStreaming --> Stream_DeltaLake
+    
+    Batch_SparkSubmit --> Cloud_Databricks
+    Batch_SparkSubmit --> Cloud_EMR
+    Batch_SparkSubmit --> Cloud_Dataproc
+    
+    Cloud_Databricks --> Monitor_Metrics
+    Cloud_EMR --> Monitor_Metrics
+    Cloud_Dataproc --> Monitor_Metrics
+    
+    Monitor_Metrics --> Monitor_Logging
+    Monitor_Logging --> Monitor_Alerting
+    
+    Batch_SparkSubmit --> Repo_Results
+    Stream_StructuredStreaming --> Repo_Results
+    Repo_Results --> Repo_Dashboard
+    Repo_Results --> Repo_API
+    
+    %% Styling
+    classDef devStyle fill:#EBF5FB,stroke:#2E86AB,stroke-width:2px,color:#1B4F72
+    classDef batchStyle fill:#FADBD8,stroke:#A23B72,stroke-width:2px,color:#6C3483
+    classDef streamStyle fill:#FEF9E7,stroke:#F18F01,stroke-width:2px,color:#B7950B
+    classDef cloudStyle fill:#EAFAF1,stroke:#27AE60,stroke-width:2px,color:#1E8449
+    classDef monitorStyle fill:#F4F6F7,stroke:#34495E,stroke-width:2px,color:#2C3E50
+    classDef repoStyle fill:#FDEAA7,stroke:#F39C12,stroke-width:2px,color:#E67E22
+    
+    class Dev_Jupyter,Dev_PyCharm,Dev_LocalSpark devStyle
+    class Batch_Scheduler,Batch_SparkSubmit,Batch_Config batchStyle
+    class Stream_Kafka,Stream_StructuredStreaming,Stream_DeltaLake streamStyle
+    class Cloud_Databricks,Cloud_EMR,Cloud_Dataproc cloudStyle
+    class Monitor_Metrics,Monitor_Logging,Monitor_Alerting monitorStyle
+    class Repo_Results,Repo_Dashboard,Repo_API repoStyle

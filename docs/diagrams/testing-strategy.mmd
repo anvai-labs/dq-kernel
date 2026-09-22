@@ -1,0 +1,85 @@
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor': '#2E86AB', 'primaryTextColor': '#FFFFFF', 'primaryBorderColor': '#1B4F72', 'lineColor': '#34495E', 'secondaryColor': '#A23B72', 'tertiaryColor': '#F18F01', 'background': '#FFFFFF', 'mainBkg': '#EBF5FB', 'secondBkg': '#FADBD8', 'tertiaryBkg': '#FEF9E7'}}}%%
+graph TB
+    subgraph Test Infrastructure
+        TI1[Pytest Framework<br/>Discovery & Fixtures]
+        TI2[Spark Test Session<br/>Local Cluster & Isolation]
+        TI3[Test Data Factory<br/>Sample Data & Mocks]
+    end
+    
+    subgraph Unit Testing
+        UT1[Framework Core Tests<br/>DQFramework initialization & Configuration loading]
+        UT2[Engine Tests<br/>Deequ engine & Custom engine]
+        UT3[Constraint Tests<br/>Individual check & Threshold testing]
+    end
+    
+    subgraph Integration Testing
+        IT1[End-to-End Workflows<br/>Complete DQ & Multi-engine scenarios]
+        IT2[Repository Integration<br/>Metrics storage & Verification results]
+        IT3[External System Tests<br/>S3 configuration & JDBC connectivity]
+    end
+    
+    subgraph Performance Testing
+        PT1[Scalability Tests<br/>Large dataset & Memory usage]
+        PT2[Engine Performance<br/>Deequ execution & Custom constraint]
+        PT3[Resource Utilization<br/>CPU usage & Memory consumption]
+    end
+    
+    subgraph Test Data Scenarios
+        TDS1[Success Scenarios<br/>Clean data & All constraints]
+        TDS2[Failure Scenarios<br/>Data quality & Threshold breaches]
+        TDS3[Edge Cases<br/>Empty datasets & Null values]
+    end
+    
+    subgraph Test Configuration
+        TC1[Test Configs<br/>example.conf files & Engine-specific settings]
+        TC2[Mock Objects<br/>Spark session & Repository mocks]
+        TC3[Test Fixtures<br/>Reusable test & Configuration objects]
+    end
+    
+    subgraph Continuous Integration
+        CI1[Automated Testing<br/>Git hook & Pull request]
+        CI2[Coverage Reporting<br/>Code coverage & Test result]
+        CI3[Deployment Testing<br/>Staging environment & Production validation]
+    end
+    
+    %% Test flow connections
+    TI1 --> UT1
+    TI2 --> UT2
+    TI3 --> UT3
+    
+    UT1 --> IT1
+    UT2 --> IT2
+    UT3 --> IT3
+    
+    IT1 --> PT1
+    IT2 --> PT2
+    IT3 --> PT3
+    
+    TDS1 --> UT1
+    TDS2 --> UT2
+    TDS3 --> UT3
+    
+    TC1 --> IT1
+    TC2 --> UT1
+    TC3 --> TI1
+    
+    PT1 --> CI1
+    PT2 --> CI2
+    PT3 --> CI3
+    
+    %% Styling
+    classDef infrastructure fill:#EBF5FB,stroke:#2E86AB,stroke-width:2px,color:#1B4F72
+    classDef unitTest fill:#FADBD8,stroke:#A23B72,stroke-width:2px,color:#6C3483
+    classDef integrationTest fill:#FEF9E7,stroke:#F18F01,stroke-width:2px,color:#B7950B
+    classDef performanceTest fill:#EAFAF1,stroke:#27AE60,stroke-width:2px,color:#1E8449
+    classDef testData fill:#F4F6F7,stroke:#34495E,stroke-width:2px,color:#2C3E50
+    classDef testConfig fill:#FDEAA7,stroke:#F39C12,stroke-width:2px,color:#E67E22
+    classDef ciStyle fill:#E8DAEF,stroke:#8E44AD,stroke-width:2px,color:#6C3483
+    
+    class TI1,TI2,TI3 infrastructure
+    class UT1,UT2,UT3 unitTest
+    class IT1,IT2,IT3 integrationTest
+    class PT1,PT2,PT3 performanceTest
+    class TDS1,TDS2,TDS3 testData
+    class TC1,TC2,TC3 testConfig
+    class CI1,CI2,CI3 ciStyle

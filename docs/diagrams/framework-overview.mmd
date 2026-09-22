@@ -1,0 +1,73 @@
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor': '#2E86AB', 'primaryTextColor': '#FFFFFF', 'primaryBorderColor': '#1B4F72', 'lineColor': '#34495E', 'secondaryColor': '#A23B72', 'tertiaryColor': '#F18F01', 'background': '#FFFFFF', 'mainBkg': '#EBF5FB', 'secondBkg': '#FADBD8', 'tertiaryBkg': '#FEF9E7'}}}%%
+graph TB
+    subgraph "Configuration Layer"
+        Config[Configuration<br/>HOCON Format]
+        ConfigLoader[Config Loader<br/> Multi-Source & File]
+    end
+    
+    subgraph "Core Framework"
+        DQF[DQ Framework<br/>Main Orchestrator]
+        EngineLoader[Engine Loader<br/>Dynamic Loading]
+        DataFrames[DataFrame Manager<br/>Spark Catalog Integration]
+    end
+    
+    subgraph "Engine Ecosystem"
+        DeequEngine[Deequ Engine<br/>Amazon Deequ Integration]
+        GEEngine[Great Expectations<br/>Statistical Validation] 
+        SchemaEngine[Schema Validation<br/>Data Type Checking]
+        CustomEngine[Custom Engine<br/>Business Logic]
+    end
+    
+    subgraph "Constraint System"
+        DeequChecks[Deequ Checks<br/>Core & Completeness]
+        GEChecks[GE Expectations<br/>Statistical & Range]
+        SchemaChecks[Schema Checks<br/>Structure & Data]
+        CustomChecks[Custom Checks<br/>Business & Rate]
+    end
+    
+    subgraph "Results & Repository"
+        Metrics[Metrics Results<br/>Success/Failure Data]
+        Verifications[Verification Results<br/>Detailed Check Info]
+        Repository[Repository System<br/>Storage & Retrieval]
+    end
+    
+    Config --> ConfigLoader
+    ConfigLoader --> DQF
+    DQF --> EngineLoader
+    DQF --> DataFrames
+    
+    EngineLoader --> DeequEngine
+    EngineLoader --> GEEngine
+    EngineLoader --> SchemaEngine
+    EngineLoader --> CustomEngine
+    
+    DeequEngine --> DeequChecks
+    GEEngine --> GEChecks
+    SchemaEngine --> SchemaChecks
+    CustomEngine --> CustomChecks
+    
+    DeequChecks --> Metrics
+    GEChecks --> Metrics
+    SchemaChecks --> Metrics
+    CustomChecks --> Metrics
+    
+    DeequChecks --> Verifications
+    GEChecks --> Verifications
+    SchemaChecks --> Verifications
+    CustomChecks --> Verifications
+    
+    Metrics --> Repository
+    Verifications --> Repository
+    
+    %% Styling
+    classDef configLayer fill:#EBF5FB,stroke:#2E86AB,stroke-width:2px,color:#1B4F72
+    classDef coreFramework fill:#FADBD8,stroke:#A23B72,stroke-width:2px,color:#6C3483
+    classDef engineLayer fill:#FEF9E7,stroke:#F18F01,stroke-width:2px,color:#B7950B
+    classDef constraintLayer fill:#EAFAF1,stroke:#27AE60,stroke-width:2px,color:#1E8449
+    classDef resultLayer fill:#F4F6F7,stroke:#34495E,stroke-width:2px,color:#2C3E50
+    
+    class Config,ConfigLoader configLayer
+    class DQF,EngineLoader,DataFrames coreFramework
+    class DeequEngine,GEEngine,SchemaEngine,CustomEngine engineLayer
+    class DeequChecks,GEChecks,SchemaChecks,CustomChecks constraintLayer
+    class Metrics,Verifications,Repository resultLayer

@@ -1,0 +1,1298 @@
+= Architecture Improvements Roadmap (planning record)
+:doctype: article
+:toc: left
+:toclevels: 3
+:sectlinks:
+:sectnums:
+:icons: font
+:source-highlighter: coderay
+
+NOTE: This is a proposed architecture, not a description of code already implemented. Use
+`index.adoc`, the source tree, and executable tests for current behavior.
+
+== Executive Summary
+
+This document outlines comprehensive architectural improvements for the Data Quality Framework to transform it from a monolithic script-based system into a modular, enterprise-grade platform. The improvements focus on scalability, maintainability, extensibility, and operational excellence.
+
+== Current Architecture Issues
+
+=== Monolithic Design Problems
+
+==== Single Responsibility Principle Violations
+
+**Current Issue**: `DQFramework` class handles multiple responsibilities
+
+[source,python]
+----
+class DQFramework:
+    def __init__(self, spark, config, default_dataframe=None):
+        # Configuration loading
+        self._config = self._load_config(config)
+        
+        # DataFrame management  
+        self.dataframes = self._load_dataframes()
+        
+        # Orchestration logic
+        # Repository management
+        # Error handling
+        # All mixed together
+----
+
+**Problems**:
+- Difficult to test individual components
+- High coupling between concerns
+- Hard to modify one aspect without affecting others
+- Violates Open/Closed Principle
+
+==== Tight Coupling Issues
+
+**Engine Loading**:
+[source,python]
+----
+# Hard-coded class naming convention
+class_name = f"{engine_name.capitalize()}Engine"
+engine_class = getattr(module, class_name)
+----
+
+**Configuration Dependency**:
+[source,python]
+----
+# Direct HOCON dependency throughout codebase
+return ConfigFactory.parse_string(config)
+----
+
+**Repository Coupling**:
+[source,python]
+----
+# Mixed concerns in engine classes
+repository_utils.save_to_repository(repository, df_metrics_results, 
+                                   constants.DQ_REPOSITORY_METRICS, current_milli_time)
+----
+
+== Proposed Architecture: Layered Microkernel
+
+=== Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    API Gateway Layer                        │
+├─────────────────────────────────────────────────────────────┤
+│                  Application Services Layer                 │
+├─────────────────────────────────────────────────────────────┤
+│                    Domain Services Layer                    │
+├─────────────────────────────────────────────────────────────┤
+│                     Plugin/Engine Layer                     │
+├─────────────────────────────────────────────────────────────┤
+│                   Infrastructure Layer                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+=== Layer 1: Infrastructure Layer
+
+==== Configuration Service
+
+[source,python]
+----
+from abc import ABC, abstractmethod
+from typing import Dict, Any, Optional
+from dataclasses import dataclass
+
+@dataclass
+class ConfigurationSource:
+    source_type: str  # file, s3, http, inline
+    location: str
+    priority: int = 0
+    refresh_interval: Optional[int] = None
+
+class ConfigurationProvider(ABC):
+    @abstractmethod
+    def load(self, source: ConfigurationSource) -> Dict[str, Any]:
+        """Load configuration from source"""
+        pass
+    
+    @abstractmethod
+    def supports(self, source_type: str) -> bool:
+        """Check if provider supports source type"""
+        pass
+
+class FileConfigurationProvider(ConfigurationProvider):
+    def load(self, source: ConfigurationSource) -> Dict[str, Any]:
+        from pyhocon import ConfigFactory
+        return ConfigFactory.parse_file(source.location)
+    
+    def supports(self, source_type: str) -> bool:
+        return source_type in ["file", "local"]
+
+class S3ConfigurationProvider(ConfigurationProvider):
+    def __init__(self, boto3_client):
+        self.s3_client = boto3_client
+    
+    def load(self, source: ConfigurationSource) -> Dict[str, Any]:
+        from urllib.parse import urlparse
+        parsed = urlparse(source.location)
+        
+        obj = self.s3_client.get_object(
+            Bucket=parsed.netloc, 
+            Key=parsed.path.lstrip('/')
+        )
+        content = obj['Body'].read().decode('utf-8')
+        
+        from pyhocon import ConfigFactory
+        return ConfigFactory.parse_string(content)
+    
+    def supports(self, source_type: str) -> bool:
+        return source_type == "s3"
+
+class ConfigurationManager:
+    def __init__(self):
+        self._providers: List[ConfigurationProvider] = []
+        self._cache: Dict[str, Any] = {}
+        self._watchers: List[Callable] = []
+    
+    def register_provider(self, provider: ConfigurationProvider):
+        """Register configuration provider"""
+        self._providers.append(provider)
+    
+    def load_configuration(self, sources: List[ConfigurationSource]) -> Dict[str, Any]:
+        """Load and merge configuration from multiple sources"""
+        
+        # Sort sources by priority
+        sorted_sources = sorted(sources, key=lambda s: s.priority)
+        
+        merged_config = {}
+        for source in sorted_sources:
+            provider = self._find_provider(source.source_type)
+            if provider:
+                source_config = provider.load(source)
+                merged_config = self._deep_merge(merged_config, source_config)
+            else:
+                raise ValueError(f"No provider for source type: {source.source_type}")
+        
+        return merged_config
+    
+    def _find_provider(self, source_type: str) -> Optional[ConfigurationProvider]:
+        """Find provider that supports source type"""
+        for provider in self._providers:
+            if provider.supports(source_type):
+                return provider
+        return None
+    
+    def _deep_merge(self, base: Dict, overlay: Dict) -> Dict:
+        """Deep merge two dictionaries"""
+        result = base.copy()
+        for key, value in overlay.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = self._deep_merge(result[key], value)
+            else:
+                result[key] = value
+        return result
+----
+
+==== Data Access Layer
+
+[source,python]
+----
+class DataFrameProvider(ABC):
+    @abstractmethod
+    def get_dataframe(self, name: str, context: Dict[str, Any] = None) -> DataFrame:
+        """Retrieve DataFrame by name"""
+        pass
+    
+    @abstractmethod
+    def list_available_dataframes(self) -> List[str]:
+        """List all available DataFrames"""
+        pass
+
+class SparkCatalogDataFrameProvider(DataFrameProvider):
+    def __init__(self, spark_session: SparkSession):
+        self.spark = spark_session
+    
+    def get_dataframe(self, name: str, context: Dict[str, Any] = None) -> DataFrame:
+        """Get DataFrame from Spark catalog"""
+        
+        if self.spark.catalog.tableExists(name):
+            df = self.spark.table(name)
+            
+            # Apply context-based optimizations
+            if context:
+                df = self._apply_context_optimizations(df, context)
+            
+            return df
+        else:
+            raise ValueError(f"Table {name} not found in Spark catalog")
+    
+    def list_available_dataframes(self) -> List[str]:
+        """List all tables in Spark catalog"""
+        return [table.name for table in self.spark.catalog.listTables()]
+    
+    def _apply_context_optimizations(self, df: DataFrame, context: Dict) -> DataFrame:
+        """Apply optimizations based on context"""
+        
+        # Column pruning
+        if "required_columns" in context:
+            df = df.select(*context["required_columns"])
+        
+        # Filter pushdown
+        if "filters" in context:
+            for filter_expr in context["filters"]:
+                df = df.filter(filter_expr)
+        
+        # Sampling for statistical checks
+        if context.get("allow_sampling", False) and context.get("sample_fraction"):
+            df = df.sample(withReplacement=False, fraction=context["sample_fraction"])
+        
+        return df
+
+class FileSystemDataFrameProvider(DataFrameProvider):
+    def __init__(self, spark_session: SparkSession, base_path: str):
+        self.spark = spark_session
+        self.base_path = base_path
+    
+    def get_dataframe(self, name: str, context: Dict[str, Any] = None) -> DataFrame:
+        """Load DataFrame from file system"""
+        
+        file_path = f"{self.base_path}/{name}"
+        
+        # Auto-detect format
+        if file_path.endswith(".parquet"):
+            return self.spark.read.parquet(file_path)
+        elif file_path.endswith(".csv"):
+            return self.spark.read.option("header", "true").csv(file_path)
+        elif file_path.endswith(".json"):
+            return self.spark.read.json(file_path)
+        else:
+            raise ValueError(f"Unsupported file format for {file_path}")
+    
+    def list_available_dataframes(self) -> List[str]:
+        """List available files in base path"""
+        import os
+        try:
+            return [f for f in os.listdir(self.base_path) 
+                   if f.endswith(('.parquet', '.csv', '.json'))]
+        except OSError:
+            return []
+
+class CompositeDataFrameProvider(DataFrameProvider):
+    def __init__(self):
+        self._providers: List[DataFrameProvider] = []
+    
+    def add_provider(self, provider: DataFrameProvider):
+        """Add a DataFrame provider"""
+        self._providers.append(provider)
+    
+    def get_dataframe(self, name: str, context: Dict[str, Any] = None) -> DataFrame:
+        """Try providers in order until one succeeds"""
+        
+        last_error = None
+        for provider in self._providers:
+            try:
+                return provider.get_dataframe(name, context)
+            except Exception as e:
+                last_error = e
+                continue
+        
+        raise ValueError(f"No provider could load DataFrame '{name}'. Last error: {last_error}")
+    
+    def list_available_dataframes(self) -> List[str]:
+        """Aggregate DataFrames from all providers"""
+        
+        all_dataframes = set()
+        for provider in self._providers:
+            try:
+                all_dataframes.update(provider.list_available_dataframes())
+            except Exception:
+                # Skip providers that fail to list
+                continue
+        
+        return list(all_dataframes)
+----
+
+==== Repository Layer
+
+[source,python]
+----
+from abc import ABC, abstractmethod
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+
+@dataclass
+class DQResult:
+    check_name: str
+    rule_name: str
+    success: bool
+    value: Optional[float]
+    message: str
+    timestamp: datetime
+    execution_time_ms: int
+    metadata: Dict[str, Any]
+
+class ResultRepository(ABC):
+    @abstractmethod
+    def save_results(self, results: List[DQResult]) -> None:
+        """Save DQ results"""
+        pass
+    
+    @abstractmethod
+    def get_results(self, filters: Dict[str, Any] = None, 
+                   limit: int = 1000) -> List[DQResult]:
+        """Retrieve DQ results"""
+        pass
+    
+    @abstractmethod
+    def get_rule_history(self, rule_name: str, 
+                        days: int = 30) -> List[DQResult]:
+        """Get historical results for a rule"""
+        pass
+
+class SparkCatalogResultRepository(ResultRepository):
+    def __init__(self, spark_session: SparkSession, 
+                 database: str = "data_quality",
+                 metrics_table: str = "dq_metrics",
+                 verifications_table: str = "dq_verifications"):
+        self.spark = spark_session
+        self.database = database
+        self.metrics_table = f"{database}.{metrics_table}"
+        self.verifications_table = f"{database}.{verifications_table}"
+        
+        self._ensure_tables_exist()
+    
+    def save_results(self, results: List[DQResult]) -> None:
+        """Save results to Spark catalog tables"""
+        
+        if not results:
+            return
+        
+        # Convert to DataFrames
+        metrics_data = []
+        verification_data = []
+        
+        for result in results:
+            # Metrics record
+            metrics_data.append({
+                "entity": "DataFrame",
+                "instance": result.rule_name,
+                "name": result.check_name,
+                "value": 1.0 if result.success else 0.0,
+                "timestamp": result.timestamp.isoformat(),
+                "execution_time_ms": result.execution_time_ms
+            })
+            
+            # Verification record
+            verification_data.append({
+                "check": result.check_name,
+                "check_level": result.metadata.get("level", "Warning"),
+                "check_status": "Success" if result.success else "Failure",
+                "constraint": result.metadata.get("constraint", "unknown"),
+                "constraint_status": "Success" if result.success else "Failure",
+                "constraint_message": result.message,
+                "timestamp": result.timestamp.isoformat(),
+                "rule_name": result.rule_name
+            })
+        
+        # Create DataFrames and save
+        if metrics_data:
+            metrics_df = self.spark.createDataFrame(metrics_data)
+            metrics_df.write.mode("append").saveAsTable(self.metrics_table)
+        
+        if verification_data:
+            verifications_df = self.spark.createDataFrame(verification_data)
+            verifications_df.write.mode("append").saveAsTable(self.verifications_table)
+    
+    def get_results(self, filters: Dict[str, Any] = None, 
+                   limit: int = 1000) -> List[DQResult]:
+        """Retrieve results with optional filtering"""
+        
+        query = f"""
+        SELECT v.*, m.execution_time_ms, m.value
+        FROM {self.verifications_table} v
+        JOIN {self.metrics_table} m ON v.check = m.name AND v.timestamp = m.timestamp
+        """
+        
+        # Add filters
+        where_clauses = []
+        if filters:
+            if "rule_name" in filters:
+                where_clauses.append(f"v.rule_name = '{filters['rule_name']}'")
+            if "start_date" in filters:
+                where_clauses.append(f"v.timestamp >= '{filters['start_date']}'")
+            if "success_only" in filters and filters["success_only"]:
+                where_clauses.append("v.check_status = 'Success'")
+        
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+        
+        query += f" ORDER BY v.timestamp DESC LIMIT {limit}"
+        
+        # Execute query and convert to DQResult objects
+        rows = self.spark.sql(query).collect()
+        
+        results = []
+        for row in rows:
+            result = DQResult(
+                check_name=row["check"],
+                rule_name=row["rule_name"],
+                success=row["check_status"] == "Success",
+                value=row["value"],
+                message=row["constraint_message"],
+                timestamp=datetime.fromisoformat(row["timestamp"]),
+                execution_time_ms=row["execution_time_ms"],
+                metadata={
+                    "level": row["check_level"],
+                    "constraint": row["constraint"]
+                }
+            )
+            results.append(result)
+        
+        return results
+    
+    def _ensure_tables_exist(self):
+        """Create tables if they don't exist"""
+        
+        # Create database
+        self.spark.sql(f"CREATE DATABASE IF NOT EXISTS {self.database}")
+        
+        # Create metrics table
+        metrics_schema = """
+        CREATE TABLE IF NOT EXISTS {table} (
+            entity STRING,
+            instance STRING,
+            name STRING,
+            value DOUBLE,
+            timestamp STRING,
+            execution_time_ms INT
+        ) USING DELTA
+        """.format(table=self.metrics_table)
+        
+        self.spark.sql(metrics_schema)
+        
+        # Create verifications table
+        verifications_schema = """
+        CREATE TABLE IF NOT EXISTS {table} (
+            check STRING,
+            check_level STRING,
+            check_status STRING,
+            constraint STRING,
+            constraint_status STRING,
+            constraint_message STRING,
+            timestamp STRING,
+            rule_name STRING
+        ) USING DELTA
+        """.format(table=self.verifications_table)
+        
+        self.spark.sql(verifications_schema)
+
+class CompositeResultRepository(ResultRepository):
+    def __init__(self):
+        self._repositories: List[ResultRepository] = []
+    
+    def add_repository(self, repository: ResultRepository):
+        """Add a result repository"""
+        self._repositories.append(repository)
+    
+    def save_results(self, results: List[DQResult]) -> None:
+        """Save to all repositories"""
+        
+        for repo in self._repositories:
+            try:
+                repo.save_results(results)
+            except Exception as e:
+                logger.error(f"Failed to save to repository {type(repo).__name__}: {e}")
+                # Continue with other repositories
+    
+    def get_results(self, filters: Dict[str, Any] = None, 
+                   limit: int = 1000) -> List[DQResult]:
+        """Get results from first available repository"""
+        
+        for repo in self._repositories:
+            try:
+                return repo.get_results(filters, limit)
+            except Exception as e:
+                logger.warning(f"Repository {type(repo).__name__} failed: {e}")
+                continue
+        
+        return []  # No repositories available
+----
+
+=== Layer 2: Plugin/Engine Layer
+
+==== Plugin Registry System
+
+[source,python]
+----
+from typing import Type, Dict, Callable, Any
+from abc import ABC, abstractmethod
+
+class PluginMetadata:
+    def __init__(self, name: str, version: str, description: str,
+                 supported_constraints: List[str] = None,
+                 dependencies: List[str] = None):
+        self.name = name
+        self.version = version
+        self.description = description
+        self.supported_constraints = supported_constraints or []
+        self.dependencies = dependencies or []
+
+class DQEnginePlugin(ABC):
+    @property
+    @abstractmethod
+    def metadata(self) -> PluginMetadata:
+        """Plugin metadata"""
+        pass
+    
+    @abstractmethod
+    def create_engine(self, config: Dict[str, Any], context: Dict[str, Any]) -> 'DQEngine':
+        """Factory method to create engine instance"""
+        pass
+    
+    @abstractmethod
+    def validate_config(self, config: Dict[str, Any]) -> bool:
+        """Validate configuration for this engine"""
+        pass
+
+class PluginRegistry:
+    def __init__(self):
+        self._plugins: Dict[str, DQEnginePlugin] = {}
+        self._hooks: Dict[str, List[Callable]] = {
+            "before_register": [],
+            "after_register": [],
+            "before_unregister": [],
+            "after_unregister": []
+        }
+    
+    def register_plugin(self, plugin: DQEnginePlugin) -> None:
+        """Register a DQ engine plugin"""
+        
+        # Execute before_register hooks
+        self._execute_hooks("before_register", plugin)
+        
+        # Validate plugin
+        self._validate_plugin(plugin)
+        
+        # Check for conflicts
+        if plugin.metadata.name in self._plugins:
+            existing_version = self._plugins[plugin.metadata.name].metadata.version
+            new_version = plugin.metadata.version
+            
+            logger.warning(f"Replacing plugin {plugin.metadata.name} "
+                         f"version {existing_version} with {new_version}")
+        
+        # Register plugin
+        self._plugins[plugin.metadata.name] = plugin
+        
+        # Execute after_register hooks
+        self._execute_hooks("after_register", plugin)
+        
+        logger.info(f"Registered plugin: {plugin.metadata.name} v{plugin.metadata.version}")
+    
+    def get_plugin(self, name: str) -> Optional[DQEnginePlugin]:
+        """Get plugin by name"""
+        return self._plugins.get(name)
+    
+    def list_plugins(self) -> List[PluginMetadata]:
+        """List all registered plugins"""
+        return [plugin.metadata for plugin in self._plugins.values()]
+    
+    def create_engine(self, engine_name: str, config: Dict[str, Any], 
+                     context: Dict[str, Any] = None) -> 'DQEngine':
+        """Create engine instance using registered plugin"""
+        
+        plugin = self.get_plugin(engine_name)
+        if not plugin:
+            raise ValueError(f"Plugin '{engine_name}' not found. "
+                           f"Available plugins: {list(self._plugins.keys())}")
+        
+        # Validate configuration
+        if not plugin.validate_config(config):
+            raise ValueError(f"Invalid configuration for plugin '{engine_name}'")
+        
+        # Create engine
+        return plugin.create_engine(config, context or {})
+    
+    def add_hook(self, hook_name: str, callback: Callable) -> None:
+        """Add hook callback"""
+        if hook_name in self._hooks:
+            self._hooks[hook_name].append(callback)
+    
+    def _validate_plugin(self, plugin: DQEnginePlugin) -> None:
+        """Validate plugin before registration"""
+        
+        metadata = plugin.metadata
+        
+        if not metadata.name:
+            raise ValueError("Plugin name cannot be empty")
+        
+        if not metadata.version:
+            raise ValueError("Plugin version cannot be empty")
+        
+        # Check dependencies
+        for dependency in metadata.dependencies:
+            try:
+                importlib.import_module(dependency)
+            except ImportError:
+                raise ValueError(f"Plugin dependency '{dependency}' not available")
+    
+    def _execute_hooks(self, hook_name: str, plugin: DQEnginePlugin) -> None:
+        """Execute hooks for plugin lifecycle events"""
+        
+        for callback in self._hooks.get(hook_name, []):
+            try:
+                callback(plugin)
+            except Exception as e:
+                logger.error(f"Hook {hook_name} failed: {e}")
+
+# Example plugin implementations
+class DeequEnginePlugin(DQEnginePlugin):
+    @property
+    def metadata(self) -> PluginMetadata:
+        return PluginMetadata(
+            name="deequ",
+            version="1.0.0",
+            description="Amazon Deequ data quality engine",
+            supported_constraints=[
+                "hasCompleteness", "hasUniqueness", "satisfies", 
+                "hasSize", "hasSum", "hasMean"
+            ],
+            dependencies=["pydeequ"]
+        )
+    
+    def create_engine(self, config: Dict[str, Any], context: Dict[str, Any]) -> 'DQEngine':
+        from dq.engine.deequ.deequ_engine import DeequEngine
+        return DeequEngine(config, context.get("timestamp"))
+    
+    def validate_config(self, config: Dict[str, Any]) -> bool:
+        """Validate Deequ-specific configuration"""
+        
+        checks = config.get("checks", [])
+        if not checks:
+            return False
+        
+        for check in checks:
+            constraint = check.get("constraint", "")
+            if constraint not in self.metadata.supported_constraints:
+                logger.warning(f"Unsupported Deequ constraint: {constraint}")
+                return False
+        
+        return True
+
+class CustomEnginePlugin(DQEnginePlugin):
+    @property
+    def metadata(self) -> PluginMetadata:
+        return PluginMetadata(
+            name="custom",
+            version="1.0.0",
+            description="Custom business logic data quality engine",
+            supported_constraints=[
+                "RateOfChange", "DistinctnessByGroup", 
+                "LookupBasedOnColumnNameList", "WideTablesNegativeValuesCheck"
+            ],
+            dependencies=[]
+        )
+    
+    def create_engine(self, config: Dict[str, Any], context: Dict[str, Any]) -> 'DQEngine':
+        from dq.engine.custom.custom_engine import CustomEngine
+        return CustomEngine(config, context.get("timestamp"))
+    
+    def validate_config(self, config: Dict[str, Any]) -> bool:
+        """Validate custom engine configuration"""
+        
+        checks = config.get("checks", [])
+        if not checks:
+            return False
+        
+        for check in checks:
+            constraint = check.get("constraint", "")
+            if constraint not in self.metadata.supported_constraints:
+                return False
+            
+            # Validate constraint-specific requirements
+            if constraint == "RateOfChange":
+                if not check.get("group_by") or not check.get("sort_by"):
+                    return False
+        
+        return True
+
+# Plugin discovery and auto-registration
+class PluginDiscovery:
+    def __init__(self, registry: PluginRegistry):
+        self.registry = registry
+    
+    def discover_and_register_plugins(self, search_paths: List[str] = None) -> None:
+        """Discover and register plugins automatically"""
+        
+        default_paths = [
+            "dq.engine.deequ.plugin",
+            "dq.engine.custom.plugin", 
+            "dq.engine.greatexpectations.plugin",
+            "dq.engine.schemavalidation.plugin"
+        ]
+        
+        search_paths = search_paths or default_paths
+        
+        for path in search_paths:
+            try:
+                module = importlib.import_module(path)
+                
+                # Look for plugin classes
+                for name in dir(module):
+                    obj = getattr(module, name)
+                    if (isinstance(obj, type) and 
+                        issubclass(obj, DQEnginePlugin) and 
+                        obj != DQEnginePlugin):
+                        
+                        plugin_instance = obj()
+                        self.registry.register_plugin(plugin_instance)
+                        
+            except ImportError as e:
+                logger.debug(f"Could not import plugin from {path}: {e}")
+                continue
+            except Exception as e:
+                logger.error(f"Error discovering plugins in {path}: {e}")
+                continue
+----
+
+=== Layer 3: Domain Services Layer
+
+==== Rule Engine Service
+
+[source,python]
+----
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass
+from enum import Enum
+
+class ExecutionMode(Enum):
+    SYNCHRONOUS = "sync"
+    ASYNCHRONOUS = "async"
+    PARALLEL = "parallel"
+
+@dataclass
+class RuleExecutionContext:
+    rule_name: str
+    execution_mode: ExecutionMode
+    dataframe_name: str
+    optimizations: Dict[str, Any]
+    metadata: Dict[str, Any]
+
+class RuleExecutionPlan:
+    def __init__(self):
+        self.stages: List[RuleExecutionStage] = []
+        self.dependencies: Dict[str, List[str]] = {}
+        self.estimated_execution_time: float = 0.0
+    
+    def add_stage(self, stage: 'RuleExecutionStage'):
+        """Add execution stage to plan"""
+        self.stages.append(stage)
+    
+    def optimize(self) -> 'RuleExecutionPlan':
+        """Optimize execution plan"""
+        # Group independent checks
+        # Reorder for optimal resource usage
+        # Apply caching strategies
+        return self
+
+@dataclass
+class RuleExecutionStage:
+    stage_id: str
+    rule_configs: List[Dict[str, Any]]
+    dependencies: List[str]
+    estimated_time: float
+    parallelizable: bool
+
+class RuleEngineService:
+    def __init__(self, plugin_registry: PluginRegistry,
+                 dataframe_provider: DataFrameProvider,
+                 result_repository: ResultRepository):
+        self.plugin_registry = plugin_registry
+        self.dataframe_provider = dataframe_provider
+        self.result_repository = result_repository
+        self.execution_planners = []
+        self.performance_monitor = PerformanceMonitor()
+    
+    def execute_rules(self, rule_configs: List[Dict[str, Any]], 
+                     context: Dict[str, Any] = None) -> List[DQResult]:
+        """Execute data quality rules with optimization"""
+        
+        context = context or {}
+        
+        # Create execution plan
+        execution_plan = self._create_execution_plan(rule_configs, context)
+        
+        # Optimize plan
+        optimized_plan = execution_plan.optimize()
+        
+        # Execute plan
+        all_results = []
+        
+        with self.performance_monitor.track_execution("rule_execution_batch"):
+            for stage in optimized_plan.stages:
+                stage_results = self._execute_stage(stage, context)
+                all_results.extend(stage_results)
+        
+        # Save results
+        self.result_repository.save_results(all_results)
+        
+        return all_results
+    
+    def _create_execution_plan(self, rule_configs: List[Dict[str, Any]], 
+                              context: Dict[str, Any]) -> RuleExecutionPlan:
+        """Create optimized execution plan"""
+        
+        plan = RuleExecutionPlan()
+        
+        # Group rules by dataframe and engine
+        grouped_rules = self._group_rules_for_optimization(rule_configs)
+        
+        for group_id, rules in grouped_rules.items():
+            stage = RuleExecutionStage(
+                stage_id=group_id,
+                rule_configs=rules,
+                dependencies=[],
+                estimated_time=self._estimate_execution_time(rules),
+                parallelizable=self._can_parallelize(rules)
+            )
+            plan.add_stage(stage)
+        
+        return plan
+    
+    def _execute_stage(self, stage: RuleExecutionStage, 
+                      context: Dict[str, Any]) -> List[DQResult]:
+        """Execute a single stage of the execution plan"""
+        
+        results = []
+        
+        if stage.parallelizable and len(stage.rule_configs) > 1:
+            # Execute in parallel
+            results = self._execute_parallel(stage.rule_configs, context)
+        else:
+            # Execute sequentially
+            for rule_config in stage.rule_configs:
+                rule_results = self._execute_single_rule(rule_config, context)
+                results.extend(rule_results)
+        
+        return results
+    
+    def _execute_single_rule(self, rule_config: Dict[str, Any], 
+                           context: Dict[str, Any]) -> List[DQResult]:
+        """Execute a single data quality rule"""
+        
+        rule_name = rule_config.get("name", "unknown")
+        engine_name = rule_config.get("engine", "unknown")
+        
+        with self.performance_monitor.track_execution(f"rule_{rule_name}"):
+            # Get DataFrames
+            dataframe_names = rule_config.get("dataframes", ["default"])
+            
+            rule_results = []
+            
+            for df_name in dataframe_names:
+                # Load DataFrame with optimization context
+                df_context = self._create_dataframe_context(rule_config)
+                dataframe = self.dataframe_provider.get_dataframe(df_name, df_context)
+                
+                # Create engine
+                engine = self.plugin_registry.create_engine(
+                    engine_name, rule_config, 
+                    {"rule_name": rule_name, "dataframe_name": df_name}
+                )
+                
+                # Execute checks
+                engine_results = engine.apply(dataframe)
+                
+                # Convert to DQResult objects
+                for result in engine_results:
+                    dq_result = DQResult(
+                        check_name=result.get("check", "unknown"),
+                        rule_name=rule_name,
+                        success=result.get("success", False),
+                        value=result.get("value"),
+                        message=result.get("message", ""),
+                        timestamp=datetime.utcnow(),
+                        execution_time_ms=result.get("execution_time_ms", 0),
+                        metadata=result.get("details", {})
+                    )
+                    rule_results.append(dq_result)
+        
+        return rule_results
+    
+    def _create_dataframe_context(self, rule_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Create optimization context for DataFrame loading"""
+        
+        # Extract required columns from checks
+        required_columns = set()
+        allow_sampling = True
+        
+        for check in rule_config.get("checks", []):
+            if check.get("columns"):
+                required_columns.update(check["columns"])
+            if check.get("group_by"):
+                required_columns.update(check["group_by"])
+            
+            # Some checks require full dataset
+            if check.get("constraint") in ["hasUniqueness", "RateOfChange"]:
+                allow_sampling = False
+        
+        return {
+            "required_columns": list(required_columns) if required_columns else None,
+            "allow_sampling": allow_sampling,
+            "sample_fraction": 0.1 if allow_sampling else None
+        }
+    
+    def _group_rules_for_optimization(self, rule_configs: List[Dict[str, Any]]) -> Dict[str, List[Dict]]:
+        """Group rules for optimal execution"""
+        
+        groups = {}
+        
+        for rule_config in rule_configs:
+            # Group by dataframe and engine for optimization
+            dataframes = rule_config.get("dataframes", ["default"])
+            engine = rule_config.get("engine", "unknown")
+            
+            for df_name in dataframes:
+                group_key = f"{df_name}_{engine}"
+                
+                if group_key not in groups:
+                    groups[group_key] = []
+                
+                groups[group_key].append(rule_config)
+        
+        return groups
+----
+
+==== Orchestration Service
+
+[source,python]
+----
+class OrchestrationService:
+    def __init__(self, rule_engine: RuleEngineService,
+                 config_manager: ConfigurationManager,
+                 event_bus: 'EventBus'):
+        self.rule_engine = rule_engine
+        self.config_manager = config_manager
+        self.event_bus = event_bus
+        self.workflow_registry = {}
+    
+    def execute_dq_workflow(self, workflow_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute complete DQ workflow"""
+        
+        workflow_id = workflow_config.get("id", f"workflow_{int(time.time())}")
+        
+        # Publish workflow started event
+        self.event_bus.publish("workflow.started", {
+            "workflow_id": workflow_id,
+            "config": workflow_config
+        })
+        
+        try:
+            # Load configuration
+            config_sources = workflow_config.get("config_sources", [])
+            merged_config = self.config_manager.load_configuration(config_sources)
+            
+            # Extract DQ rules
+            dq_rules = merged_config.get("dqframework", {}).get("dqrules", [])
+            
+            if not dq_rules:
+                raise ValueError("No DQ rules found in configuration")
+            
+            # Execute rules
+            results = self.rule_engine.execute_rules(dq_rules, {
+                "workflow_id": workflow_id
+            })
+            
+            # Generate summary
+            summary = self._generate_execution_summary(results)
+            
+            # Publish workflow completed event
+            self.event_bus.publish("workflow.completed", {
+                "workflow_id": workflow_id,
+                "summary": summary,
+                "results": results
+            })
+            
+            return {
+                "workflow_id": workflow_id,
+                "status": "completed",
+                "summary": summary,
+                "results": results
+            }
+            
+        except Exception as e:
+            # Publish workflow failed event
+            self.event_bus.publish("workflow.failed", {
+                "workflow_id": workflow_id,
+                "error": str(e),
+                "error_type": type(e).__name__
+            })
+            
+            raise
+    
+    def _generate_execution_summary(self, results: List[DQResult]) -> Dict[str, Any]:
+        """Generate execution summary from results"""
+        
+        total_checks = len(results)
+        successful_checks = sum(1 for r in results if r.success)
+        failed_checks = total_checks - successful_checks
+        
+        # Group by rule
+        rule_summaries = {}
+        for result in results:
+            rule_name = result.rule_name
+            if rule_name not in rule_summaries:
+                rule_summaries[rule_name] = {
+                    "total": 0,
+                    "successful": 0,
+                    "failed": 0,
+                    "execution_time_ms": 0
+                }
+            
+            rule_summaries[rule_name]["total"] += 1
+            rule_summaries[rule_name]["execution_time_ms"] += result.execution_time_ms
+            
+            if result.success:
+                rule_summaries[rule_name]["successful"] += 1
+            else:
+                rule_summaries[rule_name]["failed"] += 1
+        
+        return {
+            "total_checks": total_checks,
+            "successful_checks": successful_checks,
+            "failed_checks": failed_checks,
+            "success_rate": successful_checks / total_checks if total_checks > 0 else 0,
+            "total_execution_time_ms": sum(r.execution_time_ms for r in results),
+            "rule_summaries": rule_summaries
+        }
+
+# Event-driven architecture
+class EventBus:
+    def __init__(self):
+        self._subscribers: Dict[str, List[Callable]] = {}
+    
+    def subscribe(self, event_type: str, handler: Callable):
+        """Subscribe to events"""
+        if event_type not in self._subscribers:
+            self._subscribers[event_type] = []
+        self._subscribers[event_type].append(handler)
+    
+    def publish(self, event_type: str, data: Dict[str, Any]):
+        """Publish event to subscribers"""
+        for handler in self._subscribers.get(event_type, []):
+            try:
+                handler(data)
+            except Exception as e:
+                logger.error(f"Event handler failed for {event_type}: {e}")
+
+# Example event handlers
+class AlertEventHandler:
+    def __init__(self, alert_manager: 'AlertManager'):
+        self.alert_manager = alert_manager
+    
+    def handle_workflow_completed(self, event_data: Dict[str, Any]):
+        """Handle workflow completion events"""
+        
+        summary = event_data.get("summary", {})
+        failed_checks = summary.get("failed_checks", 0)
+        
+        if failed_checks > 0:
+            self.alert_manager.send_alert({
+                "type": "DQ_WORKFLOW_FAILURES",
+                "severity": "HIGH" if failed_checks > 5 else "MEDIUM",
+                "message": f"Data quality workflow has {failed_checks} failed checks",
+                "workflow_id": event_data.get("workflow_id"),
+                "details": summary
+            })
+----
+
+=== Layer 4: Application Services Layer
+
+==== REST API Service
+
+[source,python]
+----
+from flask import Flask, request, jsonify
+from typing import Dict, Any, List
+
+class DQFrameworkAPI:
+    def __init__(self, orchestration_service: OrchestrationService,
+                 rule_engine: RuleEngineService,
+                 result_repository: ResultRepository):
+        self.app = Flask(__name__)
+        self.orchestration_service = orchestration_service
+        self.rule_engine = rule_engine
+        self.result_repository = result_repository
+        
+        self._setup_routes()
+    
+    def _setup_routes(self):
+        """Setup API routes"""
+        
+        @self.app.route('/api/v1/workflows', methods=['POST'])
+        def execute_workflow():
+            """Execute DQ workflow"""
+            try:
+                workflow_config = request.get_json()
+                result = self.orchestration_service.execute_dq_workflow(workflow_config)
+                return jsonify(result), 200
+            except Exception as e:
+                return jsonify({"error": str(e)}), 400
+        
+        @self.app.route('/api/v1/rules', methods=['POST'])
+        def execute_rules():
+            """Execute specific DQ rules"""
+            try:
+                rule_configs = request.get_json().get("rules", [])
+                results = self.rule_engine.execute_rules(rule_configs)
+                
+                # Convert DQResult objects to dict
+                results_dict = [
+                    {
+                        "check_name": r.check_name,
+                        "rule_name": r.rule_name,
+                        "success": r.success,
+                        "value": r.value,
+                        "message": r.message,
+                        "timestamp": r.timestamp.isoformat(),
+                        "execution_time_ms": r.execution_time_ms,
+                        "metadata": r.metadata
+                    }
+                    for r in results
+                ]
+                
+                return jsonify({"results": results_dict}), 200
+            except Exception as e:
+                return jsonify({"error": str(e)}), 400
+        
+        @self.app.route('/api/v1/results', methods=['GET'])
+        def get_results():
+            """Get DQ results with filtering"""
+            try:
+                filters = {}
+                if request.args.get('rule_name'):
+                    filters['rule_name'] = request.args.get('rule_name')
+                if request.args.get('start_date'):
+                    filters['start_date'] = request.args.get('start_date')
+                if request.args.get('success_only'):
+                    filters['success_only'] = request.args.get('success_only').lower() == 'true'
+                
+                limit = int(request.args.get('limit', 1000))
+                
+                results = self.result_repository.get_results(filters, limit)
+                
+                results_dict = [
+                    {
+                        "check_name": r.check_name,
+                        "rule_name": r.rule_name,
+                        "success": r.success,
+                        "value": r.value,
+                        "message": r.message,
+                        "timestamp": r.timestamp.isoformat(),
+                        "execution_time_ms": r.execution_time_ms,
+                        "metadata": r.metadata
+                    }
+                    for r in results
+                ]
+                
+                return jsonify({"results": results_dict}), 200
+            except Exception as e:
+                return jsonify({"error": str(e)}), 400
+        
+        @self.app.route('/api/v1/plugins', methods=['GET'])
+        def list_plugins():
+            """List available plugins"""
+            try:
+                plugins = self.rule_engine.plugin_registry.list_plugins()
+                plugins_dict = [
+                    {
+                        "name": p.name,
+                        "version": p.version,
+                        "description": p.description,
+                        "supported_constraints": p.supported_constraints
+                    }
+                    for p in plugins
+                ]
+                return jsonify({"plugins": plugins_dict}), 200
+            except Exception as e:
+                return jsonify({"error": str(e)}), 400
+        
+        @self.app.route('/api/v1/health', methods=['GET'])
+        def health_check():
+            """Health check endpoint"""
+            return jsonify({
+                "status": "healthy",
+                "timestamp": datetime.utcnow().isoformat(),
+                "version": "2.0.0"
+            }), 200
+    
+    def run(self, host='0.0.0.0', port=5000, debug=False):
+        """Run the API server"""
+        self.app.run(host=host, port=port, debug=debug)
+----
+
+== Implementation Strategy
+
+=== Phase 1: Infrastructure Foundation (Weeks 1-4)
+
+1. **Configuration Service** - Replace direct HOCON dependencies
+2. **Plugin Registry** - Enable dynamic engine loading
+3. **Data Access Layer** - Abstract DataFrame providers
+4. **Repository Layer** - Centralize result storage
+
+=== Phase 2: Domain Services (Weeks 5-8)
+
+1. **Rule Engine Service** - Centralize rule execution logic
+2. **Orchestration Service** - Workflow management
+3. **Event Bus** - Enable event-driven architecture
+4. **Performance Monitoring** - Built-in observability
+
+=== Phase 3: Application Services (Weeks 9-12)
+
+1. **REST API** - External integration interface
+2. **CLI Interface** - Command-line tool
+3. **Web Dashboard** - Management interface
+4. **Monitoring Integration** - External system integration
+
+== Benefits of New Architecture
+
+=== Scalability Improvements
+- **Horizontal scaling** through plugin distribution
+- **Parallel execution** of independent rules
+- **Resource optimization** through intelligent caching
+- **Load balancing** across multiple instances
+
+=== Maintainability Enhancements  
+- **Clear separation** of concerns
+- **Plugin-based extensibility** for new engines
+- **Standardized interfaces** for all components
+- **Comprehensive testing** at each layer
+
+=== Operational Excellence
+- **Built-in monitoring** and observability
+- **Event-driven alerts** and notifications
+- **Performance profiling** and optimization
+- **Health checks** and diagnostics
+
+=== Developer Experience
+- **Well-defined APIs** for integration
+- **Plugin development** framework
+- **Comprehensive documentation** and examples
+- **IDE support** through type hints and interfaces
+
+== Migration Strategy
+
+=== Backward Compatibility
+- Maintain existing `DQFramework` class as facade
+- Gradual migration of engine implementations
+- Configuration compatibility layer
+- Deprecation warnings for old patterns
+
+=== Risk Mitigation
+- Feature flags for new architecture components
+- A/B testing between old and new implementations
+- Comprehensive regression testing
+- Rollback capabilities at each phase
+
+=== Success Metrics
+- **Performance**: 50% improvement in execution time
+- **Reliability**: 99.9% uptime and error reduction
+- **Extensibility**: Plugin development time < 1 day
+- **Maintainability**: 60% reduction in bug fix time
+
+This architectural transformation positions the Data Quality Framework as an enterprise-grade platform capable of scaling to meet the most demanding data quality requirements while maintaining developer productivity and operational excellence.

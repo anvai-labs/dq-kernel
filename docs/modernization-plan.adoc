@@ -1,0 +1,421 @@
+= Architecture Modernization Plan
+:toc: left
+:toclevels: 3
+:sectlinks:
+:imagesdir: png
+
+Status: Active +
+Last reviewed: 2026-09-20
+
+== Product vision
+
+The framework turns a versioned rule set and a known dataset into deterministic,
+machine-readable quality evidence. It must fail closed when input identity,
+configuration, execution, or outcomes are ambiguous. Spark remains the distributed
+execution substrate; Python coordinates work and must not pull unbounded dataset rows
+to the driver.
+
+The order of design priorities is:
+
+. Security and evidence integrity.
+. Deterministic failure and recoverability.
+. Distributed execution and bounded driver memory.
+. A stable, understandable operator and extension experience.
+. Additional engines and features.
+
+== Current architecture truth
+
+image::target-execution-kernel.png[Current facade and incremental target architecture]
+
+`DQFramework` is a facade over configuration loading, catalog selection, DataFrame
+resolution, engine discovery, execution, and outcome enrichment. The code already
+uses useful patterns, but their boundaries are inconsistent:
+
+[cols="1,2,2",options="header"]
+|===
+|Pattern |Current use |Assessment
+
+|Facade
+|`DQFramework` and the two command-line entry points
+|Useful public surface, but the facade currently owns too many infrastructure details.
+
+|Strategy and factory
+|`CatalogProvider` plus `CatalogFactory`
+|Good direction. Identifier validation, exception translation, and dependency injection
+must become consistent across providers.
+
+|Plugin/microkernel
+|`DQEngine` plus convention-based `EngineLoader`
+|Extensible, but imports and class naming are runtime-only contracts. Built-ins need an
+explicit registry before third-party entry points are added.
+
+|Builder
+|`DeequCheck` and `DeequConstraintsBuilder`
+|Appropriate for chained PyDeequ APIs. Configuration expressions must be interpreted as
+a bounded DSL, never evaluated as Python.
+
+|Adapter
+|Great Expectations and catalog providers
+|Useful isolation, but optional dependency and version capabilities need explicit checks.
+
+|Repository
+|`repository_utils.save_to_repository`
+|A persistence helper rather than a repository abstraction. Engines currently coordinate
+validation and persistence in the same method.
+|===
+
+The principal runtime data structures are HOCON `ConfigTree` objects, mutable dictionaries
+for check outcomes, Python lists for intermediate custom-engine metrics, Spark DataFrames,
+and a dictionary cache for foreign-key reference data. Spark DataFrames are appropriate for
+dataset-scale state. Configuration and outcome dictionaries need typed immutable boundaries;
+driver-side row lists must remain bounded to check summaries.
+
+== Findings and debt ledger
+
+[cols="1,1,3,3",options="header"]
+|===
+|ID |Priority |Evidence and risk |Target
+
+|TD-ARCH-1
+|P0
+|Configured Deequ assertions and generated suggestions reached `eval()`. A rule file could
+become executable Python instead of declarative input.
+|Restricted assertion and suggestion interpreters with negative security fixtures. No
+`eval()` in package code. *Implemented 2026-09-20.*
+
+|TD-ARCH-2
+|P0
+|Table and column identifiers are validated in only one orchestrator fallback. Unity,
+schema, repository, and custom-engine SQL paths interpolate identifiers independently.
+|One validated identifier value object and quoting policy used at every catalog/SQL boundary.
+*Implemented 2026-09-21 (`dq.identifiers`); Unity DESCRIBE/SHOW/USE statements now use
+quoted validated names and provider behavior is characterized with fake Spark sessions.*
+
+|TD-ARCH-3
+|P0
+|Engines return mutable dictionaries and Spark `Row` details. The orchestrator, reporter,
+CLI, and consumers independently infer required keys and serializability.
+|A frozen `CheckOutcome` domain model, one legacy-dictionary adapter, and one evidence
+serializer. Unknown/ambiguous outcomes fail at the engine boundary.
+
+|TD-ARCH-4
+|P1
+|`CustomEngine` collects full rate-of-change and grouped result datasets to the driver,
+performs an extra count for logging, and can divide by zero.
+|Distributed window/aggregation expressions that collect only bounded check summaries;
+property and scale fixtures prove equivalence and memory shape. *Implemented 2026-09-20;
+scheduled scale benchmarks remain manual.*
+
+|TD-ARCH-5
+|P1
+|`DQFramework` loads sources, resolves frames, creates engines, executes rules, mutates
+outcomes, and selects repositories. Tests commonly need Spark to exercise coordination.
+|Keep the public facade but compose injected configuration, resolver, registry, executor,
+and sink ports behind it.
+
+|TD-ARCH-6
+|P1
+|The advertised lightweight package eagerly imports framework, PyDeequ, and AWS dependencies;
+the source `__version__` also drifted from package metadata.
+|Lazy optional imports, one package-version source, capability errors, and core-only import
+tests.
+
+|TD-ARCH-7
+|P1
+|Persistence is called from engines, forces `coalesce(1)`, assumes two-part table names, and
+has no idempotency or write-result contract.
+|Outcome sink port with explicit append/idempotency semantics; bounded test sinks; storage
+tuning belongs to deployment configuration. *Implemented 2026-09-21 (`dq.sinks`); the
+PostgreSQL sink remains proposed.*
+
+|TD-ARCH-8
+|P1
+|Several checked-in examples do not satisfy the same structural validator used by the CLI,
+and examples are not executable CI contracts.
+|Parameterized validation of every local example plus one small end-to-end example per
+supported engine capability.
+
+|TD-ARCH-9
+|P2
+|Large schema/custom check classes mix rule parsing, Spark planning, execution, and formatting;
+tests repeat manual success loops and diagnostic printing.
+|Constraint strategy objects, shared outcome assertions/fixtures, and focused unit versus
+Spark integration markers. *Constraint strategy objects implemented 2026-09-20 for the
+custom engine (ADR-003); shared assertions, unit/spark markers, and the lazy test
+session implemented 2026-09-21 (U7).*
+
+|TD-ARCH-10
+|P1
+|PyDeequ types leak into shared constants, assertions, schema checks, and repository helpers.
+|ADR-002: own typed rule/metric semantics, introduce a native Spark parity subset, then an
+Arrow/DataFusion adapter. Retain vendor adapters for rules that cannot be translated faithfully.
+
+|TD-PROD-1
+|P1
+|Releases ship from source without signatures, SBOMs, or marketplace-grade
+packaging; no container image or listing assets exist.
+|Signed wheels, SBOM, provenance attestation, container image, and listing
+assets per marketplace security review (ADR-007, MVP-1). Spec:
+SPEC-003.
+
+|TD-PROD-2
+|P1
+|Gate events produce no notifications and no incident records; consumers poll
+reports.
+|A notifier port beside the sink (webhook/e-mail adapters, fake first) that
+emits gate events from run scope commits, with incident records in the
+evidence store (ADR-007, MVP-1). Spec: SPEC-002 and ADR-008.
+
+|TD-PROD-3
+|P2
+|No statistical or ML anomaly policies exist; the kernel is exact-only by
+doctrine.
+|An optional policy pack consuming kernel evidence - never approximate
+metrics inside the kernel (ADR-007, MVP-2; co-design before build).
+
+|TD-PROD-4
+|P1
+|The evidence plane is single-tenant: one namespace, no API keys, no RBAC,
+no retention configuration.
+|Split by the open-core boundary (ADR-009): 4a (open) tenant namespace
+primitives in the evidence schema - namespace column, scoped retention,
+negative isolation tests (SPEC-006); 4b (closed repo `dq-control-plane`)
+tenants, API keys, RBAC, and the control plane API - tracked in the closed
+repo's own ledger (ADR-009).
+
+|TD-PROD-5
+|P2
+|Onboarding requires reading ADRs; no quickstart, error-message catalog, or
+compatibility matrix for downstream consumers.
+|Quickstart, error catalog, and a published compatibility matrix
+(ADR-007, MVP-1). Spec: SPEC-004 with the enforcing contract test.
+
+|TD-PROD-8
+|P1
+|The durable sink is PostgreSQL-specific (raw DB-API), and the Deequ
+dependency is Spark/JVM-bound with a slowed upstream cadence.
+|Generalize the sink to SQLAlchemy Core with an Arrow fast path (SPEC-007)
+and build the Arrow-native evaluation engine behind the kernel's semantic
+versions - reaching DataFusion, Polars, and LanceDB without a Spark cluster
+(ADR-010). No Deequ fork: legally permitted (Apache-2.0) but strategically
+rejected.
+
+|TD-PROD-6
+|P1
+|The open-core boundary (ADR-009) is currently enforced only by convention.
+|Boundary contract tests: the OSS suite proves the framework runs
+control-plane-free with zero closed-repo references, and a schema-stability
+contract pins the evidence surface the closed repo consumes.
+
+|TD-PROD-7
+|P2
+|Marketplace metering, tenant UX, and dashboard API belong to the closed
+control plane and have no OSS-side spec.
+|Owned by the closed repo (`dq-control-plane`), which mirrors this repo's
+ADR/spec/TD discipline; OSS tracks only the boundary. See ADR-009.
+|===
+
+== Target architecture
+
+The accepted direction is documented in
+link:decisions/adr/ADR-001-incremental-typed-execution-kernel.adoc[ADR-001]. The stable
+facade delegates to five narrow seams:
+
+. A configuration source parses bytes and returns a validated immutable execution plan.
+. A DataFrame resolver maps logical dataset identity to a Spark DataFrame.
+. An engine registry maps an engine identifier to a constraint strategy.
+. An executor runs the plan and returns typed outcomes without persistence side effects.
+. Outcome sinks serialize or persist a completed execution record.
+
+This is a modular monolith. Network services, queues, and a plugin marketplace are not
+required to obtain these boundaries.
+
+The proposed engine-neutral rule and metric intermediate representation is documented in
+link:decisions/adr/ADR-002-engine-neutral-rule-kernel.adoc[ADR-002]. It replaces PyDeequ
+concepts at the domain boundary while retaining PyDeequ, native Spark, Great Expectations,
+and Arrow/DataFusion as capability-checked execution adapters. It does not create another
+DataFrame runtime.
+
+== Bounded delivery sequence
+
+[cols="1,3,3,2",options="header"]
+|===
+|Unit |Change |Acceptance |CI cost
+
+|U1
+|Remove executable configuration and establish architecture records.
+|No package `eval()`; allowed assertion/suggestion fixtures pass; malicious AST shapes fail.
+|Pure Python tests, lint, security scan; existing Spark suite once.
+
+|U2
+|Repair package/optional-dependency boundaries and example contracts.
+|Core import without extras; version cannot drift; every local example validates.
+|Pure Python matrix, one package build.
+
+|U3
+|Introduce typed execution plan and `CheckOutcome`, retaining a v2 dictionary adapter.
+|All engines satisfy shared contract tests; report bytes stay compatible with `dq-report/v1`.
+|Pure contract tests plus existing Spark suite.
+
+|U4
+|Centralize identifiers and catalog resolution.
+|Injection and malformed identifier fixtures fail before Spark SQL; provider behavior is
+characterized with fakes.
+|Pure tests, then targeted Spark catalog tests.
+
+|U5
+|Replace custom-engine driver collections with distributed transformations.
+|Equivalence, zero-denominator, empty-input, and bounded-summary tests; benchmark evidence on
+a scheduled/manual runner.
+|Targeted Spark tests; scale test outside ordinary PRs.
+
+|U6
+|Extract outcome sinks and repository semantics.
+|Engines are persistence-free; idempotent fake and Spark storage contracts; no unconditional
+`coalesce(1)`.
+|Pure sink tests and one storage integration lane.
+
+|U7
+|Consolidate test helpers, examples, and extension documentation.
+|Shared assertions replace repeated loops; examples are executable; extension compatibility
+is explicit.
+|Path-scoped documentation and example checks.
+|===
+
+Each unit must land independently green. Coverage should ratchet around changed domain code;
+raising the repository-wide percentage is not a substitute for boundary and negative tests.
+
+== Current delivery status
+
+* U1: merged in PR 32; post-merge CI passed on Python 3.12 and 3.13.
+* U2: merged in PR 33; PR and post-merge CI passed:
+  https://github.com/anvai-labs/dq-kernel/pull/33
+  Lazy package imports, metadata versioning, example structure
+  validation, and PyDeequ 1.7/Deequ 2.0.21 compatibility are grouped in one reviewable unit.
+  DQDL uses an explicit parser dependency and bounded fail-closed summaries. Full runtime
+  execution of every catalog-backed example remains U7.
+  Local validation: 197 full-suite tests passed before the final negative fixtures; 29 focused
+  package/validator tests passed afterward, with 100% coverage of changed production lines.
+  PR checks are the authority for Python 3.12/3.13 and Java 17 certification.
+* U3a: merged in PR 34; PR and post-merge CI passed on Python 3.12/3.13. A frozen
+  `CheckOutcome` snapshot centralizes strict JSON/boolean validation, prevents mutable
+  aliases, bounds summary count/depth/nodes/bytes, and preserves valid v2 extension fields.
+  The facade and report builder share that boundary. Spark summary Rows become named
+  dictionaries rather than losing field names during JSON encoding. Focused contract tests
+  cover malformed and non-finite results, immutable copies, optional-free imports, and limits.
+  Local validation: 238 full-suite tests passed; the new outcome module has 100% line and
+  branch coverage. Overall line coverage is 71.88% and branch coverage is 65.17%.
+  PR 34: https://github.com/anvai-labs/dq-kernel/pull/34
+  The first hosted matrix exceeded its prior runtime and cancellation was requested;
+  no passing certification is inferred from local tests. CI test steps now have a
+  ten-minute budget, slow tests dump Python stacks after sixty seconds, and import
+  subprocesses have a thirty-second timeout. These diagnostics do not assert a root cause.
+  Collection inspection found a generated test ID of 1,048,642 characters from a large
+  string fixture. Explicit short IDs prevent this fixture from flooding verbose CI logs;
+  local quiet output had hidden that problem. The corrected matrix passed all 238 tests.
+* U3b core: implemented in `dq.plan` (size/completeness only). Typed snapshot/column references,
+  count metrics, size/completeness rules, exact Decimal predicates, canonical cached plan
+  digests, metric deduplication and capability checks are opt-in and engine-independent.
+  The pull request/CI record is the certification authority. No existing runtime selects this
+  API automatically. The executable example deliberately uses fixture counts, not real data.
+  Local validation: 284 full-suite tests passed, including 46 new core/example contracts;
+  the plan module has 100% line and branch coverage. No new engine dependency is required.
+* U3b integration: implemented for size and completeness. `dq.spark_adapter` executes
+  portable count plans natively on Spark: capabilities and bindings are validated before
+  any job, all metrics for a dataset are computed in one shared aggregate action with the
+  driver receiving a single aggregate row per dataset, columns resolve only on exact
+  case-sensitive matches (duplicate or case-insensitive colliding fields are refused),
+  and results are hand-computed fixture expectations rather than PyDeequ comparisons.
+  Counts/v1 semantics hold on Spark: null and NaN are not present, empty strings and
+  string "NaN" are present, infinity stays present, decimals skip NaN handling, and
+  completeness fails on empty input. `dq.portable_config` translates only the exactly
+  representable HOCON subset (`isComplete`, single-comparison `hasCompleteness`,
+  integer-comparison `hasSize`); every other constraint fails closed and stays on the
+  legacy engine path, and callers must supply the snapshot digest that legacy
+  configuration lacks. Local validation: 334 full-suite tests passed on Python 3.13 with
+  both new modules at 100% line and branch coverage. Differential certification against
+  PyDeequ is now in place (`dq.tests.test_spark_adapter_differential`): sizes, nulls,
+  decimals, exact thresholds, and empty inputs agree engine-to-engine, and the one
+  intentional divergence is pinned - counts/v1 excludes floating-point NaN from present
+  counts while Deequ's completeness counts it. `DatasetRef` digests remain
+  caller-certified, and no runtime selects this API automatically.
+  U3a is a compatibility boundary, not the full
+  portable kernel. Direct engine calls still return legacy dictionaries; the facade/report
+  enforce the new boundary. Great Expectations runtime compatibility is not certified by
+  the current Spark suite; its existing integration tests are disabled.
+* U5: implemented for the custom engine. `DistinctnessByGroup` reduces per-group
+  distinct counts to one bounded summary per column (observed range plus violation
+  count), `RateOfChange` computes consecutive-pair changes with a distributed lag
+  window and one aggregate per column, and `LookupBasedOnColumnNameList` matches
+  schema-sized column names through a left-semi join instead of collecting the
+  reference table. The driver never receives per-group or per-row dataset content,
+  the logging-only `count()` action is gone, and zero or null baselines are reported
+  as skipped pairs instead of crashing the run. Per-group and per-row verification
+  granularity is intentionally replaced by per-column summaries with aggregate
+  diagnostics; empty-input outcomes ("No suitable data", value 1 for distinctness,
+  value 0 for rate of change) and all metric/verification string shapes are
+  preserved. Local validation: 305 full-suite tests passed on Python 3.13; changed
+  lines in the custom engine exceed the 90 percent diff-cover gate. Scheduled scale
+  benchmarks remain manual per the CI cost policy. The engine is now four stateless
+  strategy objects behind the `CustomEngine` facade with reference identifiers validated
+  before SQL, and its constraint surface is frozen as a first-class adapter contract
+  (ADR-003).
+* U4: implemented. `dq.identifiers` provides the validated `TableName` and
+  `ColumnName` value objects (bounded parts, one-to-three part table names,
+  backtick-quoted SQL rendering) and every catalog/SQL boundary now parses
+  through them: the orchestrator fallback, all three catalog providers,
+  Unity DESCRIBE/SHOW/USE statements, the schema-validation foreign-key
+  reference query, the custom-engine reference lookup, and repository table
+  names. Injection and malformed identifier fixtures fail before any Spark
+  call, and provider behavior is characterized with fake Spark sessions.
+* U6: implemented. `dq.sinks` owns persistence: the framework builds one
+  `RepositorySink` (or an `InMemorySink` for characterization) from the
+  repository configuration and engines hand their metric and verification
+  artifacts to the injected sink port. Sinks are append-only and keyed, the
+  idempotency contract is enforced by the in-memory sink and provable by
+  callers, configuration is validated eagerly before any Spark call, and the
+  unconditional `coalesce(1)` is gone - file and table writes now preserve
+  Spark's own partitioning. Storage tuning belongs to deployment
+  configuration; the PostgreSQL sink remains proposed under ADR-002.
+* U7: implemented. Shared outcome assertions live in `dq.tests.helpers`; the
+  repeated manual success loops and duplicated helpers/fixtures are gone; every
+  test module is marked `unit` or `spark` (the conftest auto-marks unmarked
+  tests as unit and builds its Spark session lazily, so `pytest -m "not spark"`
+  runs the portable and pure suites without a JVM); and example scripts carry
+  compile-plus-execution contracts. Extension compatibility is explicit in
+  ADR-003 and the operator reference.
+* Beyond U7 — productization track: with U1-U7 complete, the modernization
+  sequence is finished and a productization track opens under ADR-007 (see
+  link:product-strategy.adoc[the product strategy]): MVP-1 lands the durable
+  PostgreSQL evidence plane rollout (ADR-006), a gate-event notifier port,
+  and signed/SBOM releases (TD-PROD-1, TD-PROD-2); MVP-2 adds the
+  multi-tenant control plane and marketplace offers. ADR-009 splits that
+  control plane into a closed repository (`dq-control-plane`) that consumes
+  this framework through its published artifacts — the open repo keeps the
+  engine, the evidence format, and the tenant-namespace primitives
+  (SPEC-006); the boundary is enforced by TD-PROD-6. The
+  PostgreSQL durable sink remains the co-design substrate with the consumer;
+  groups/v2 may make the empty-input vacuous pass configurable. No backend
+  migration is enabled by this dependency upgrade.
+
+U3a limits are 10,000 outcomes, 1 MiB per encoded outcome, 16 MiB across one batch/run,
+10,000 diagnostic nodes per outcome, and nesting depth 16. Limits reject rather than truncate.
+They bound the evidence boundary, not upstream Spark collection: custom-engine raw-row
+collection was TD-ARCH-4/U5 and now returns bounded per-column summaries. Engine-owned
+persistence still happens before boundary
+validation and is not promotion-grade admission evidence; U6 moves persistence behind the
+validated result contract.
+
+Upgrade decision: keep Spark 3.5.9, move the wrapper and JVM artifact together, and test with
+Java 17. Spark 4.1 is now mapped upstream but needs a separate framework parity lane. DQDL,
+row-level quarantine, metric history/anomaly checks, and approximation support are independent
+capabilities; upstream availability does not imply framework support. Row-level quarantine and
+metric history remain planned.
+
+== Explicit non-goals
+
+* Replacing Spark or PyDeequ in the same program of work.
+* Building a distributed control plane or long-running service.
+* Loading arbitrary Python plugins from a rule file.
+* Collecting raw failing records into evidence reports.
+* Breaking the v2 result dictionary or `dq-report/v1` without a versioned migration.

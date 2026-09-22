@@ -1,0 +1,905 @@
+= Performance Optimization Guide (planning record)
+:doctype: article
+:toc: left
+:toclevels: 3
+:sectlinks:
+:sectnums:
+:icons: font
+:source-highlighter: coderay
+
+NOTE: Techniques and performance figures in this document are proposals or illustrative targets;
+they are not benchmark results or current guarantees. Use reproducible benchmarks before making
+capacity or latency commitments.
+
+== Executive Summary
+
+This document provides comprehensive performance optimization strategies for the Data Quality Framework. It identifies current bottlenecks, provides immediate fixes, and outlines advanced optimization techniques for enterprise-scale deployments.
+
+== Current Performance Issues
+
+=== 🚨 **Critical Bottleneck: DataFrame.collect() Operations**
+
+**Location**: `build/lib/dq/engine/custom/custom_engine.py:164`
+
+[source,python]
+----
+# PERFORMANCE KILLER - Brings entire DataFrame to driver
+df_final = dataframe.collect()
+for row in df_final:  # Processes rows sequentially on driver
+    for col in columns:
+        value_list = row[f"{col}_list"]
+        # ... processing logic
+----
+
+**Impact**:
+- Memory exhaustion on large datasets (>1GB)
+- Single-threaded processing on driver node
+- Network bottleneck transferring data to driver
+- Linear scaling issues with data size
+
+**Immediate Fix**:
+[source,python]
+----
+def _check_rate_of_change_optimized(self, dq_dimension, constraint, dataframe, 
+                                   columns=None, group_by=None, sort_by=None, 
+                                   min=None, max=None, level="Warning"):
+    """Optimized rate of change check using distributed processing"""
+    
+    window = Window.partitionBy(*group_by).orderBy(F.col(sort_by))
+    
+    # Process all columns in single pass
+    for column in columns:
+        # Calculate rate of change using window functions
+        dataframe = dataframe.withColumn(
+            f"{column}_prev", 
+            F.lag(F.col(column), 1).over(window)
+        ).withColumn(
+            f"{column}_change_pct",
+            F.when(F.col(f"{column}_prev") != 0,
+                   F.abs((F.col(column) - F.col(f"{column}_prev")) / 
+                         F.col(f"{column}_prev") * 100))
+            .otherwise(0)
+        )
+    
+    # Apply thresholds and aggregate results using Spark operations
+    violation_checks = []
+    for column in columns:
+        violation_count = dataframe.filter(
+            F.col(f"{column}_change_pct") > max
+        ).count()
+        
+        total_count = dataframe.filter(
+            F.col(f"{column}_prev").isNotNull()
+        ).count()
+        
+        success = violation_count == 0 if max else True
+        
+        violation_checks.append({
+            "constraint": constraint,
+            "column": column,
+            "violations": violation_count,
+            "total_records": total_count,
+            "success": success,
+            "violation_rate": violation_count / total_count if total_count > 0 else 0
+        })
+    
+    return self._format_check_results(violation_checks, dq_dimension, level)
+----
+
+**Performance Improvement**: 10-100x faster on large datasets
+
+=== Inefficient Reference Data Queries
+
+**Issue**: Repeated SQL queries for reference data lookup
+
+[source,python]
+----
+# Current: Executed for every column validation
+df_ref = self._sparkSession.sql("Select "+ ref_columns+ " from "+ ref_table)
+colnameList = df_ref.rdd.flatMap(lambda x: x).collect()
+----
+
+**Optimized Solution**:
+[source,python]
+----
+class ReferenceDataManager:
+    def __init__(self, spark_session: SparkSession):
+        self.spark = spark_session
+        self._cache = {}
+        self._broadcast_vars = {}
+    
+    def get_reference_data(self, table_name: str, column_name: str, 
+                          cache_strategy: str = "broadcast") -> Set[str]:
+        """Get reference data with intelligent caching"""
+        
+        cache_key = f"{table_name}.{column_name}"
+        
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+        
+        # Query reference data once
+        ref_df = self.spark.sql(f"SELECT DISTINCT {column_name} FROM {table_name}")
+        
+        # Choose caching strategy based on data size
+        ref_count = ref_df.count()
+        
+        if cache_strategy == "broadcast" and ref_count < 10000:
+            # Small reference data - broadcast to all nodes
+            ref_list = [row[0] for row in ref_df.collect()]
+            ref_set = set(ref_list)
+            self._broadcast_vars[cache_key] = self.spark.sparkContext.broadcast(ref_set)
+            self._cache[cache_key] = ref_set
+        else:
+            # Large reference data - cache DataFrame
+            ref_df = ref_df.cache()
+            ref_list = [row[0] for row in ref_df.collect()]
+            self._cache[cache_key] = set(ref_list)
+        
+        return self._cache[cache_key]
+    
+    def validate_columns_against_reference(self, dataframe: DataFrame, 
+                                         ref_table: str, ref_column: str,
+                                         ignore_columns: List[str] = None) -> Dict:
+        """Validate DataFrame columns against reference data efficiently"""
+        
+        ref_data = self.get_reference_data(ref_table, ref_column)
+        
+        columns_to_check = [col for col in dataframe.columns 
+                           if col not in (ignore_columns or [])]
+        
+        validation_results = {}
+        
+        for column in columns_to_check:
+            # Use broadcast variable if available
+            cache_key = f"{ref_table}.{ref_column}"
+            if cache_key in self._broadcast_vars:
+                # Distributed validation using broadcast
+                broadcast_ref = self._broadcast_vars[cache_key]
+                
+                def is_valid_column(col_name):
+                    return col_name in broadcast_ref.value
+                
+                is_valid_udf = F.udf(is_valid_column, BooleanType())
+                
+                # This approach validates existence without bringing data to driver
+                validation_count = dataframe.select(
+                    F.lit(column).alias("column_name")
+                ).withColumn(
+                    "is_valid", is_valid_udf(F.lit(column))
+                ).agg(
+                    F.sum(F.col("is_valid").cast("int")).alias("valid_count")
+                ).collect()[0]["valid_count"]
+                
+                validation_results[column] = {
+                    "column": column,
+                    "is_valid": validation_count > 0,
+                    "found_in_reference": column in ref_data
+                }
+            else:
+                # Fallback to simple check
+                validation_results[column] = {
+                    "column": column,
+                    "is_valid": column in ref_data,
+                    "found_in_reference": column in ref_data
+                }
+        
+        return validation_results
+----
+
+== Memory Optimization Strategies
+
+=== DataFrame Caching Strategy
+
+[source,python]
+----
+class IntelligentCacheManager:
+    def __init__(self, spark_session: SparkSession):
+        self.spark = spark_session
+        self._cached_dataframes = {}
+        self._cache_stats = {}
+        self._memory_threshold = 0.8  # 80% of available memory
+    
+    def smart_cache(self, dataframe: DataFrame, cache_key: str, 
+                   access_pattern: str = "multiple") -> DataFrame:
+        """Intelligently cache DataFrame based on usage patterns"""
+        
+        if cache_key in self._cached_dataframes:
+            self._update_access_stats(cache_key)
+            return self._cached_dataframes[cache_key]
+        
+        # Estimate DataFrame size
+        estimated_size = self._estimate_dataframe_size(dataframe)
+        current_memory_usage = self._get_current_memory_usage()
+        
+        # Decide caching strategy
+        if estimated_size < 100 * 1024 * 1024:  # < 100MB
+            storage_level = StorageLevel.MEMORY_ONLY
+        elif estimated_size < 1024 * 1024 * 1024:  # < 1GB
+            storage_level = StorageLevel.MEMORY_AND_DISK
+        else:
+            storage_level = StorageLevel.DISK_ONLY
+        
+        # Apply caching if memory allows
+        if current_memory_usage < self._memory_threshold:
+            cached_df = dataframe.persist(storage_level)
+            self._cached_dataframes[cache_key] = cached_df
+            self._cache_stats[cache_key] = {
+                "access_count": 1,
+                "last_access": time.time(),
+                "size_estimate": estimated_size,
+                "storage_level": storage_level
+            }
+            return cached_df
+        else:
+            # Memory pressure - evict least recently used
+            self._evict_lru_cache()
+            return self.smart_cache(dataframe, cache_key, access_pattern)
+    
+    def _estimate_dataframe_size(self, dataframe: DataFrame) -> int:
+        """Estimate DataFrame memory footprint"""
+        
+        # Sample-based size estimation
+        sample_fraction = min(0.01, 1000.0 / dataframe.count())  # 1% or 1000 rows
+        sample_df = dataframe.sample(withReplacement=False, fraction=sample_fraction)
+        
+        # Calculate size based on data types and row count
+        total_rows = dataframe.count()
+        sample_rows = sample_df.count()
+        
+        if sample_rows == 0:
+            return 0
+        
+        # Estimate based on schema and sample
+        size_per_row = 0
+        for field in dataframe.schema.fields:
+            if isinstance(field.dataType, StringType):
+                size_per_row += 50  # Average string size
+            elif isinstance(field.dataType, IntegerType):
+                size_per_row += 4
+            elif isinstance(field.dataType, DoubleType):
+                size_per_row += 8
+            else:
+                size_per_row += 20  # Default estimate
+        
+        estimated_size = total_rows * size_per_row
+        return estimated_size
+    
+    def _evict_lru_cache(self):
+        """Evict least recently used cached DataFrames"""
+        
+        if not self._cache_stats:
+            return
+        
+        # Find least recently used
+        lru_key = min(self._cache_stats.keys(), 
+                     key=lambda k: self._cache_stats[k]["last_access"])
+        
+        # Unpersist and remove
+        if lru_key in self._cached_dataframes:
+            self._cached_dataframes[lru_key].unpersist()
+            del self._cached_dataframes[lru_key]
+            del self._cache_stats[lru_key]
+----
+
+=== Partition Optimization
+
+[source,python]
+----
+class PartitionOptimizer:
+    def __init__(self, spark_session: SparkSession):
+        self.spark = spark_session
+        self.default_parallelism = spark_session.sparkContext.defaultParallelism
+    
+    def optimize_partitioning(self, dataframe: DataFrame, 
+                             operation_type: str = "general") -> DataFrame:
+        """Optimize DataFrame partitioning based on operation type"""
+        
+        current_partitions = dataframe.rdd.getNumPartitions()
+        optimal_partitions = self._calculate_optimal_partitions(
+            dataframe, operation_type
+        )
+        
+        if abs(current_partitions - optimal_partitions) > 2:
+            if operation_type == "aggregation":
+                # Partition by key columns for better aggregation performance
+                return dataframe.repartition(optimal_partitions)
+            elif operation_type == "join":
+                # Coalesce to reduce shuffle overhead
+                return dataframe.coalesce(optimal_partitions)
+            else:
+                # General optimization
+                if current_partitions < optimal_partitions:
+                    return dataframe.repartition(optimal_partitions)
+                else:
+                    return dataframe.coalesce(optimal_partitions)
+        
+        return dataframe
+    
+    def _calculate_optimal_partitions(self, dataframe: DataFrame, 
+                                    operation_type: str) -> int:
+        """Calculate optimal number of partitions"""
+        
+        # Estimate data size
+        row_count = dataframe.count()
+        
+        if row_count < 10000:
+            return 1
+        elif row_count < 100000:
+            return min(4, self.default_parallelism)
+        elif row_count < 1000000:
+            return min(8, self.default_parallelism)
+        else:
+            # For large datasets, aim for 128MB per partition
+            estimated_size_mb = row_count * len(dataframe.columns) * 8 / (1024 * 1024)
+            optimal_partitions = max(1, int(estimated_size_mb / 128))
+            return min(optimal_partitions, self.default_parallelism * 2)
+
+# Usage in DQ Framework
+class OptimizedDQFramework(DQFramework):
+    def __init__(self, spark: SparkSession, config: str, default_dataframe: DataFrame = None):
+        super().__init__(spark, config, default_dataframe)
+        self.cache_manager = IntelligentCacheManager(spark)
+        self.partition_optimizer = PartitionOptimizer(spark)
+    
+    def run(self) -> List[Dict]:
+        """Optimized execution with intelligent caching and partitioning"""
+        
+        results = []
+        
+        for rule_config in self._config.get("dqframework.dqrules", []):
+            df_names = rule_config.get('dataframes', ["default"])
+            
+            for df_name in df_names:
+                # Get and optimize DataFrame
+                dataframe = self.get_dataframe(df_name)
+                
+                # Apply intelligent caching
+                cache_key = f"{df_name}_{rule_config.get('name', 'unknown')}"
+                dataframe = self.cache_manager.smart_cache(dataframe, cache_key)
+                
+                # Optimize partitioning based on check types
+                operation_type = self._determine_operation_type(rule_config)
+                dataframe = self.partition_optimizer.optimize_partitioning(
+                    dataframe, operation_type
+                )
+                
+                # Execute checks with optimized DataFrame
+                engine = EngineLoader().load_engine(
+                    rule_config.get("engine"), rule_config, 
+                    ResultKey.current_milli_time()
+                )
+                
+                check_results = engine.apply(dataframe, 
+                                           repository=self._config.get("dqframework.repository", {}))
+                results.extend(check_results)
+        
+        return results
+    
+    def _determine_operation_type(self, rule_config: Dict) -> str:
+        """Determine optimal operation type for partitioning strategy"""
+        
+        checks = rule_config.get("checks", [])
+        
+        # Check for aggregation operations
+        for check in checks:
+            if check.get("group_by") or check.get("constraint") in ["DistinctnessByGroup"]:
+                return "aggregation"
+            elif check.get("constraint") in ["RateOfChange"]:
+                return "join"  # Window operations benefit from join optimization
+        
+        return "general"
+----
+
+== Query Optimization Techniques
+
+=== Predicate Pushdown
+
+[source,python]
+----
+class QueryOptimizer:
+    def __init__(self, spark_session: SparkSession):
+        self.spark = spark_session
+    
+    def optimize_for_dq_checks(self, dataframe: DataFrame, 
+                               dq_checks: List[Dict]) -> DataFrame:
+        """Optimize DataFrame based on DQ check requirements"""
+        
+        # Extract optimization hints from checks
+        optimization_plan = self._analyze_checks(dq_checks)
+        
+        # Apply column pruning
+        if optimization_plan["required_columns"]:
+            dataframe = dataframe.select(*optimization_plan["required_columns"])
+        
+        # Apply early filters
+        for filter_condition in optimization_plan["filters"]:
+            dataframe = dataframe.filter(filter_condition)
+        
+        # Apply sampling for statistical checks
+        if optimization_plan["can_sample"]:
+            sample_fraction = min(0.1, 100000 / dataframe.count())
+            if sample_fraction < 1.0:
+                dataframe = dataframe.sample(withReplacement=False, fraction=sample_fraction)
+        
+        return dataframe
+    
+    def _analyze_checks(self, dq_checks: List[Dict]) -> Dict:
+        """Analyze DQ checks to extract optimization opportunities"""
+        
+        required_columns = set()
+        filters = []
+        can_sample = True
+        
+        for check in dq_checks:
+            # Extract required columns
+            if check.get("columns"):
+                required_columns.update(check["columns"])
+            if check.get("group_by"):
+                required_columns.update(check["group_by"])
+            
+            # Extract filter conditions
+            if check.get("constraint") == "satisfies":
+                expression = check.get("expression", "")
+                # Simple filter extraction
+                if ">" in expression or "<" in expression:
+                    filters.append(expression)
+            
+            # Check if sampling is appropriate
+            if check.get("constraint") in ["hasUniqueness", "RateOfChange"]:
+                can_sample = False  # These require full dataset
+        
+        return {
+            "required_columns": list(required_columns) if required_columns else None,
+            "filters": filters,
+            "can_sample": can_sample
+        }
+
+# Advanced SQL Optimization
+class SQLOptimizedEngine:
+    def __init__(self, spark_session: SparkSession):
+        self.spark = spark_session
+    
+    def execute_optimized_completeness_check(self, dataframe: DataFrame, 
+                                           columns: List[str]) -> Dict:
+        """Optimized completeness check using pure SQL"""
+        
+        # Register DataFrame as temporary view
+        view_name = f"dq_temp_view_{int(time.time())}"
+        dataframe.createOrReplaceTempView(view_name)
+        
+        # Build optimized SQL query
+        total_count_sql = f"SELECT COUNT(*) as total FROM {view_name}"
+        
+        null_checks = []
+        for col in columns:
+            null_checks.append(f"SUM(CASE WHEN {col} IS NULL THEN 1 ELSE 0 END) as {col}_nulls")
+        
+        null_count_sql = f"""
+        SELECT {', '.join(null_checks)}
+        FROM {view_name}
+        """
+        
+        # Execute queries
+        total_count = self.spark.sql(total_count_sql).collect()[0]["total"]
+        null_counts = self.spark.sql(null_count_sql).collect()[0]
+        
+        # Calculate completeness
+        results = {}
+        for col in columns:
+            null_count = null_counts[f"{col}_nulls"]
+            completeness = (total_count - null_count) / total_count if total_count > 0 else 0
+            results[col] = {
+                "constraint": "hasCompleteness",
+                "column": col,
+                "value": completeness,
+                "total_records": total_count,
+                "null_records": null_count
+            }
+        
+        # Cleanup
+        self.spark.catalog.dropTempView(view_name)
+        
+        return results
+----
+
+== Parallel Processing Optimization
+
+=== Multi-Threading for Independent Checks
+
+[source,python]
+----
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+from typing import Callable, List, Dict, Any
+
+class ParallelDQExecutor:
+    def __init__(self, max_workers: int = None):
+        self.max_workers = max_workers or min(32, (os.cpu_count() or 1) + 4)
+        self._thread_local = threading.local()
+    
+    def execute_checks_parallel(self, dataframe: DataFrame, 
+                               check_configs: List[Dict],
+                               engine_factory: Callable) -> List[Dict]:
+        """Execute independent DQ checks in parallel"""
+        
+        # Group checks by independence
+        independent_groups = self._group_independent_checks(check_configs)
+        
+        all_results = []
+        
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit independent check groups
+            futures = {}
+            
+            for group_id, checks in independent_groups.items():
+                future = executor.submit(
+                    self._execute_check_group, 
+                    dataframe, checks, engine_factory
+                )
+                futures[future] = group_id
+            
+            # Collect results as they complete
+            for future in as_completed(futures):
+                group_id = futures[future]
+                try:
+                    group_results = future.result()
+                    all_results.extend(group_results)
+                except Exception as e:
+                    logger.error(f"Check group {group_id} failed: {e}")
+                    # Continue with other groups
+        
+        return all_results
+    
+    def _group_independent_checks(self, check_configs: List[Dict]) -> Dict[str, List[Dict]]:
+        """Group checks that can be executed independently"""
+        
+        # Simple grouping by engine type
+        groups = {}
+        
+        for i, check in enumerate(check_configs):
+            engine_type = check.get("engine", "unknown")
+            group_key = f"{engine_type}_{i // 3}"  # Group in batches of 3
+            
+            if group_key not in groups:
+                groups[group_key] = []
+            groups[group_key].append(check)
+        
+        return groups
+    
+    def _execute_check_group(self, dataframe: DataFrame, 
+                           checks: List[Dict], 
+                           engine_factory: Callable) -> List[Dict]:
+        """Execute a group of checks"""
+        
+        results = []
+        
+        for check in checks:
+            try:
+                engine = engine_factory(check)
+                check_result = engine.apply(dataframe)
+                results.extend(check_result)
+            except Exception as e:
+                logger.error(f"Check {check.get('constraint_name', 'unknown')} failed: {e}")
+                # Add error result
+                results.append({
+                    "check": check.get("constraint_name", "unknown"),
+                    "success": False,
+                    "error": str(e),
+                    "details": {"error_type": type(e).__name__}
+                })
+        
+        return results
+
+# Async Processing for I/O Operations
+import asyncio
+import aiohttp
+from typing import Awaitable
+
+class AsyncDQRepository:
+    def __init__(self, repository_config: Dict):
+        self.config = repository_config
+        self.session: aiohttp.ClientSession = None
+    
+    async def __aenter__(self):
+        self.session = aiohttp.ClientSession()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.session:
+            await self.session.close()
+    
+    async def save_results_async(self, results: List[Dict]) -> None:
+        """Save results asynchronously to external systems"""
+        
+        # Prepare batch operations
+        save_tasks = []
+        
+        # Save to different targets in parallel
+        if self.config.get("webhook_url"):
+            save_tasks.append(self._save_to_webhook(results))
+        
+        if self.config.get("database_url"):
+            save_tasks.append(self._save_to_database(results))
+        
+        if self.config.get("kafka_config"):
+            save_tasks.append(self._save_to_kafka(results))
+        
+        # Execute all saves concurrently
+        if save_tasks:
+            await asyncio.gather(*save_tasks, return_exceptions=True)
+    
+    async def _save_to_webhook(self, results: List[Dict]) -> None:
+        """Save results to webhook endpoint"""
+        
+        webhook_url = self.config["webhook_url"]
+        
+        async with self.session.post(webhook_url, json=results) as response:
+            if response.status != 200:
+                logger.warning(f"Webhook save failed: {response.status}")
+    
+    async def _save_to_database(self, results: List[Dict]) -> None:
+        """Save results to database (async implementation)"""
+        # Implementation depends on async database driver
+        pass
+    
+    async def _save_to_kafka(self, results: List[Dict]) -> None:
+        """Save results to Kafka (async implementation)"""
+        # Implementation using aiokafka or similar
+        pass
+
+# Integration with main framework
+class AsyncOptimizedDQFramework(DQFramework):
+    def __init__(self, spark: SparkSession, config: str, default_dataframe: DataFrame = None):
+        super().__init__(spark, config, default_dataframe)
+        self.parallel_executor = ParallelDQExecutor()
+    
+    async def run_async(self) -> List[Dict]:
+        """Asynchronous execution with parallel processing"""
+        
+        all_results = []
+        
+        for rule_config in self._config.get("dqframework.dqrules", []):
+            df_names = rule_config.get('dataframes', ["default"])
+            
+            for df_name in df_names:
+                dataframe = self.get_dataframe(df_name)
+                
+                # Execute checks in parallel
+                check_results = self.parallel_executor.execute_checks_parallel(
+                    dataframe,
+                    rule_config.get("checks", []),
+                    lambda check: EngineLoader().load_engine(
+                        check.get("engine", rule_config.get("engine")),
+                        {**rule_config, "checks": [check]},
+                        ResultKey.current_milli_time()
+                    )
+                )
+                
+                all_results.extend(check_results)
+                
+                # Save results asynchronously
+                repository_config = self._config.get("dqframework.repository", {})
+                if repository_config:
+                    async with AsyncDQRepository(repository_config) as repo:
+                        await repo.save_results_async(check_results)
+        
+        return all_results
+----
+
+== Monitoring and Profiling
+
+=== Performance Monitoring
+
+[source,python]
+----
+import time
+import psutil
+from typing import Dict, Any
+from dataclasses import dataclass
+from contextlib import contextmanager
+
+@dataclass
+class PerformanceMetrics:
+    execution_time: float
+    memory_usage_mb: float
+    cpu_usage_percent: float
+    disk_io_mb: float
+    network_io_mb: float
+    spark_metrics: Dict[str, Any]
+
+class PerformanceProfiler:
+    def __init__(self, spark_session: SparkSession):
+        self.spark = spark_session
+        self._metrics_history = []
+    
+    @contextmanager
+    def profile_execution(self, operation_name: str):
+        """Context manager for profiling DQ operations"""
+        
+        # Capture initial state
+        start_time = time.time()
+        initial_memory = psutil.virtual_memory().used / (1024 * 1024)
+        initial_cpu = psutil.cpu_percent()
+        
+        # Spark metrics before
+        spark_metrics_before = self._get_spark_metrics()
+        
+        try:
+            yield
+        finally:
+            # Capture final state
+            end_time = time.time()
+            final_memory = psutil.virtual_memory().used / (1024 * 1024)
+            final_cpu = psutil.cpu_percent()
+            
+            # Spark metrics after
+            spark_metrics_after = self._get_spark_metrics()
+            
+            # Calculate metrics
+            metrics = PerformanceMetrics(
+                execution_time=end_time - start_time,
+                memory_usage_mb=final_memory - initial_memory,
+                cpu_usage_percent=(final_cpu + initial_cpu) / 2,
+                disk_io_mb=0,  # Would need more sophisticated tracking
+                network_io_mb=0,  # Would need more sophisticated tracking
+                spark_metrics=self._calculate_spark_delta(
+                    spark_metrics_before, spark_metrics_after
+                )
+            )
+            
+            # Store metrics
+            self._metrics_history.append({
+                "operation": operation_name,
+                "timestamp": end_time,
+                "metrics": metrics
+            })
+            
+            # Log performance
+            logger.info(f"Performance metrics for {operation_name}",
+                       execution_time=metrics.execution_time,
+                       memory_usage_mb=metrics.memory_usage_mb,
+                       cpu_usage=metrics.cpu_usage_percent)
+    
+    def _get_spark_metrics(self) -> Dict[str, Any]:
+        """Get current Spark metrics"""
+        
+        try:
+            # Access Spark UI metrics programmatically
+            sc = self.spark.sparkContext
+            
+            return {
+                "tasks_completed": sc.statusTracker().getExecutorInfos(),
+                "active_jobs": len(sc.statusTracker().getActiveJobIds()),
+                "active_stages": len(sc.statusTracker().getActiveStageIds())
+            }
+        except Exception:
+            return {}
+    
+    def _calculate_spark_delta(self, before: Dict, after: Dict) -> Dict:
+        """Calculate difference in Spark metrics"""
+        
+        delta = {}
+        
+        # Simple delta calculation
+        for key in before:
+            if key in after and isinstance(before[key], (int, float)):
+                delta[f"{key}_delta"] = after[key] - before[key]
+        
+        return delta
+    
+    def get_performance_report(self, operation_filter: str = None) -> Dict:
+        """Generate performance report"""
+        
+        filtered_metrics = self._metrics_history
+        if operation_filter:
+            filtered_metrics = [
+                m for m in self._metrics_history 
+                if operation_filter in m["operation"]
+            ]
+        
+        if not filtered_metrics:
+            return {"message": "No metrics available"}
+        
+        # Calculate statistics
+        execution_times = [m["metrics"].execution_time for m in filtered_metrics]
+        memory_usage = [m["metrics"].memory_usage_mb for m in filtered_metrics]
+        
+        return {
+            "total_operations": len(filtered_metrics),
+            "avg_execution_time": sum(execution_times) / len(execution_times),
+            "max_execution_time": max(execution_times),
+            "min_execution_time": min(execution_times),
+            "avg_memory_usage": sum(memory_usage) / len(memory_usage),
+            "max_memory_usage": max(memory_usage),
+            "recent_operations": filtered_metrics[-10:]  # Last 10 operations
+        }
+
+# Usage in DQ Framework
+class ProfiledDQFramework(DQFramework):
+    def __init__(self, spark: SparkSession, config: str, default_dataframe: DataFrame = None):
+        super().__init__(spark, config, default_dataframe)
+        self.profiler = PerformanceProfiler(spark)
+    
+    def run(self) -> List[Dict]:
+        """Execute with performance profiling"""
+        
+        with self.profiler.profile_execution("dq_framework_full_run"):
+            results = []
+            
+            for rule_config in self._config.get("dqframework.dqrules", []):
+                rule_name = rule_config.get("name", "unknown_rule")
+                
+                with self.profiler.profile_execution(f"rule_{rule_name}"):
+                    # Execute rule with profiling
+                    rule_results = self._execute_rule(rule_config)
+                    results.extend(rule_results)
+            
+            # Generate performance report
+            perf_report = self.profiler.get_performance_report()
+            logger.info("Performance summary", **perf_report)
+            
+            return results
+----
+
+== Best Practices Summary
+
+=== Immediate Optimizations (High Impact, Low Effort)
+
+1. **Replace `collect()` operations** with distributed processing
+2. **Implement reference data caching** to avoid repeated queries
+3. **Add DataFrame partitioning optimization** based on data size
+4. **Enable Spark SQL optimization** by using SQL where possible
+
+=== Medium-Term Improvements
+
+1. **Implement intelligent caching** with memory management
+2. **Add parallel processing** for independent checks
+3. **Optimize query execution** with predicate pushdown
+4. **Add performance monitoring** and profiling
+
+=== Long-Term Optimizations
+
+1. **Async I/O operations** for external system integration
+2. **Advanced query optimization** with cost-based optimization
+3. **Machine learning-based** performance tuning
+4. **Distributed caching** across cluster nodes
+
+=== Performance Guidelines
+
+==== Data Size Thresholds
+- **< 100MB**: Single partition, memory-only caching
+- **100MB - 1GB**: Multiple partitions, memory + disk caching
+- **1GB - 10GB**: Optimized partitioning, disk caching
+- **> 10GB**: Advanced optimization, sampling strategies
+
+==== Spark Configuration
+[source,bash]
+----
+# Recommended Spark settings for DQ Framework
+spark.sql.adaptive.enabled=true
+spark.sql.adaptive.coalescePartitions.enabled=true
+spark.sql.adaptive.skewJoin.enabled=true
+spark.serializer=org.apache.spark.serializer.KryoSerializer
+spark.sql.execution.arrow.pyspark.enabled=true
+----
+
+==== Memory Management
+- **Driver Memory**: 2-4GB for medium datasets, 8GB+ for large datasets
+- **Executor Memory**: 4-8GB per executor
+- **Executor Cores**: 4-5 cores per executor for optimal performance
+- **Dynamic Allocation**: Enable for variable workloads
+
+== Conclusion
+
+Implementing these performance optimizations will result in:
+
+- **10-100x performance improvement** for large datasets
+- **90% reduction in memory usage** through intelligent caching
+- **50% faster execution** through parallel processing
+- **Improved scalability** to handle enterprise-scale data volumes
+
+**Priority Implementation Order**:
+1. Fix critical `collect()` operations (Week 1)
+2. Implement caching and partitioning (Week 2-3)
+3. Add parallel processing (Week 4-5)
+4. Implement monitoring and profiling (Week 6-7)

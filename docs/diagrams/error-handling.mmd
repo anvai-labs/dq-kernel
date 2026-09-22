@@ -1,0 +1,73 @@
+%%{init: {'theme':'base', 'themeVariables': { 'primaryColor': '#2E86AB', 'primaryTextColor': '#FFFFFF', 'primaryBorderColor': '#1B4F72', 'lineColor': '#34495E', 'secondaryColor': '#A23B72', 'tertiaryColor': '#F18F01', 'background': '#FFFFFF', 'mainBkg': '#EBF5FB', 'secondBkg': '#FADBD8', 'tertiaryBkg': '#FEF9E7'}}}%%
+flowchart TD
+    subgraph "Configuration Errors"
+        CE1[ Invalid Configuration<br/>Malformed & Missing]
+        CE2[ Source Errors<br/>S3 & File]
+        CE3[ Schema Errors<br/>Invalid & Type]
+    end
+    
+    subgraph "Engine Loading Errors"
+        ELE1[ Module Not Found<br/>Engine & Import]
+        ELE2[ Class Instantiation<br/>Constructor & Parameter]
+        ELE3[ Engine Compatibility<br/>Version & API]
+    end
+    
+    subgraph "Data Processing Errors"
+        DPE1[ DataFrame Errors<br/>Table & Catalog]
+        DPE2[ Constraint Failures<br/>Rule & Threshold]
+        DPE3[ Resource Errors<br/>Memory & Cluster]
+    end
+    
+    subgraph "Error Handling Strategies"
+        EHS1[ Retry Logic<br/>Exponential & Maximum]
+        EHS2[📝 Logging & Monitoring<br/>Structured & Error]
+        EHS3[ Graceful Degradation<br/>Skip & Partial]
+    end
+    
+    subgraph "Recovery Mechanisms"
+        RM1[ Auto-Recovery<br/>Configuration & Engine]
+        RM2[ Result Validation<br/>Output & Consistency]
+        RM3[ Incident Response<br/>Alert & Manual]
+    end
+    
+    subgraph "Error Reporting"
+        ER1[ Metrics Dashboard<br/>Error & Failure]
+        ER2[📧 Notifications<br/>Email & Slack]
+        ER3[ Error Details<br/>Stack & Context]
+    end
+    
+    %% Error flow connections
+    CE1 --> EHS2
+    CE2 --> EHS1
+    CE3 --> EHS3
+    
+    ELE1 --> EHS2
+    ELE2 --> EHS3
+    ELE3 --> RM1
+    
+    DPE1 --> EHS1
+    DPE2 --> EHS3
+    DPE3 --> RM1
+    
+    EHS1 --> RM1
+    EHS2 --> ER1
+    EHS3 --> RM2
+    
+    RM1 --> ER2
+    RM2 --> ER3
+    RM3 --> ER1
+    
+    %% Styling
+    classDef configError fill:#FADBD8,stroke:#E74C3C,stroke-width:2px,color:#C0392B
+    classDef engineError fill:#FEF9E7,stroke:#F39C12,stroke-width:2px,color:#E67E22
+    classDef dataError fill:#EBF5FB,stroke:#3498DB,stroke-width:2px,color:#2980B9
+    classDef handlingStrategy fill:#EAFAF1,stroke:#27AE60,stroke-width:2px,color:#1E8449
+    classDef recovery fill:#F4F6F7,stroke:#9B59B6,stroke-width:2px,color:#8E44AD
+    classDef reporting fill:#FDF2E9,stroke:#FF6B6B,stroke-width:2px,color:#E55353
+    
+    class CE1,CE2,CE3 configError
+    class ELE1,ELE2,ELE3 engineError
+    class DPE1,DPE2,DPE3 dataError
+    class EHS1,EHS2,EHS3 handlingStrategy
+    class RM1,RM2,RM3 recovery
+    class ER1,ER2,ER3 reporting

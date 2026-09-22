@@ -1,0 +1,56 @@
+sequenceDiagram
+    participant Client
+    participant DQFramework
+    participant ConfigLoader
+    participant EngineLoader
+    participant Engine
+    participant CheckSystem
+    participant Repository
+    participant Spark
+    
+    Client->>DQFramework: Initialize(spark, config, dataframe)
+    DQFramework->>ConfigLoader: Load Configuration
+    
+    alt File/S3/ADLS/HTTP Config
+        ConfigLoader->>ConfigLoader: Parse from source
+    else String Config
+        ConfigLoader->>ConfigLoader: Parse string
+    end
+    
+    ConfigLoader-->>DQFramework: Parsed Configuration
+    
+    DQFramework->>Spark: Load DataFrames from Catalog
+    Spark-->>DQFramework: DataFrame Collection
+    
+    Client->>DQFramework: run()
+    
+    loop For each DQ Rule
+        DQFramework->>EngineLoader: load_engine(engine_name, config)
+        EngineLoader->>Engine: Instantiate Engine
+        EngineLoader-->>DQFramework: Engine Instance
+        
+        loop For each DataFrame
+            DQFramework->>Engine: apply(dataframe, repository)
+            Engine->>CheckSystem: Execute Checks
+            
+            alt Deequ Engine
+                CheckSystem->>Spark: VerificationSuite.run()
+                Spark-->>CheckSystem: VerificationResult
+            else Custom Engine
+                CheckSystem->>CheckSystem: Custom Logic Execution
+            else Schema Engine
+                CheckSystem->>CheckSystem: Schema Validation
+            end
+            
+            CheckSystem-->>Engine: Check Results
+            
+            opt Repository Enabled
+                Engine->>Repository: Save Metrics
+                Engine->>Repository: Save Verifications
+            end
+            
+            Engine-->>DQFramework: Summary Metrics
+        end
+    end
+    
+    DQFramework-->>Client: Cumulative Results

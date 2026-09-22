@@ -1,0 +1,71 @@
+classDiagram
+    class DQEngine {
+        <<abstract>>
+        +config: ConfigTree
+        +dqts: int
+        +__init__(config, dqts)
+        +apply(dataframe, repository)* DataFrame
+    }
+    
+    class DeequEngine {
+        -_sparkSession: SparkSession
+        +apply(dataframe, repository) List~Dict~
+        -_process_verification_result()
+    }
+    
+    class CustomEngine {
+        -_sparkSession: SparkSession
+        +apply(dataframe, repository) List~Dict~
+        +_check_distinctness_by_group()
+        +_check_rate_of_change()
+        +_lookupBasedOnColumnNameList()
+        +_check_for_negative_values()
+        -__checkMinMaxThreshold()
+    }
+    
+    class GreatExpectationsEngine {
+        +apply(dataframe, repository) List~Dict~
+        -_create_expectation_suite()
+        -_run_expectations()
+    }
+    
+    class SchemaValidationEngine {
+        +apply(dataframe, repository) List~Dict~
+        +_validate_data_types()
+        +_validate_foreign_keys()
+        +_validate_not_null()
+        +_validate_unique_constraints()
+    }
+    
+    class EngineLoader {
+        +load_engine(engine_name, *args, kwargs) DQEngine
+        -_import_module()
+        -_get_class()
+    }
+    
+    class DeequCheck {
+        +checks_config: List
+        +single_check_mode: bool
+        +apply_checks(verification_builder, spark)
+        +_create_completeness_check()
+        +_create_uniqueness_check()
+        +_create_compliance_check()
+    }
+    
+    class ConstraintsBuilder {
+        +build_constraints(checks_config)
+        +_parse_constraint_config()
+    }
+    
+    DQEngine <|-- DeequEngine
+    DQEngine <|-- CustomEngine
+    DQEngine <|-- GreatExpectationsEngine
+    DQEngine <|-- SchemaValidationEngine
+    
+    EngineLoader ..> DQEngine : creates
+    DeequEngine --> DeequCheck : uses
+    SchemaValidationEngine --> ConstraintsBuilder : uses
+    
+    note for DQEngine "Base class defining the\nengine interface contract"
+    note for EngineLoader "Uses Python reflection to\ndynamically load engines"
+    note for CustomEngine "Implements business-specific\nvalidation logic"

@@ -1,0 +1,33 @@
+= Databricks authentication and runtime compatibility
+
+The Databricks integration uses the Databricks SDK's unified authentication.
+For local development, use the Databricks CLI OAuth login. For unattended
+workloads, prefer OAuth machine-to-machine credentials or workload identity
+federation (WIF); do not commit personal access tokens.
+
+For GitHub Actions WIF, configure the Databricks federation policy and expose
+only `DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, and
+`DATABRICKS_AUTH_TYPE=github-oidc`. Construct `DatabricksCheck()` without a
+token so the SDK obtains the short-lived credential. The legacy explicit-token
+constructor remains supported for compatibility, passes the token directly to
+the SDK, and does not retain it on the check object.
+
+The package, Spark 3.5 integration, and optional Databricks integration require
+Python 3.12 or 3.13. CI tests both supported versions.
+
+Official references:
+
+* OAuth federation policy: https://docs.databricks.com/aws/en/dev-tools/auth/oauth-federation-provider
+* GitHub Actions with workload identity federation: https://docs.databricks.com/aws/en/dev-tools/ci-cd/github
+* Databricks unified authentication: https://docs.databricks.com/aws/en/dev-tools/auth/unified-auth
+
+== Runtime boundary
+
+Databricks Runtime 18 LTS uses Apache Spark 4.1, JDK 21, and Python 3.12.
+PyDeequ 1.7.0 maps both Spark 3.5 and Spark 4.1 artifacts. This project still verifies
+PySpark 3.5.9 with Deequ 2.0.21 and Java 17 only, and therefore does not claim Runtime 18
+compatibility. A Spark 4.1/JDK 21 lane must prove adapter and semantic parity before that
+runtime becomes supported; an upstream coordinate alone is not sufficient.
+
+* Databricks Runtime 18 LTS: https://docs.databricks.com/aws/en/release-notes/runtime/18
+* PyDeequ 1.7.0 Spark mapping: https://github.com/awslabs/python-deequ/blob/v1.7.0/pydeequ/configs.py

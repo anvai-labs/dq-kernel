@@ -1,0 +1,378 @@
+= Data Quality Framework reference
+:toc: left
+:toclevels: 3
+:sectlinks:
+:imagesdir: png
+
+This document describes behavior implemented on the current default branch. Documents named
+`technical-debt-analysis`, `architecture-improvements`, `performance-optimization`,
+`future-enhancements`, and `improvements-index` are planning records, not current guarantees.
+
+== Supported runtime
+
+The tested source matrix is Python 3.12 and 3.13 with PySpark 3.5.9, PyDeequ 1.7.0,
+and the Deequ `2.0.21-spark-3.5` JAR. PyDeequ 1.7.0 can map Spark 4.1, but this repository
+does not claim Spark 4 or Databricks Runtime 18 compatibility until a separate parity lane
+verifies the framework's complete adapter behavior.
+
+The base package can be imported without Spark, PyDeequ, AWS, or Databricks installed. Importing
+the `DQFramework` facade and executing built-in distributed engines requires the applicable
+extras.
+
+Install the framework path used by the orchestrator and built-in engines:
+
+[source,shell]
+----
+pip install 'dq-kernel[spark,deequ]'
+----
+
+Add `aws` for Glue/S3 support and `databricks` for the Databricks SDK integration. The Great
+Expectations adapter imports `great_expectations` at runtime, but the project does not pin that
+third-party package because the adapter uses its legacy `SparkDFDataset` API. Install and test a
+compatible version explicitly before selecting that engine.
+
+== Architecture
+
+image::framework-overview.png[Framework components]
+
+The active architecture assessment, debt ledger, and bounded delivery sequence are in
+link:modernization-plan.adoc[Architecture Modernization Plan]. The governing incremental
+design decision is
+link:decisions/adr/ADR-001-incremental-typed-execution-kernel.adoc[ADR-001].
+The proposed library-independent rule/metric boundary is
+link:decisions/adr/ADR-002-engine-neutral-rule-kernel.adoc[ADR-002].
+
+The implemented execution path is:
+
+. `DQFramework` parses a HOCON string or supported URI.
+. `CatalogFactory` selects the Spark, Hive, Unity/Delta, or Glue catalog provider.
+. Configured DataFrames are resolved before rule execution; an optional default DataFrame can be
+  supplied directly.
+. `EngineLoader` accepts a lowercase alphanumeric/underscore engine name and imports
+  `dq.engine.<name>.<name>_engine`.
+. Each engine returns metric dictionaries. `DQFramework.run()` adds the execution timestamp and
+  Spark application ID.
+. When a rule supplies repository configuration, supporting engines can append metric and
+  verification DataFrames to file paths or catalog tables.
+
+The public base contract is:
+
+[source,python]
+----
+class DQEngine(ABC):
+    @abstractmethod
+    def apply(self, dataframe: DataFrame, repository=None) -> list[dict]:
+        ...
+----
+
+Extension compatibility is explicit:
+
+* `repository` receives the framework's outcome sink (an `OutcomeSink` from
+  `dq.sinks`), not raw storage configuration. Engines hand their bounded
+  artifacts to the sink; they must not write to files, tables, or catalogs
+  themselves.
+* Catalog and SQL identifiers must parse through `dq.identifiers`
+  (`TableName`, `ColumnName`) so malformed or injected names fail before any
+  Spark call.
+* The custom constraint surface is frozen by ADR-003: its canonical names are
+  permanent contracts, and new constraints require kernel-backed semantics
+  first.
+* Persistence belongs to sinks: engines hand bounded artifacts to the
+  injected `OutcomeSink`, durable backends implement `run_scope` so a run is
+  one transaction (ADR-006), and drivers are injected by deployment — the
+  framework never holds credentials or imports storage drivers.
+
+== Configuration loading
+
+`DQFramework(spark, config, default_dataframe=None)` accepts:
+
+* an inline HOCON string;
+* `file://` for a local HOCON file;
+* `s3://` when the AWS extra and credentials are available;
+* `abfss://` in a Spark environment configured for ADLS Gen2; or
+* `http://` or `https://` (the HTTP helper applies a request timeout).
+
+Unknown URI schemes raise `ConfigurationError`. `dq-validate` fully parses local and `file://`
+configuration; remote schemes fail validation. Materialize an immutable local copy first.
+
+A minimal Deequ configuration is:
+
+[source,hocon]
+----
+dqframework {
+  dqrules = [
+    {
+      name = "completeness_checks"
+      engine = "deequ"
+      dataframes = ["default"]
+      checks = [
+        {
+          constraint_name = "id_complete"
+          constraint = "isComplete"
+          column = "id"
+          level = "Error"
+        }
+      ]
+    }
+  ]
+}
+----
+
+Pass the DataFrame as `default_dataframe`, or declare table-backed frames:
+
+[source,hocon]
+----
+dqframework {
+  catalog_type = "unity"
+  dataframes {
+    orders = "main.sales.orders"
+    customers {
+      catalog = "main"
+      database = "sales"
+      table = "customers"
+    }
+  }
+  dqrules = []
+}
+----
+
+Table identifiers are limited to one-, two-, or three-part alphanumeric/underscore identifiers;
+arbitrary SQL expressions are not accepted as table names.
+
+== Catalog providers
+
+`catalog_type` supports:
+
+* `spark` (default fallback) and `hive`, both through Spark's catalog;
+* `unity` and `delta`, through the Unity Catalog provider; and
+* `glue`, through the AWS Glue provider.
+
+When `catalog_type` is omitted, the factory checks Spark configuration for Unity/Delta or Glue
+markers and otherwise selects `spark`. Catalog permissions and cloud credentials are supplied by
+the runtime; the framework does not embed them.
+
+== Engines
+
+=== Deequ
+
+The `deequ` engine maps supported HOCON constraints to PyDeequ checks and requires the matching
+Deequ JAR on the Spark classpath. The checked-in local example uses:
+
+[source,python]
+----
+SparkSession.builder \
+    .config("spark.jars", "lib/deequ-2.0.21-spark-3.5.jar") \
+    .getOrCreate()
+----
+
+=== Outcome contract
+
+The facade and evidence reporter use an immutable `CheckOutcome` compatibility
+boundary. Summaries require Boolean success and finite, strict JSON diagnostics;
+Spark summary Rows export named fields. Exports are independent copies. The
+boundary rejects more than 10,000 outcomes, 1 MiB per outcome, 16 MiB per batch/run,
+10,000 diagnostic nodes per outcome, or depth 16. It does not truncate evidence
+or bound upstream dataset collection. Portable rule planning has landed for
+counts/v1 and groups/v1; durable post-validation persistence remains proposed
+under ADR-002.
+
+=== Portable count plans
+
+The opt-in `dq.plan` API owns immutable `DatasetRef`, `ColumnRef`, `Predicate`,
+`RuleSpec`, `MetricKey`, `CapabilitySet`, and `ExecutionPlan` values. It uses only
+the standard library and framework exceptions/outcomes. No engine is imported.
+Run `python -m examples.portable_counts` from a source checkout for an executable
+fixture demonstration, not a real admission report.
+
+[cols="1,3",options="header"]
+|===
+|Contract |`counts/v1` meaning
+|Input identity |Case-sensitive logical dataset alias plus SHA-256 of a snapshot
+whose identity covers both data and schema. The caller/adapter verifies the bytes;
+the kernel only validates the supplied identity's shape.
+|Columns |One case-sensitive portable identifier, up to 128 ASCII characters.
+Nested paths, quoting, expressions and SQL filters are not accepted.
+|Row count |Exact global count including rows containing null/NaN; unsigned 64-bit.
+|Present count |Exact global count excluding null and floating-point NaN in the
+selected column. Empty strings and infinities are present: completeness is not
+a finite-value or nonblank check.
+|Size |Integer count compared with an integral threshold.
+|Completeness |Present/rows, compared as an exact fraction against a finite
+Decimal threshold in [0,1]. Empty input fails, even when the threshold is zero.
+|Predicates |GE, GT, LE, LT, EQ only; no executable expressions, binary-float
+thresholds, approximations, or implicit rounding. Decimal precision and exponent
+are bounded to 38 digits and [-38,38].
+|Failure |Missing, extra, malformed, snapshot-mismatched or inconsistent metrics
+are execution errors, not failed quality measurements. Warning severity never
+turns a failed check into passing `dq-report/v1` evidence.
+|===
+
+Rules are sorted by unique stable ID. Plans reject empty/mutable rule collections,
+more than 10,000 rules, and conflicting snapshot bindings for one alias. A tuple
+of deduplicated metric keys includes snapshot, column, kind and semantic version;
+plans cannot mix semantic versions.
+The canonical JSON SHA-256 is cached; it is independent of rule input order,
+Decimal trailing zeros, and adapter identity. Adapter name/version is recorded
+separately in outcomes. `dq.spark_adapter` computes all of a dataset's metrics in
+one shared aggregate action, so duplicate metric requests cost a single scan.
+
+`validate_for(capabilities)` rejects unsupported metrics or semantic versions.
+`evaluate(counts, capabilities)` repeats that check, validates the complete metric
+set, and returns immutable outcomes. Counts must describe the complete snapshot:
+partition counts may be summed, but partition completeness ratios must not be
+averaged without weighting by row count. Only summaries cross this boundary.
+
+Capability declarations are promises, not proof. The built-in `dq.spark_adapter`
+advertises `counts/v1` for size and completeness and is verified against
+hand-computed fixtures covering nulls, NaN and infinities, decimals, empty
+inputs, case-sensitive columns, and repartitioning. A differential suite
+(`dq.tests.test_spark_adapter_differential`) runs the same rules through
+PyDeequ and the native adapter and pins the one intentional divergence:
+counts/v1 excludes floating-point NaN from present counts while Deequ's
+completeness counts it, so NaN-bearing columns can pass in PyDeequ and fail
+natively past thresholds between the two ratios. On empty inputs both engines
+fail completeness. Snapshot digests remain caller-certified.
+`dq.portable_config` translates exactly representable HOCON
+count rules and fails closed on everything else. Numeric ranges, uniqueness,
+schema, regex, clocks/timezones, durable admission and DataFusion remain
+outside this slice.
+
+Outcomes carry the rule ID, exact numerator/denominator, semantic version, logical
+plan digest and adapter declaration. `build_report` accepts these outcomes, but
+the plan digest does not replace approved rule-set/dataset digests or establish
+durable promotion authority. Existing engine entry points are unchanged.
+
+=== DQDL compatibility
+
+PyDeequ 1.7 adds Deequ Data Quality Definition Language support. The `dqdl` engine accepts a
+non-empty `ruleset` and returns one bounded outcome per rule. It deliberately does not collect
+row-level results into framework outcomes. DQDL is a vendor-specific compatibility adapter, not
+the portable rule model proposed by ADR-002. See `examples/dqdl_validation.conf`.
+
+For offline deployment, add both `lib/deequ-2.0.21-spark-3.5.jar` and `lib/dqdl-1.0.0.jar`
+to `spark.jars` (comma-separated). The second artifact is `software.amazon.glue:dqdl:1.0.0`,
+declared by Deequ's published POM; the Deequ JAR alone cannot execute DQDL. Alternatively,
+resolve `pydeequ.deequ_maven_coord` using `spark.jars.packages` before creating the session.
+Keep runtime dependencies aligned with the tested Spark distribution.
+
+`max_outcomes` defaults to 1000 and may be set from 1 to 10000. Excess outcomes, zero outcomes,
+missing rule identities, or unknown statuses raise errors. DQDL rejects repository persistence
+configuration; use `--report-json` for summary evidence. Cross-dataset DQDL rules and row-level
+quarantine are not exposed by this adapter yet.
+
+=== Schema validation
+
+The `schemavalidation` engine uses Deequ plus Spark schema inspection for datatype, nullable,
+unique, and foreign-key checks. See `examples/schema_validation.conf`.
+
+=== Custom constraints
+
+The `custom` engine currently implements `DistinctnessByGroup`, `RateOfChange`,
+`LookupBasedOnColumnNameList`, and `WideTablesNegativeValuesCheck`. See
+`examples/custom_constraints.conf`.
+
+=== Great Expectations adapter
+
+The `greatexpectations` engine is an optional compatibility adapter. It requires a separately
+installed Great Expectations release that still exposes `ge.dataset.SparkDFDataset`; current CI
+tests the adapter boundary with a controlled substitute and does not certify a live external
+Great Expectations/Spark combination.
+
+== Results and repositories
+
+`DQFramework.run()` returns a list of dictionaries containing at least `check`, `success`,
+`details`, `ts`, and `jobid` for results emitted by an engine.
+
+Repository configuration is optional. The current helper requires `dataset`, accepts formats
+`parquet`, `csv`, `json`, `delta`, or `orc`, and supports:
+
+[source,hocon]
+----
+repository {
+  dataset = "orders"
+  format = "delta"
+  file {
+    paths = ["/quality/results"]
+  }
+  catalog {
+    tables = ["quality.orders"]
+  }
+}
+----
+
+The helper appends partitioned file results and appends to or creates catalog tables with metric
+suffixes. It does not implement retries, alert delivery, retention, or access control; those are
+deployment responsibilities.
+
+== Command-line tools
+
+[source,shell]
+----
+dq-kernel file:///absolute/path/config.conf --spark-master 'local[*]'
+dq-validate file:///absolute/path/config.conf --format json
+----
+
+`dq-kernel` creates a Spark session, runs the configured checks, prints a summary, and returns
+nonzero when checks fail. `dq-validate` validates required local configuration structure without
+running Spark checks. Built-in engines use engine-specific payloads: Deequ/custom use `checks`,
+schema validation uses `schema`, Great Expectations uses `expectations`, and DQDL uses `ruleset`.
+Every checked-in `.conf` example is validated in CI.
+
+== Security boundaries
+
+* Do not place cloud credentials, Databricks tokens, or storage secrets in HOCON files.
+* Use runtime-native identity, secret managers, and least-privilege catalog/storage grants.
+* Only HTTPS should be used for remote configuration in production.
+* Table names are validated, but configuration content remains trusted operational input.
+* Databricks automation should use OAuth machine-to-machine or workload identity federation.
+
+See link:databricks-authentication.adoc[Databricks authentication and runtime compatibility].
+
+== Tests and CI
+
+CI runs the Spark-backed test suite on Python 3.12 and 3.13 with Java 17. It rejects missing tests,
+enforces 55% combined coverage, independent 57% line and 46% branch floors, and 90% changed-code
+coverage, runs Black,
+Flake8, Bandit, and pip-audit, builds the package, reviews dependency changes, and checks
+documentation links. A fail-closed aggregate job is the required branch-protection context.
+
+The owner path runs only after immutable owner/repository checks and environment approval on
+self-hosted capacity. Other pull requests stay on GitHub-hosted runners.
+
+== Examples and planning records
+
+* link:../examples/README.md[Runnable configuration examples]
+* link:modernization-plan.adoc[Active architecture modernization plan]
+* link:decisions/adr/ADR-001-incremental-typed-execution-kernel.adoc[ADR-001: typed execution kernel]
+* link:decisions/adr/ADR-002-engine-neutral-rule-kernel.adoc[ADR-002: engine-neutral rule kernel]
+* link:decisions/adr/ADR-003-custom-constraint-adapter.adoc[ADR-003: custom constraint adapter]
+* link:decisions/adr/ADR-004-grouped-metric-requests.adoc[ADR-004: grouped metric requests]
+* link:decisions/adr/ADR-005-value-range-metrics.adoc[ADR-005: value-range metrics]
+* link:decisions/adr/ADR-006-durable-postgres-sink.adoc[ADR-006: durable PostgreSQL sink]
+* link:decisions/adr/ADR-007-productization-mvp.adoc[ADR-007: productization MVP]
+* link:decisions/adr/ADR-008-gate-event-notifier-port.adoc[ADR-008: gate-event notifier port]
+* link:decisions/adr/ADR-009-open-core-boundary.adoc[ADR-009: open-core boundary]
+* link:decisions/adr/ADR-010-compute-agnostic-dataplane.adoc[ADR-010: compute-agnostic data plane]
+* link:decisions/adr/ADR-010-compute-agnostic-dataplane.adoc[ADR-010: compute-agnostic data plane]
+* link:product-strategy.adoc[Product strategy and market landscape]
+* link:quickstart.adoc[Quickstart]
+* link:error-catalog.adoc[Error catalog]
+* link:specs/SPEC-001-evidence-plane-rollout.adoc[SPEC-001: evidence plane rollout]
+* link:specs/SPEC-002-gate-notifier.adoc[SPEC-002: gate-event notifier]
+* link:specs/SPEC-003-release-signing-sbom.adoc[SPEC-003: release signing and SBOM]
+* link:specs/SPEC-004-error-catalog-and-quickstart.adoc[SPEC-004: error catalog and quickstart]
+* link:specs/SPEC-005-control-plane-outline.adoc[SPEC-005: multi-tenant control plane (outline)]
+* link:specs/SPEC-006-tenant-namespaces.adoc[SPEC-006: tenant namespaces]
+* link:specs/SPEC-007-sqlalchemy-arrow-sink.adoc[SPEC-007: SQLAlchemy sink and Arrow fast path]
+* link:review-handoff-codex.adoc[Adversarial review handoff for Codex]
+* link:reviews/2026-09-21-adversarial-review.md[Adversarial review findings (Codex, 2026-09-21)]
+* link:reviews/2026-09-21-review-triage.md[Triage and dispositions]
+* link:technical-debt-analysis.adoc[Historical technical-debt analysis]
+* link:architecture-improvements.adoc[Architecture planning record]
+* link:performance-optimization.adoc[Performance ideas]
+* link:future-enhancements.adoc[Future enhancement ideas]
+* link:improvements-index.adoc[Planning index]
+
+Planning records can contain illustrative pseudocode, targets, and estimates that are not
+implemented or benchmarked. Use this reference, the source, and the executable CI gates for the
+current contract.

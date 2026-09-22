@@ -1,0 +1,376 @@
+= Technical Debt Analysis (historical planning record)
+:doctype: article
+:toc: left
+:toclevels: 3
+:sectlinks:
+:sectnums:
+:icons: font
+:source-highlighter: coderay
+
+NOTE: This document captures a point-in-time planning analysis. Its examples, issue list,
+priorities, and estimates are not current implementation claims. Use `index.adoc`, the source,
+and CI results for the current supported contract.
+
+== Executive Summary
+
+This document provides a comprehensive analysis of technical debt within the Data Quality Framework codebase. The analysis identifies critical issues affecting security, performance, maintainability, and scalability.
+
+== Critical Security Issues
+
+=== 🚨 **HIGH PRIORITY** - Code Injection Vulnerability
+
+**Location**: `build/lib/dq/engine/deequ/deequ_check.py:31`
+
+[source,python]
+----
+# CRITICAL SECURITY ISSUE
+return eval(lambda_expr, {"__builtins__": {}})
+----
+
+**Risk**: Remote code execution vulnerability
+**Impact**: Potential system compromise
+**Timeline**: Fix immediately
+
+**Recommended Fix**:
+[source,python]
+----
+import ast
+
+def safe_lambda_parser(lambda_str: str):
+    try:
+        tree = ast.parse(lambda_str, mode='eval')
+        # Whitelist allowed operations
+        allowed_nodes = (ast.Lambda, ast.Name, ast.Compare, ast.Constant)
+        for node in ast.walk(tree):
+            if not isinstance(node, allowed_nodes):
+                raise ValueError(f"Unsafe operation: {type(node)}")
+        return eval(compile(tree, '<string>', 'eval'))
+    except Exception as e:
+        raise SecurityError(f"Invalid lambda expression: {e}")
+----
+
+=== SQL Injection Risk
+
+**Location**: `build/lib/dq/engine/custom/custom_engine.py:90`
+
+[source,python]
+----
+# POTENTIAL SQL INJECTION
+df_ref = self._sparkSession.sql("Select "+ ref_columns+ " from "+ ref_table)
+----
+
+**Recommended Fix**:
+[source,python]
+----
+def get_reference_data(self, table_name: str, column_name: str):
+    safe_table = self._validate_table_name(table_name)
+    safe_column = self._validate_column_name(column_name)
+    return self._spark_session.sql(f"SELECT {safe_column} FROM {safe_table}")
+----
+
+== Architecture Issues
+
+=== Broken Inheritance Hierarchy
+
+**Issue**: `SchemavalidationEngine` inherits from `DeequEngine` instead of `DQEngine`
+**Impact**: Tight coupling, violation of LSP
+**Priority**: High
+
+**Current Structure**:
+[source,python]
+----
+SchemavalidationEngine(DeequEngine)  # WRONG
+----
+
+**Correct Structure**:
+[source,python]
+----
+SchemavalidationEngine(DQEngine)     # CORRECT
+----
+
+=== Missing Dependency Injection
+
+**Issue**: Hard-coded dependencies throughout codebase
+**Impact**: Poor testability, tight coupling
+
+**Recommended Pattern**:
+[source,python]
+----
+class DQFramework:
+    def __init__(self, spark: SparkSession, 
+                 config_loader: ConfigLoader,
+                 dataframe_provider: DataFrameProvider):
+        self._spark = spark
+        self._config_loader = config_loader
+        self._dataframe_provider = dataframe_provider
+----
+
+== Performance Bottlenecks
+
+=== Critical Memory Issue
+
+**Location**: `build/lib/dq/engine/custom/custom_engine.py:164`
+
+[source,python]
+----
+# SCALABILITY KILLER
+df_final = dataframe.collect()  # Brings entire DataFrame to driver
+----
+
+**Impact**: OOM errors on large datasets
+**Timeline**: Fix in next sprint
+
+**Recommended Fix**:
+[source,python]
+----
+# Use distributed processing instead
+def _check_rate_of_change(self, ...):
+    window = Window.partitionBy(*group_by).orderBy(F.col(sort_by))
+    
+    result_df = dataframe.withColumn("change_pct", 
+        F.when(F.lag("value").over(window) != 0,
+               F.abs((F.col("value") - F.lag("value").over(window)) / 
+                     F.lag("value").over(window) * 100))
+        .otherwise(0))
+    
+    # Process results without collecting entire DataFrame
+    violation_count = result_df.filter(F.col("change_pct") > max_threshold).count()
+----
+
+=== Inefficient Repository Queries
+
+**Issue**: Repeated SQL queries for reference data
+**Impact**: Poor performance, unnecessary network calls
+
+**Current**:
+[source,python]
+----
+# Executed for every column
+df_ref = self._sparkSession.sql("Select "+ ref_columns+ " from "+ ref_table)
+----
+
+**Optimized**:
+[source,python]
+----
+class ReferenceDataCache:
+    def __init__(self):
+        self._cache = {}
+    
+    def get_reference_data(self, table: str, column: str):
+        cache_key = f"{table}.{column}"
+        if cache_key not in self._cache:
+            self._cache[cache_key] = self._spark_session.sql(
+                f"SELECT {column} FROM {table}"
+            ).cache()
+        return self._cache[cache_key]
+----
+
+== Error Handling Deficiencies
+
+=== Silent Failures
+
+**Location**: `build/lib/dq/dq_framework.py:34`
+
+[source,python]
+----
+def _load_config(self, config):
+    # ... other conditions ...
+    else:
+        return None  # Silent failure - no logging or exception
+----
+
+**Recommended Fix**:
+[source,python]
+----
+class ConfigurationError(DQFrameworkError):
+    pass
+
+def _load_config(self, config):
+    # ... other conditions ...
+    else:
+        logger.error(f"Unsupported configuration scheme: {config}")
+        raise ConfigurationError(f"Cannot load configuration from: {config}")
+----
+
+=== Inconsistent Exception Handling
+
+**Issue**: Mix of print statements and exceptions
+**Impact**: Poor debugging experience
+
+**Current Pattern**:
+[source,python]
+----
+if verification_result.status == "SUCCESS":
+    print("Data quality checks passed successfully.")
+else:
+    print("Data quality checks failed.")
+----
+
+**Recommended Pattern**:
+[source,python]
+----
+logger = logging.getLogger(__name__)
+
+def process_verification_result(self, verification_result):
+    if verification_result.status == "SUCCESS":
+        logger.info("Data quality checks passed successfully")
+        return True
+    else:
+        logger.warning("Data quality checks failed", extra={
+            "failed_checks": len(verification_result.checkResults),
+            "rule_name": self._config.get("name", "unknown")
+        })
+        return False
+----
+
+== Code Quality Issues
+
+=== High Code Duplication
+
+**Locations**: Multiple engines, repository utilities
+**Impact**: Maintenance burden, inconsistent behavior
+
+**Example - Duplicated Summary Creation**:
+[source,python]
+----
+# Found in multiple engines
+summarymetrics.append({
+    "check": check["check"],
+    "success": check["check_status"] == "Success",
+    "details": check
+})
+----
+
+**Recommended Utility**:
+[source,python]
+----
+class MetricProcessor:
+    @staticmethod
+    def create_summary_metric(check_result: Dict, additional_context: Dict = None) -> Dict:
+        base_metric = {
+            "check": check_result.get("check"),
+            "success": check_result.get("check_status") == "Success",
+            "details": check_result,
+            "timestamp": datetime.utcnow().isoformat(),
+            "execution_time_ms": check_result.get("execution_time_ms", 0)
+        }
+        
+        if additional_context:
+            base_metric.update(additional_context)
+            
+        return base_metric
+----
+
+=== Missing Type Hints
+
+**Issue**: No type annotations throughout codebase
+**Impact**: Poor IDE support, runtime errors
+
+**Current**:
+[source,python]
+----
+def apply(self, dataframe, repository=None):
+    return summarymetrics
+----
+
+**Improved**:
+[source,python]
+----
+from typing import List, Dict, Optional
+from pyspark.sql import DataFrame
+
+def apply(self, dataframe: DataFrame, repository: Optional[Dict] = None) -> List[Dict]:
+    """Apply data quality checks to the DataFrame."""
+    return summarymetrics
+----
+
+== Testing Gaps
+
+=== Missing Test Categories
+
+**Current Coverage**:
+- ✅ Basic unit tests
+- ❌ Integration tests
+- ❌ Performance tests  
+- ❌ Security tests
+- ❌ Negative test cases
+
+**Recommended Test Structure**:
+[source,python]
+----
+@pytest.mark.unit
+def test_engine_loader_invalid_engine():
+    loader = EngineLoader()
+    with pytest.raises(EngineLoadError, match="Engine .* not found"):
+        loader.load_engine("nonexistent_engine")
+
+@pytest.mark.integration
+def test_end_to_end_dq_workflow():
+    # Test complete workflow from config to results
+    pass
+
+@pytest.mark.performance
+@pytest.mark.parametrize("dataset_size", [1000, 10000, 100000])
+def test_performance_scalability(dataset_size):
+    # Performance benchmarks
+    pass
+
+@pytest.mark.security
+def test_configuration_injection_prevention():
+    malicious_config = "dqframework { malicious_code = 'rm -rf /' }"
+    with pytest.raises(SecurityError):
+        DQFramework(spark, malicious_config)
+----
+
+== Immediate Action Items
+
+=== 🔴 **Critical (Fix This Week)**
+
+1. **Remove `eval()` usage** - Replace with AST-based safe parsing
+2. **Fix SQL injection** - Implement parameterized queries
+3. **Add input validation** - Sanitize all user inputs
+
+=== 🟡 **High Priority (Next Sprint)**
+
+1. **Fix inheritance hierarchy** - Ensure all engines inherit from `DQEngine`
+2. **Replace `collect()` operations** - Use distributed processing
+3. **Implement proper error handling** - Add logging and custom exceptions
+4. **Add configuration validation** - Use Pydantic or similar
+
+=== 🟢 **Medium Priority (Within Month)**
+
+1. **Extract common utilities** - Reduce code duplication
+2. **Add comprehensive testing** - Include integration and performance tests
+3. **Implement caching strategy** - For DataFrames and reference data
+4. **Add type hints** - Throughout codebase
+
+== Recommended Development Practices
+
+=== Code Review Checklist
+
+- [ ] No `eval()` or `exec()` usage
+- [ ] All SQL queries are parameterized
+- [ ] Error handling with proper logging
+- [ ] Type hints for all public methods
+- [ ] Unit tests for new functionality
+- [ ] Performance impact assessment
+- [ ] Security vulnerability check
+
+=== Development Standards
+
+1. **Security First**: Never use `eval()`, validate all inputs
+2. **Performance Aware**: Avoid `collect()`, use distributed processing
+3. **Error Transparent**: Log errors, use custom exceptions
+4. **Test Driven**: Write tests before implementation
+5. **Type Safe**: Use type hints and validation
+
+== Conclusion
+
+The Data Quality Framework has significant technical debt that poses security risks and scalability limitations. Immediate action is required on critical security issues, followed by systematic refactoring to improve architecture, performance, and maintainability.
+
+**Estimated Effort**:
+- Critical fixes: 1-2 weeks
+- High priority improvements: 1 sprint (2-3 weeks)
+- Complete technical debt resolution: 2-3 months
+
+**ROI**: Addressing this technical debt will improve security posture, enable scaling to larger datasets, reduce maintenance costs, and accelerate feature development.
