@@ -287,9 +287,9 @@ raising the repository-wide percentage is not a substitute for boundary and nega
 
 == Current delivery status
 
-* U1: merged in PR 32; post-merge CI passed on Python 3.12 and 3.13.
-* U2: merged in PR 33; PR and post-merge CI passed:
-  https://github.com/anvai-labs/dq-kernel/pull/33
+* U1: merged in data-quality-framework PR 32 (dq-kernel's predecessor repository); post-merge CI passed on Python 3.12 and 3.13.
+* U2: merged in data-quality-framework PR 33; PR and post-merge CI passed:
+  https://github.com/anvai-labs/data-quality-framework/pull/33
   Lazy package imports, metadata versioning, example structure
   validation, and PyDeequ 1.7/Deequ 2.0.21 compatibility are grouped in one reviewable unit.
   DQDL uses an explicit parser dependency and bounded fail-closed summaries. Full runtime
@@ -297,7 +297,7 @@ raising the repository-wide percentage is not a substitute for boundary and nega
   Local validation: 197 full-suite tests passed before the final negative fixtures; 29 focused
   package/validator tests passed afterward, with 100% coverage of changed production lines.
   PR checks are the authority for Python 3.12/3.13 and Java 17 certification.
-* U3a: merged in PR 34; PR and post-merge CI passed on Python 3.12/3.13. A frozen
+* U3a: merged in data-quality-framework PR 34; PR and post-merge CI passed on Python 3.12/3.13. A frozen
   `CheckOutcome` snapshot centralizes strict JSON/boolean validation, prevents mutable
   aliases, bounds summary count/depth/nodes/bytes, and preserves valid v2 extension fields.
   The facade and report builder share that boundary. Spark summary Rows become named
@@ -305,7 +305,7 @@ raising the repository-wide percentage is not a substitute for boundary and nega
   cover malformed and non-finite results, immutable copies, optional-free imports, and limits.
   Local validation: 238 full-suite tests passed; the new outcome module has 100% line and
   branch coverage. Overall line coverage is 71.88% and branch coverage is 65.17%.
-  PR 34: https://github.com/anvai-labs/dq-kernel/pull/34
+  PR 34: https://github.com/anvai-labs/data-quality-framework/pull/34
   The first hosted matrix exceeded its prior runtime and cancellation was requested;
   no passing certification is inferred from local tests. CI test steps now have a
   ten-minute budget, slow tests dump Python stacks after sixty seconds, and import
