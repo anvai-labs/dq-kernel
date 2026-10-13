@@ -59,7 +59,7 @@ black = "26.10.0"                  # Formatting (lint runs on 3.13)
 flake8 = "^6.0.0"               # Linting only
 bandit = "^1.7.5"               # Security scanning only
 pip-audit = "^2.10.1"             # Audit lane runs on 3.13
-diff-cover = "10.5.1"
+diff-cover = "10.6.0"
 
 [tool.poetry.scripts]
 dq-kernel = "dq.cli:main"
