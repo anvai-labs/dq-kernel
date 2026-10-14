@@ -54,7 +54,7 @@ databricks = ["databricks-sdk", "cron-schedule-triggers"]
 # Minimal development dependencies (only for CI)
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.3"
-pytest-cov = "^6.0.0"           # Branch coverage gate
+pytest-cov = ">=6,<8"           # Branch coverage gate
 black = "26.10.0"                  # Formatting (lint runs on 3.13)
 flake8 = ">=6,<8"               # Linting only
 bandit = "^1.7.5"               # Security scanning only
