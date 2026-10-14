@@ -786,15 +786,15 @@ xml-validation = ["lxml (>=4,<7)"]
 
 [[package]]
 name = "databricks-sdk"
-version = "0.150.0"
+version = "0.151.0"
 description = "Databricks SDK for Python (Beta)"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
 markers = "extra == \"databricks\""
 files = [
-    {file = "databricks_sdk-0.150.0-py3-none-any.whl", hash = "sha256:65ded768243a6c894dae15b5ce3b19bbb64d91e515aa2970d0d37d68cec5143c"},
-    {file = "databricks_sdk-0.150.0.tar.gz", hash = "sha256:d1a2391f2295da76460c9ca2fd7ca9aa87f0876162e7a8715bfe07b9be1a0e5b"},
+    {file = "databricks_sdk-0.151.0-py3-none-any.whl", hash = "sha256:61a3d339eb56c95c64945a3feab2c8c910f5ed212ed04bf7f866c37dae9bd2d0"},
+    {file = "databricks_sdk-0.151.0.tar.gz", hash = "sha256:fadd9da86d5e4ba991f7507a90dc099ee4ca10dad2b36b594654dacdb2b34b63"},
 ]
 
 [package.dependencies]
@@ -2194,4 +2194,4 @@ spark = ["pyspark"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "b9beeafda1afc834125fcf21393f18ff1434ceed17638a425e16e93a61ff62e2"
+content-hash = "35657c5077b604023fbe50b3133fd87dce2c7374de576eefcfc31ddc609c304d"
