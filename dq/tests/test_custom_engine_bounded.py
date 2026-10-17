@@ -456,3 +456,97 @@ def test_negative_values_constraint_reports_failing_and_non_numeric_columns(spar
 
 
 pytestmark = pytest.mark.spark
+
+
+def test_grouped_distinct_bounds_accepts_bare_string_columns(spark):
+    """A bare string is the natural single-element HOCON form (issue #25)."""
+    frame = spark.createDataFrame(_GROUPS_DATA, _GROUPS_SCHEMA)
+    list_form = GroupedDistinctBoundsStrategy().apply(
+        frame,
+        "GroupedDistinctBounds",
+        "Compliance",
+        "Error",
+        ["id"],
+        ["region"],
+        2,
+        None,
+    )
+    string_form = GroupedDistinctBoundsStrategy().apply(
+        frame, "GroupedDistinctBounds", "Compliance", "Error", "id", "region", 2, None
+    )
+    assert (
+        string_form == list_form
+    ), "bare strings must behave exactly like one-element lists"
+
+
+def test_rate_of_change_accepts_bare_string_columns(spark):
+    """Bare strings for columns/group_by keep the legacy sort_by string too."""
+    frame = spark.createDataFrame(_RATE_DATA, _RATE_SCHEMA)
+    list_form = ConsecutivePercentChangeStrategy().apply(
+        frame,
+        "ConsecutivePercentChange",
+        "Compliance",
+        "Error",
+        ["v"],
+        ["grp"],
+        "day",
+        None,
+        150,
+    )
+    string_form = ConsecutivePercentChangeStrategy().apply(
+        frame,
+        "ConsecutivePercentChange",
+        "Compliance",
+        "Error",
+        "v",
+        "grp",
+        "day",
+        None,
+        150,
+    )
+    assert (
+        string_form == list_form
+    ), "bare strings must behave exactly like one-element lists"
+
+
+def test_column_parameters_reject_non_column_values():
+    """Mis-typed parameters fail before Spark with the parameter named."""
+    for bad_columns, bad_group_by in (
+        (7, ["region"]),
+        (["id"], 3.5),
+        (["id", 4], ["region"]),
+    ):
+        with pytest.raises(ValueError, match="column name or a list of column names"):
+            GroupedDistinctBoundsStrategy().apply(
+                None,
+                "GroupedDistinctBounds",
+                "Compliance",
+                "Error",
+                bad_columns,
+                bad_group_by,
+                None,
+                None,
+            )
+
+
+def test_grouped_constraints_require_at_least_one_grouping_column():
+    with pytest.raises(ValueError, match="at least one grouping column"):
+        GroupedDistinctBoundsStrategy().apply(
+            None, "GroupedDistinctBounds", "Compliance", "Error", ["id"], [], None, None
+        )
+
+
+def test_rate_of_change_sort_by_must_name_exactly_one_column():
+    for bad_sort_by in (["day", "v"], []):
+        with pytest.raises(ValueError, match="exactly one ordering column"):
+            ConsecutivePercentChangeStrategy().apply(
+                None,
+                "ConsecutivePercentChange",
+                "Compliance",
+                "Error",
+                ["v"],
+                ["grp"],
+                bad_sort_by,
+                None,
+                150,
+            )
