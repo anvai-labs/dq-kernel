@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns the envelope's aggregate verdict; Spark-backed end-to-end tests
   pin the dispatch across counts/v1, groups/v1, and ranges/v1
 
+### Fixed
+
+- `GroupedDistinctBounds` and `ConsecutivePercentChange` custom constraints
+  accept a bare string for `columns` and `group_by` as the one-column form
+  (previously the string was iterated character by character and died inside
+  Spark with a cryptic `UNRESOLVED_COLUMN 'r'`); mis-typed parameters now
+  fail before Spark with a `ValueError` naming the constraint and parameter,
+  and `sort_by` accepts exactly one ordering column in either form (#25)
+
 ## [0.1.0]
 
 ### Added

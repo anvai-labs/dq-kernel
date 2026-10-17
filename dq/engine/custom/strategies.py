@@ -76,6 +76,27 @@ def violation_expression(value, threshold_min, threshold_max):
     return F.lit(False) if violation is None else violation
 
 
+def column_list(value, constraint, param):
+    """Normalize a column parameter to a list of column names.
+
+    A bare string names one column; a list or tuple names several. Anything
+    else is a configuration error. Without this guard a bare string is
+    iterated character by character downstream (``groupBy(*"region")``) and
+    surfaces as a cryptic ``UNRESOLVED_COLUMN 'r'`` Spark analysis error
+    (issue #25).
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)) and all(
+        isinstance(column, str) for column in value
+    ):
+        return list(value)
+    raise ValueError(
+        f"{constraint}: '{param}' must be a column name or a list of column "
+        f"names, got {value!r}"
+    )
+
+
 class GroupedDistinctBoundsStrategy:
     """Validate distinct counts of columns within groups meet thresholds.
 
@@ -95,6 +116,12 @@ class GroupedDistinctBoundsStrategy:
         threshold_min,
         threshold_max,
     ) -> Tuple[List[list], List[list]]:
+        columns = column_list(columns, name, "columns")
+        group_by = column_list(group_by, name, "group_by")
+        if not group_by:
+            raise ValueError(
+                f"{name}: 'group_by' must name at least one grouping column"
+            )
         logger.info(
             "Checking distinctness of columns '%s' by group '%s'", columns, group_by
         )
@@ -191,6 +218,19 @@ class ConsecutivePercentChangeStrategy:
         threshold_min,
         threshold_max,
     ) -> Tuple[List[list], List[list]]:
+        columns = column_list(columns, name, "columns")
+        group_by = column_list(group_by, name, "group_by")
+        if not group_by:
+            raise ValueError(
+                f"{name}: 'group_by' must name at least one grouping column"
+            )
+        sort_columns = column_list(sort_by, name, "sort_by")
+        if len(sort_columns) != 1:
+            raise ValueError(
+                f"{name}: 'sort_by' must name exactly one ordering column, "
+                f"got {sort_columns!r}"
+            )
+        sort_by = sort_columns[0]
         logger.info(
             "Checking rate of change for '%s' by group '%s' and sort by '%s'",
             columns,
