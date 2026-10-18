@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 158 raise sites across the modules below; the contract
+The framework raises 162 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -204,9 +204,14 @@ the evidence store refused an unsafe write.
 == dq/engine/custom/strategies.py
 
 *Content:* 1 `ConfigurationError` site (re-raised from identifier
-validation).
+validation) and 4 `ValueError` sites guarding the grouped constraints'
+column parameters.
 
 * Cause: custom-engine reference lookups with malformed table or column
-  identifiers.
+  identifiers; `columns`, `group_by`, or `sort_by` given as a non-column
+  type, an empty `group_by`, or a `sort_by` that does not name exactly one
+  ordering column (a bare string used to be iterated character by character
+  and died inside Spark as `UNRESOLVED_COLUMN 'r'` — issue #25).
 * Fix: supply bounded alphanumeric identifiers; see the error catalog entry
-  on identifier shapes and ADR-006.
+  on identifier shapes and ADR-006. Pass each column parameter as a column
+  name or a list of column names (`sort_by`: exactly one ordering column).
