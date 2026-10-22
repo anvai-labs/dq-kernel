@@ -222,6 +222,54 @@ def test_distinctness_many_groups_stay_bounded(spark):
     assert all(result["success"] for result in results)
 
 
+def test_engine_accumulates_across_checks_and_rate_columns(spark):
+    # Guards two combinations the single-check single-column rate tests
+    # cannot catch: the engine loop running more than one check per
+    # rule (accumulator regression drops all but the last check), and
+    # the rate strategy's per-index aggregates over two columns
+    # (index/column misalignment produces wrong per-column verdicts).
+    frame = spark.createDataFrame(
+        [
+            ("d1", "g", 1.0, 10.0),
+            ("d2", "g", 2.0, 10.0),
+            ("d3", "g", 4.0, -1.0),
+        ],
+        "day string, grp string, v double, w double",
+    )
+    config = ConfigFactory.parse_string("""
+        sync {
+            checks = [
+            {
+                constraint_name = "roc_two_columns"
+                constraint = "RateOfChange"
+                columns = ["v", "w"]
+                group_by = ["grp"]
+                sort_by = "day"
+                max = 50
+                level = "Error"
+            },
+            {
+                constraint_name = "negativity"
+                constraint = "NoNegativeValues"
+                level = "Error"
+            }
+            ]
+        }
+        """).get("sync", {})
+    results = BusinessrulesEngine(config).apply(frame)
+    summaries = summaries_by_instance(results)
+    # v: 1.0 -> 2.0 -> 4.0 = +100% change (violates max 50); w: only
+    # -1.0 is negative so the negativity check flags it.
+    assert any(
+        "v" in instance and not s["success"] for instance, s in summaries.items()
+    )
+    assert any(
+        "w" in instance and not s["success"] for instance, s in summaries.items()
+    )
+    # both checks contributed rows (engine accumulated across checks)
+    assert len(results) >= 3
+
+
 def test_rate_of_change_emits_one_bounded_summary_per_column(spark):
     frame = spark.createDataFrame(_RATE_DATA, _RATE_SCHEMA)
     results = BusinessrulesEngine(

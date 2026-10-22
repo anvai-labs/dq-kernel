@@ -5,14 +5,11 @@ import os
 
 os.environ["SPARK_VERSION"] = "3.5"
 import pytest
-from pyhocon import ConfigFactory
 
 from dq.engine.businessrules.businessrules_engine import BusinessrulesEngine
 from dq.engine.businessrules.strategies import NoNegativeValuesStrategy
 from dq.tests.helpers import assert_overall_success
 import pydeequ
-
-from pyspark.sql import SparkSession
 
 
 def test_wide_col_negative_values(

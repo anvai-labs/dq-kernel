@@ -188,7 +188,11 @@ DTYPE_OUTCOMES = [(True, dtype) for dtype in DTYPES] + [(False, "integer")]
 
 
 @pytest.mark.parametrize("nullable", [False, True], ids=["required", "nullable"])
-@pytest.mark.parametrize("expected_success,dtype", DTYPE_OUTCOMES)
+@pytest.mark.parametrize(
+    "expected_success,dtype",
+    DTYPE_OUTCOMES,
+    ids=[f"{ok}-{d}" for ok, d in DTYPE_OUTCOMES],
+)
 def test_schemavalidation_dtype_constraints(spark, expected_success, dtype, nullable):
     df = incoming_df(spark, dtype, nullable)
     apply_and_assert(
