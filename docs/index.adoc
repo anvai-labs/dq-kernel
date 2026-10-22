@@ -269,7 +269,7 @@ unique, and foreign-key checks. See `examples/schema_validation.conf`.
 
 The `custom` engine currently implements `DistinctnessByGroup`, `RateOfChange`,
 `LookupBasedOnColumnNameList`, and `WideTablesNegativeValuesCheck`. See
-`examples/custom_constraints.conf`.
+`examples/businessrules_constraints.conf`.
 
 === Great Expectations adapter
 

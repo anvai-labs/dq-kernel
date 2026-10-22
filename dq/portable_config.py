@@ -5,7 +5,7 @@
 
 Counts/v1 accepts ``isComplete``, ``hasCompleteness`` with one literal
 comparison, and ``hasSize`` with one integer comparison. Groups/v1 accepts the
-custom engine's ``DistinctnessByGroup``, translating each column into up to two
+businessrules engine's ``DistinctnessByGroup``, translating each column into up to two
 grouped-distinct rules (a ``.min`` and a ``.max`` bound) whose decisions match
 the legacy constraint exactly. Everything else fails closed and stays on the
 legacy engine path. Semantics are owned by ``dq.plan`` and can differ from

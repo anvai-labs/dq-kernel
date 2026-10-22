@@ -16,7 +16,7 @@ from json import dumps
 import pytest
 from pyhocon import ConfigFactory
 
-from dq.engine.custom.custom_engine import CustomEngine
+from dq.engine.businessrules.businessrules_engine import BusinessrulesEngine
 from dq.plan import (
     ColumnRef,
     Comparison,
@@ -57,7 +57,7 @@ def legacy_config(columns, group_by, minimum, maximum):
 def legacy_column_decisions(config, frame, columns):
     """Per-column success from the legacy engine's summaries."""
     decisions = {column: True for column in columns}
-    for result in CustomEngine(config).apply(frame):
+    for result in BusinessrulesEngine(config).apply(frame):
         column = result["details"]["instance"].rsplit(" for ", 1)[-1]
         if column in decisions:
             decisions[column] = decisions[column] and result["success"]

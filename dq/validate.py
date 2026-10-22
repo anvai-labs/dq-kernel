@@ -14,7 +14,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _BUILT_IN_PAYLOAD_KEYS = {
-    "custom": "checks",
+    "businessrules": "checks",
     "deequ": "checks",
     "dqdl": "ruleset",
     "greatexpectations": "expectations",

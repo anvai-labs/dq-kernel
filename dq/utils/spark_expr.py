@@ -3,7 +3,7 @@
 
 """Shared Spark aggregation builders for grouped distinct-bounds pipelines.
 
-Both the portable adapter (``dq.spark_adapter``) and the custom engine's
+Both the portable adapter (``dq.spark_adapter``) and the businessrules engine's
 grouped strategy build the same ``dq_distinct_{i}`` / ``dq_group_count``
 / ``dq_min_{i}`` / ``dq_max_{i}`` pipeline; this module is its single
 definition. Consumers that lazy-import pyspark (the adapter) must also

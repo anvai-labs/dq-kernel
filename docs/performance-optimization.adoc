@@ -19,7 +19,7 @@ This document provides comprehensive performance optimization strategies for the
 
 === 🚨 **Critical Bottleneck: DataFrame.collect() Operations**
 
-**Location**: `build/lib/dq/engine/custom/custom_engine.py:164`
+**Location**: `build/lib/dq/engine/businessrules/businessrules_engine.py:164`
 
 [source,python]
 ----

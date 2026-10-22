@@ -194,14 +194,14 @@ the evidence store refused an unsafe write.
 * Fix: supply bounded alphanumeric parts starting with a letter or
   underscore; see the identifier shapes in the operator reference.
 
-== dq/engine/custom/custom_engine.py
+== dq/engine/businessrules/businessrules_engine.py
 
 *Content:* 1 `ValueError` site.
 
 * Cause: `constraint` named a custom constraint outside the frozen surface.
 * Fix: use one of the four canonical constraints (or their legacy aliases).
 
-== dq/engine/custom/strategies.py
+== dq/engine/businessrules/strategies.py
 
 *Content:* 1 `ConfigurationError` site (re-raised from identifier
 validation) and 4 `ValueError` sites guarding the grouped constraints'

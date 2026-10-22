@@ -1,7 +1,7 @@
 # Copyright 2024 Data Quality Framework Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Bounded-summary contracts for the custom engine (TD-ARCH-4 / U5).
+"""Bounded-summary contracts for the businessrules engine (TD-ARCH-4 / U5).
 
 Every constraint must decide its outcome with distributed aggregations and
 return at most one metric summary per (constraint, column), never per group
@@ -20,8 +20,8 @@ from pyspark.sql.types import (
     StructType,
 )
 
-from dq.engine.custom.custom_engine import CustomEngine
-from dq.engine.custom.strategies import (
+from dq.engine.businessrules.businessrules_engine import BusinessrulesEngine
+from dq.engine.businessrules.strategies import (
     ConsecutivePercentChangeStrategy,
     GroupedDistinctBoundsStrategy,
 )
@@ -69,7 +69,7 @@ def bounded_check_config(
     max_value=None,
     sort_by=None,
 ):
-    """Build a one-check ``sync`` config for a bounded custom constraint."""
+    """Build a one-check ``sync`` config for a bounded businessrules constraint."""
     settings = f"columns = {dumps(columns)}\n        group_by = {dumps(group_by)}"
     if sort_by is not None:
         settings += f'\n        sort_by = "{sort_by}"'
@@ -133,9 +133,9 @@ def lookup_config(ref_table, ref_columns="item_id", ignore_columns=None):
 
 def test_distinctness_emits_one_bounded_summary_per_column(spark):
     frame = spark.createDataFrame(_GROUPS_DATA, _GROUPS_SCHEMA)
-    results = CustomEngine(distinctness_config(["id", "val"], ["region"], 2, 3)).apply(
-        frame
-    )
+    results = BusinessrulesEngine(
+        distinctness_config(["id", "val"], ["region"], 2, 3)
+    ).apply(frame)
     assert len(results) == 2, "one summary per column, not one per group"
     by_instance = summaries_by_instance(results)
     id_summary = next(
@@ -165,7 +165,7 @@ def test_distinctness_threshold_decisions_match_per_group_evaluation(
     spark, min_value, max_value, expected
 ):
     frame = spark.createDataFrame(_GROUPS_DATA, _GROUPS_SCHEMA)
-    results = CustomEngine(
+    results = BusinessrulesEngine(
         distinctness_config(["id", "val"], ["region"], min_value, max_value)
     ).apply(frame)
     by_instance = summaries_by_instance(results)
@@ -178,7 +178,9 @@ def test_distinctness_threshold_decisions_match_per_group_evaluation(
 
 def test_distinctness_empty_input_keeps_single_success_summary(spark):
     empty = spark.createDataFrame([], _GROUPS_SCHEMA)
-    results = CustomEngine(distinctness_config(["id"], ["region"], 2)).apply(empty)
+    results = BusinessrulesEngine(distinctness_config(["id"], ["region"], 2)).apply(
+        empty
+    )
     assert len(results) == 1
     summary = results[0]
     assert summary["success"] is True, "current legacy behavior on empty input"
@@ -192,16 +194,16 @@ def test_distinctness_many_groups_stay_bounded(spark):
         rows.append((f"g{group}", "a", 1.0))
         rows.append((f"g{group}", "b", 2.0))
     frame = spark.createDataFrame(rows, _GROUPS_SCHEMA)
-    results = CustomEngine(distinctness_config(["id", "val"], ["region"], 1, 5)).apply(
-        frame
-    )
+    results = BusinessrulesEngine(
+        distinctness_config(["id", "val"], ["region"], 1, 5)
+    ).apply(frame)
     assert len(results) == 2, "200 groups must not produce 400 summaries"
     assert all(result["success"] for result in results)
 
 
 def test_rate_of_change_emits_one_bounded_summary_per_column(spark):
     frame = spark.createDataFrame(_RATE_DATA, _RATE_SCHEMA)
-    results = CustomEngine(
+    results = BusinessrulesEngine(
         rate_of_change_config(["v"], ["grp"], "day", None, 50)
     ).apply(frame)
     assert len(results) == 1
@@ -210,7 +212,7 @@ def test_rate_of_change_emits_one_bounded_summary_per_column(spark):
 
 def test_rate_of_change_passing_ranges_report_success(spark):
     frame = spark.createDataFrame(_RATE_DATA, _RATE_SCHEMA)
-    results = CustomEngine(
+    results = BusinessrulesEngine(
         rate_of_change_config(["v"], ["grp"], "day", None, 150)
     ).apply(frame)
     assert len(results) == 1
@@ -230,16 +232,16 @@ def test_rate_of_change_zero_denominator_does_not_crash(spark):
 
 def test_rate_of_change_null_values_do_not_crash(spark):
     frame = spark.createDataFrame(_RATE_DATA, _RATE_SCHEMA)
-    results = CustomEngine(rate_of_change_config(["v"], ["grp"], "day", None, 1)).apply(
-        frame
-    )
+    results = BusinessrulesEngine(
+        rate_of_change_config(["v"], ["grp"], "day", None, 1)
+    ).apply(frame)
     assert len(results) == 1
     assert isinstance(results[0]["success"], bool)
 
 
 def test_rate_of_change_empty_input_keeps_single_failed_summary(spark):
     empty = spark.createDataFrame([], _RATE_SCHEMA)
-    results = CustomEngine(
+    results = BusinessrulesEngine(
         rate_of_change_config(["v"], ["grp"], "day", None, 50)
     ).apply(empty)
     assert len(results) == 1
@@ -250,7 +252,7 @@ def test_rate_of_change_empty_input_keeps_single_failed_summary(spark):
 
 def test_rate_of_change_single_row_groups_produce_no_pairs(spark):
     single = spark.createDataFrame([("s", 1, 5.0)], _RATE_SCHEMA)
-    results = CustomEngine(
+    results = BusinessrulesEngine(
         rate_of_change_config(["v"], ["grp"], "day", None, 50)
     ).apply(single)
     assert len(results) == 1
@@ -265,7 +267,7 @@ def test_rate_of_change_many_rows_stay_bounded(spark):
         rows.append((f"g{group}", 0, base))
         rows.append((f"g{group}", 1, base * 1.1))
     frame = spark.createDataFrame(rows, _RATE_SCHEMA)
-    results = CustomEngine(
+    results = BusinessrulesEngine(
         rate_of_change_config(["v"], ["grp"], "day", None, 50)
     ).apply(frame)
     assert len(results) == 1, "2000 rows must not produce 2000 summaries"
@@ -278,7 +280,7 @@ def test_lookup_matches_column_names_against_reference_values(spark):
     frame = spark.createDataFrame(
         [("item_id", 3, "note_value")], ["item_id", "qty", "note"]
     )
-    results = CustomEngine(lookup_config("lookup_ref_filled")).apply(frame)
+    results = BusinessrulesEngine(lookup_config("lookup_ref_filled")).apply(frame)
     assert len(results) == 3
     by_instance = summaries_by_instance(results)
     assert by_instance["LookupBasedOnColumnNameList for item_id "]["success"] is True
@@ -293,7 +295,7 @@ def test_lookup_ignores_configured_columns(spark):
     frame = spark.createDataFrame(
         [("item_id", 3, "note_value")], ["item_id", "qty", "note"]
     )
-    results = CustomEngine(
+    results = BusinessrulesEngine(
         lookup_config("lookup_ref_small", ignore_columns=["note"])
     ).apply(frame)
     assert len(results) == 2
@@ -305,14 +307,16 @@ def test_lookup_empty_reference_fails_every_column(spark):
         "lookup_ref_empty"
     )
     frame = spark.createDataFrame([("a", 1)], ["item_id", "qty"])
-    results = CustomEngine(lookup_config("lookup_ref_empty")).apply(frame)
+    results = BusinessrulesEngine(lookup_config("lookup_ref_empty")).apply(frame)
     assert len(results) == 2
     assert all(not result["success"] for result in results)
 
 
 def test_apply_summaries_keep_the_legacy_shape(spark):
     frame = spark.createDataFrame(_GROUPS_DATA, _GROUPS_SCHEMA)
-    results = CustomEngine(distinctness_config(["id"], ["region"], 2, 3)).apply(frame)
+    results = BusinessrulesEngine(distinctness_config(["id"], ["region"], 2, 3)).apply(
+        frame
+    )
     assert results
     for result in results:
         assert set(result) == {"check", "success", "details"}
@@ -327,7 +331,7 @@ def test_apply_fails_closed_on_unsupported_constraints(spark):
     config = distinctness_config(["id"], ["region"])
     config["checks"][0]["constraint"] = "MadeUpConstraint"
     with pytest.raises(ValueError, match="MadeUpConstraint"):
-        CustomEngine(config).apply(frame)
+        BusinessrulesEngine(config).apply(frame)
 
 
 def test_distinctness_reports_groups_above_the_maximum(spark):
@@ -345,7 +349,7 @@ def test_canonical_names_run_with_canonical_instance_strings(spark):
     frame = spark.createDataFrame(_GROUPS_DATA, _GROUPS_SCHEMA)
     config = distinctness_config(["id"], ["region"], 2, 3)
     config["checks"][0]["constraint"] = "GroupedDistinctBounds"
-    results = CustomEngine(config).apply(frame)
+    results = BusinessrulesEngine(config).apply(frame)
     assert len(results) == 1
     assert results[0]["details"]["instance"].startswith("GroupedDistinctBounds ")
     assert results[0]["success"] is False
@@ -363,7 +367,7 @@ def test_canonical_negative_values_and_reference_table_names_run(spark):
             level = "Warning"
         } ] }
         """).get("sync", {})
-    by_instance = summaries_by_instance(CustomEngine(config).apply(frame))
+    by_instance = summaries_by_instance(BusinessrulesEngine(config).apply(frame))
     assert by_instance["NoNegativeValues for negative "]["success"] is False
     assert by_instance["NoNegativeValues for positive "]["success"] is True
 
@@ -373,7 +377,7 @@ def test_canonical_negative_values_and_reference_table_names_run(spark):
     lookup_frame = spark.createDataFrame([("a", 1)], ["item_id", "qty"])
     lookup = lookup_config("ref_tbl_canonical")
     lookup["checks"][0]["constraint"] = "ColumnNamesInReferenceTable"
-    results = CustomEngine(lookup).apply(lookup_frame)
+    results = BusinessrulesEngine(lookup).apply(lookup_frame)
     assert results[0]["details"]["instance"].startswith("ColumnNamesInReferenceTable ")
 
 
@@ -383,8 +387,8 @@ def test_legacy_aliases_keep_their_historical_output(spark, caplog):
     canonical_config = distinctness_config(["id"], ["region"], 2, 3)
     canonical_config["checks"][0]["constraint"] = "GroupedDistinctBounds"
     with caplog.at_level("WARNING"):
-        legacy_results = CustomEngine(legacy_config).apply(frame)
-    canonical_results = CustomEngine(canonical_config).apply(frame)
+        legacy_results = BusinessrulesEngine(legacy_config).apply(frame)
+    canonical_results = BusinessrulesEngine(canonical_config).apply(frame)
     assert any("renamed to" in record.message for record in caplog.records)
     assert [
         (result["success"], result["details"]["value"]) for result in legacy_results
@@ -405,14 +409,14 @@ def test_lookup_rejects_unsafe_reference_table_identifiers(spark):
     frame = spark.createDataFrame([("a", 1)], ["item_id", "qty"])
     config = lookup_config("lookup_ref; drop table sensitive")
     with pytest.raises(ConfigurationError, match="ref_table"):
-        CustomEngine(config).apply(frame)
+        BusinessrulesEngine(config).apply(frame)
 
 
 def test_lookup_rejects_non_identifier_reference_columns(spark):
     frame = spark.createDataFrame([("a", 1)], ["item_id", "qty"])
     config = lookup_config("lookup_ref_filled", ref_columns="item_id; drop")
     with pytest.raises(ConfigurationError, match="ref_columns"):
-        CustomEngine(config).apply(frame)
+        BusinessrulesEngine(config).apply(frame)
 
 
 def test_lookup_rejects_missing_reference_identifiers(spark):
@@ -425,7 +429,7 @@ def test_lookup_rejects_missing_reference_identifiers(spark):
         } ] }
         """).get("sync", {})
     with pytest.raises(ConfigurationError, match="ref_table"):
-        CustomEngine(config).apply(frame)
+        BusinessrulesEngine(config).apply(frame)
 
 
 def test_negative_values_constraint_reports_failing_and_non_numeric_columns(spark):
@@ -440,7 +444,7 @@ def test_negative_values_constraint_reports_failing_and_non_numeric_columns(spar
     frame = spark.createDataFrame(
         [(1.0, -5.0, "text")], ["positive", "negative", "label"]
     )
-    results = CustomEngine(config).apply(frame)
+    results = BusinessrulesEngine(config).apply(frame)
     by_instance = summaries_by_instance(results)
     assert by_instance["WideTablesNegativeValuesCheck for positive "]["success"] is True
     assert (
