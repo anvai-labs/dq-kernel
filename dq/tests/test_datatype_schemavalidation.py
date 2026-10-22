@@ -60,9 +60,7 @@ def _name_age_df(spark):
 
 
 def _varchar10_df(spark):
-    return _name_age_df(spark).withColumn(
-        "name", expr("CAST( name as VARCHAR(10))")
-    )
+    return _name_age_df(spark).withColumn("name", expr("CAST( name as VARCHAR(10))"))
 
 
 def _short_df(spark):
