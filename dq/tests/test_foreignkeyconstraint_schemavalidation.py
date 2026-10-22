@@ -9,11 +9,11 @@ from dq.tests.schemavalidation_support import (
     schema_validation_config,
 )
 
-# LATENT DEFECT (flag-fix commit pending): the fixtures historically
-# named "single_check_mode" also ran with single_check_mode = False,
-# so both labels exercise the multi-check path today.
+# The single_check_mode label now actually runs single-check; before
+# the flag-fix commit both labels ran multi-check (latent defect from
+# the copy-pasted fixtures).
 CHECK_MODE_FLAGS = {
-    "single_check_mode": False,
+    "single_check_mode": True,
     "multiple_check_mode": False,
 }
 

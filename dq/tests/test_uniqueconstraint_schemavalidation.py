@@ -9,9 +9,12 @@ from dq.tests.schemavalidation_support import (
     schema_validation_config,
 )
 
-# LATENT DEFECT (flag-fix commit pending): the tests historically named
-# "multiple_check_mode" also ran with single_check_mode = True, so both
-# labels exercise the single-check path today.
+# LATENT DEFECT (kept, documented): flipping multiple_check_mode to
+# single_check_mode = False crashes inside pydeequ —
+# "'ScalaFunction1' object has no attribute 'hashCode'" — because the
+# uniqueness assertion lambdas collide as JVM proxy objects when split
+# across multiple Checks. Multi-check + lambda-asserted uniqueness is
+# broken engine-stack-wide; until fixed, both labels run single-check.
 CHECK_MODE_FLAGS = {
     "single_check_mode": True,
     "multiple_check_mode": True,
