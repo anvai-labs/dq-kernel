@@ -91,7 +91,10 @@ class BusinessrulesEngine(DQEngine):
             params = {"name": constraint}
             params.update(
                 dq_dimension=check_config.get("dq_dimension", "Compliance"),
-                level=check_config.get("level", None),
+                # "Error" keeps check_level a StringType column; a None
+                # default would infer NullType and break sink persistence
+                # for rule packs that omit level.
+                level=check_config.get("level", "Error"),
             )
             if canonical == "GroupedDistinctBounds":
                 params.update(

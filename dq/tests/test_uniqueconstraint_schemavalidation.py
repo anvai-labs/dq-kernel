@@ -10,17 +10,22 @@ from dq.tests.schemavalidation_support import (
     schema_validation_config,
 )
 
-# pydeequ crashes when uniqueness assertion lambdas are split across
-# multiple Checks: "'ScalaFunction1' object has no attribute
-# 'hashCode'". The multi-check axis runs the real multi-check config
-# and is marked xfail(strict) so the day pydeequ fixes the collision
-# the suite flags the stale expectation instead of silently passing.
+# pydeequ crashes in multi-check mode once the check set is large
+# enough for a Scala Map hash collision: the comparison reaches the
+# JVM-side ScalaFunction1 assertion wrapper, which has no hashCode
+# ("'ScalaFunction1' object has no attribute 'hashCode'"). Verified
+# unfixable from Python (shared function objects and callable classes
+# implementing hashCode/equals both still crash); every check alone
+# and every one-dropped subset passes, only the full set fails. The
+# multi-check axis runs the real multi-check config and is marked
+# xfail(strict) so the day pydeequ fixes the hashing the suite flags
+# the stale expectation instead of silently passing.
 PYDEEQU_MULTI_CHECK_CRASH = pytest.mark.xfail(
     strict=True,
     raises=Py4JJavaError,
-    reason="pydeequ: uniqueness assertion lambdas collide as JVM proxies "
-    "across multiple Checks ('ScalaFunction1' object has no attribute "
-    "'hashCode')",
+    reason="pydeequ: Scala Map hash collision over Checks reaches the "
+    "unhashable ScalaFunction1 assertion wrapper ('ScalaFunction1' "
+    "object has no attribute 'hashCode')",
 )
 
 CHECK_MODES = [
