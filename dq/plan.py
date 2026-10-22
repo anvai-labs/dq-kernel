@@ -359,6 +359,49 @@ class CapabilitySet:
             raise ConfigurationError("capabilities require immutable MetricKind tags")
 
 
+def _counts_decision(rule: "RuleSpec", values: dict):
+    """Decide a counts/v1 rule: completeness ratio or raw size."""
+    rows = values[rule.required_metrics[0]]
+    numerator = rows if rule.kind is RuleKind.SIZE else values[rule.required_metrics[1]]
+    denominator = 1 if rule.kind is RuleKind.SIZE else rows
+    success = bool(denominator) and rule.predicate.matches(
+        Fraction(numerator, denominator)
+    )
+    return (
+        success,
+        {"numerator": numerator, "denominator": denominator},
+        "evaluated" if denominator else "empty_dataset",
+    )
+
+
+def _grouped_decision(rule: "RuleSpec", values: dict):
+    """Decide a groups/v1 rule against the smallest per-group bound."""
+    count_key, target_key = rule.required_metrics
+    if values[count_key] == 0:
+        return True, {"numerator": 0, "denominator": 1}, "no_groups"
+    numerator = values[target_key]
+    success = rule.predicate.matches(Fraction(numerator))
+    return success, {"numerator": numerator, "denominator": 1}, "evaluated"
+
+
+def _ranges_decision(rule: "RuleSpec", values: dict):
+    """Decide a ranges/v1 rule against an exact-Fraction bound."""
+    count_key, target_key = rule.required_metrics
+    if values[count_key] == 0:
+        return (
+            True,
+            {"numerator": 0, "denominator": 1},
+            "no_values",
+        )
+    bound = values[target_key]
+    success = rule.predicate.matches(bound)
+    return (
+        success,
+        {"numerator": bound.numerator, "denominator": bound.denominator},
+        "evaluated",
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ExecutionPlan:
     """Canonical logical plan; deduplication does not assert a physical scan count."""
@@ -463,18 +506,55 @@ class ExecutionPlan:
                 and value > values[MetricKey(metric.dataset, MetricKind.ROW_COUNT)]
             ):
                 raise ValidationError("present count cannot exceed row count")
+        return self._bounded_outcomes(
+            values,
+            capabilities,
+            SEMANTICS_VERSION,
+            _counts_decision,
+        )
+
+    def _evaluate_grouped(
+        self, values: dict, capabilities: CapabilitySet
+    ) -> tuple[CheckOutcome, ...]:
+        return self._bounded_outcomes(
+            values,
+            capabilities,
+            SEMANTIC_GROUPS_VERSION,
+            _grouped_decision,
+        )
+
+    def _evaluate_ranges(
+        self, values: dict, capabilities: CapabilitySet
+    ) -> tuple[CheckOutcome, ...]:
+        return self._bounded_outcomes(
+            values,
+            capabilities,
+            SEMANTIC_RANGES_VERSION,
+            _ranges_decision,
+        )
+
+    def _bounded_outcomes(
+        self,
+        values: dict,
+        capabilities: CapabilitySet,
+        semantic_version: str,
+        decide,
+    ) -> tuple[CheckOutcome, ...]:
+        """Evaluate every rule through a per-semantics decision function.
+
+        Args:
+            values: Validated metric values keyed by MetricKey.
+            capabilities: Capabilities the plan was validated against.
+            semantic_version: Semantics constant stamped into every outcome.
+            decide: Callable ``(rule, values) -> (success, observed, reason)``.
+
+        Returns:
+            Normalized CheckOutcome tuple.
+        """
         fingerprint = self.fingerprint
         outcomes = []
         for rule in self.rules:
-            rows = values[rule.required_metrics[0]]
-            numerator = (
-                rows if rule.kind is RuleKind.SIZE else values[rule.required_metrics[1]]
-            )
-            denominator = 1 if rule.kind is RuleKind.SIZE else rows
-            observed = {"numerator": numerator, "denominator": denominator}
-            success = bool(denominator) and rule.predicate.matches(
-                Fraction(numerator, denominator)
-            )
+            success, observed, reason = decide(rule, values)
             outcomes.append(
                 CheckOutcome(
                     {
@@ -484,87 +564,8 @@ class ExecutionPlan:
                         "details": {
                             **rule.to_dict(),
                             "observed": observed,
-                            "reason": "evaluated" if denominator else "empty_dataset",
-                            "semantic_version": SEMANTICS_VERSION,
-                            "plan_sha256": fingerprint,
-                            "adapter": {
-                                "name": capabilities.adapter,
-                                "version": capabilities.version,
-                            },
-                        },
-                    }
-                )
-            )
-        return normalize_outcomes(outcomes)
-
-    def _evaluate_grouped(
-        self, values: dict, capabilities: CapabilitySet
-    ) -> tuple[CheckOutcome, ...]:
-        fingerprint = self.fingerprint
-        outcomes = []
-        for rule in self.rules:
-            count_key, target_key = rule.required_metrics
-            group_count = values[count_key]
-            if group_count == 0:
-                success = True
-                reason = "no_groups"
-                numerator = 0
-            else:
-                numerator = values[target_key]
-                success = rule.predicate.matches(Fraction(numerator))
-                reason = "evaluated"
-            outcomes.append(
-                CheckOutcome(
-                    {
-                        "check": rule.rule_id,
-                        "rule_id": rule.rule_id,
-                        "success": success,
-                        "details": {
-                            **rule.to_dict(),
-                            "observed": {"numerator": numerator, "denominator": 1},
                             "reason": reason,
-                            "semantic_version": SEMANTIC_GROUPS_VERSION,
-                            "plan_sha256": fingerprint,
-                            "adapter": {
-                                "name": capabilities.adapter,
-                                "version": capabilities.version,
-                            },
-                        },
-                    }
-                )
-            )
-        return normalize_outcomes(outcomes)
-
-    def _evaluate_ranges(
-        self, values: dict, capabilities: CapabilitySet
-    ) -> tuple[CheckOutcome, ...]:
-        fingerprint = self.fingerprint
-        outcomes = []
-        for rule in self.rules:
-            count_key, target_key = rule.required_metrics
-            value_count = values[count_key]
-            if value_count == 0:
-                success = True
-                reason = "no_values"
-                bound = Fraction(0)
-            else:
-                bound = values[target_key]
-                success = rule.predicate.matches(bound)
-                reason = "evaluated"
-            outcomes.append(
-                CheckOutcome(
-                    {
-                        "check": rule.rule_id,
-                        "rule_id": rule.rule_id,
-                        "success": success,
-                        "details": {
-                            **rule.to_dict(),
-                            "observed": {
-                                "numerator": bound.numerator,
-                                "denominator": bound.denominator,
-                            },
-                            "reason": reason,
-                            "semantic_version": SEMANTIC_RANGES_VERSION,
+                            "semantic_version": semantic_version,
                             "plan_sha256": fingerprint,
                             "adapter": {
                                 "name": capabilities.adapter,

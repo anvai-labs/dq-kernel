@@ -15,6 +15,7 @@ import pytest
 
 from dq.exceptions import ConfigurationError, RepositoryError
 from dq.postgres_sink import DEFAULT_DSN_VARIABLE, PostgresOutcomeSink
+from dq.tests.helpers import FakeDataFrame, FakeRow
 
 
 class FakeCursor:
@@ -47,22 +48,6 @@ class FakeConnection:
 
     def close(self):
         self.closed = True
-
-
-class FakeRow:
-    def __init__(self, values):
-        self._values = values
-
-    def asDict(self, recursive=True):
-        return dict(self._values)
-
-
-class FakeDataFrame:
-    def __init__(self, rows):
-        self._rows = rows
-
-    def collect(self):
-        return [FakeRow(row) for row in self._rows]
 
 
 class ConnectionFactory:

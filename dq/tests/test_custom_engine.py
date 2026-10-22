@@ -8,6 +8,7 @@ import pytest
 from pyhocon import ConfigFactory
 
 from dq.engine.custom.custom_engine import CustomEngine
+from dq.engine.custom.strategies import NoNegativeValuesStrategy
 from dq.tests.helpers import assert_overall_success
 import pydeequ
 
@@ -48,6 +49,22 @@ def test_wide_col_negative_values(
     custom_engine = CustomEngine(custom_config_wide_col_negative_values)
     results = custom_engine.apply(numeric_dataframe, None)
     assert_overall_success(results, "wide-table negative values")
+
+
+def test_no_negative_values_messages_blank_the_default_source(
+    spark, numeric_dataframe_with_negatives
+):
+    # Legacy output contract: the default timeSeries source renders as
+    # an empty suffix in verification messages, never the literal word.
+    _, verifications = NoNegativeValuesStrategy().apply(
+        numeric_dataframe_with_negatives,
+        "WideTablesNegativeValuesCheck",
+        "Validity",
+        "Warning",
+    )
+    assert verifications
+    for row in verifications:
+        assert "timeSeries" not in row[5], row
 
 
 pytestmark = pytest.mark.spark

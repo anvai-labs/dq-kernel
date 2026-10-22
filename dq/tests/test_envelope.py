@@ -21,6 +21,7 @@ from dq.plan import (
     RuleKind,
     RuleSpec,
 )
+from dq.tests import plan_support
 
 DATASET = DatasetRef("bars", "b" * 64)
 
@@ -40,34 +41,11 @@ def counts_plan():
 
 
 def groups_plan():
-    return ExecutionPlan(
-        (
-            RuleSpec(
-                "grp_min",
-                DATASET,
-                RuleKind.GROUPED_DISTINCT,
-                Predicate(Comparison.GE, Decimal(1)),
-                ColumnRef("id"),
-                group_by=(ColumnRef("region"),),
-                target=MetricKind.GROUP_MIN_DISTINCT,
-            ),
-        )
-    )
+    return plan_support.groups_plan("grp_min", DATASET)
 
 
 def ranges_plan():
-    return ExecutionPlan(
-        (
-            RuleSpec(
-                "rng_min",
-                DATASET,
-                RuleKind.VALUE_RANGE,
-                Predicate(Comparison.GE, Decimal(0)),
-                ColumnRef("amount"),
-                target=MetricKind.COLUMN_MIN,
-            ),
-        )
-    )
+    return plan_support.ranges_plan("rng_min", DATASET)
 
 
 def test_envelope_composes_mixed_semantics():

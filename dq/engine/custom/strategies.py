@@ -20,6 +20,7 @@ from pyspark.sql.window import Window
 
 from dq.exceptions import ConfigurationError
 from dq.identifiers import ColumnName, IdentifierError, TableName
+from dq.utils.spark_expr import grouped_bounds_summary
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,74 @@ def column_list(value, constraint, param):
     )
 
 
+def validated_grouped_params(columns, group_by, name):
+    """Normalize ``columns``/``group_by`` and require a grouping column."""
+    columns = column_list(columns, name, "columns")
+    group_by = column_list(group_by, name, "group_by")
+    if not group_by:
+        raise ValueError(f"{name}: 'group_by' must name at least one grouping column")
+    return columns, group_by
+
+
+def group_result_emitter(name, level, dq_dimension):
+    """Build the bounded append pair for a per-column grouped summary.
+
+    Returns:
+        Tuple of (emit callable, metric rows, verification rows); the
+        lists are the emitter's own accumulators.
+    """
+    metric_results = []
+    check_verifications = []
+
+    def emit(instance, value, check_status, constraint_status, constraint_message):
+        metric_results.append(metric_row(instance, dq_dimension, value))
+        check_verifications.append(
+            verification_row(
+                name,
+                level,
+                check_status,
+                instance,
+                constraint_status,
+                constraint_message,
+            )
+        )
+
+    return emit, metric_results, check_verifications
+
+
+def column_result_emitter(name, level, dq_dimension, source):
+    """Build the append pair for a per-column reference/negativity summary.
+
+    The verification instance keeps its historical double space after the
+    constraint name; legacy outputs are pinned to that exact string.
+    ``source`` must already be normalized (``timeSeries`` -> ``""``) by
+    the caller so messages and instances agree.
+
+    Returns:
+        Tuple of (emit callable, metric rows, verification rows); the
+        lists are the emitter's own accumulators.
+    """
+    metric_results = []
+    check_verifications = []
+
+    def emit(column, value, check_status, constraint_status, message):
+        metric_results.append(
+            metric_row(f"{name} for {column} {source}", dq_dimension, value)
+        )
+        check_verifications.append(
+            verification_row(
+                name,
+                level,
+                check_status,
+                f"{name}  for {column} {source}",
+                constraint_status,
+                message,
+            )
+        )
+
+    return emit, metric_results, check_verifications
+
+
 class GroupedDistinctBoundsStrategy:
     """Validate distinct counts of columns within groups meet thresholds.
 
@@ -116,40 +185,25 @@ class GroupedDistinctBoundsStrategy:
         threshold_min,
         threshold_max,
     ) -> Tuple[List[list], List[list]]:
-        columns = column_list(columns, name, "columns")
-        group_by = column_list(group_by, name, "group_by")
-        if not group_by:
-            raise ValueError(
-                f"{name}: 'group_by' must name at least one grouping column"
-            )
+        columns, group_by = validated_grouped_params(columns, group_by, name)
         logger.info(
             "Checking distinctness of columns '%s' by group '%s'", columns, group_by
         )
-        grouped_counts = dataframe.groupBy(*group_by).agg(
-            *[
-                F.countDistinct(F.col(column)).alias(f"dq_distinct_{index}")
-                for index, column in enumerate(columns)
-            ]
+        summary = grouped_bounds_summary(
+            dataframe,
+            group_by,
+            columns,
+            per_column_extra=lambda distinct, index: F.sum(
+                violation_expression(distinct, threshold_min, threshold_max).cast(
+                    "long"
+                )
+            ).alias(f"dq_violations_{index}"),
         )
-        aggregate_exprs = [F.count(F.lit(1)).alias("dq_group_count")]
-        for index in range(len(columns)):
-            distinct = F.col(f"dq_distinct_{index}")
-            aggregate_exprs.extend(
-                [
-                    F.min(distinct).alias(f"dq_min_{index}"),
-                    F.max(distinct).alias(f"dq_max_{index}"),
-                    F.sum(
-                        violation_expression(
-                            distinct, threshold_min, threshold_max
-                        ).cast("long")
-                    ).alias(f"dq_violations_{index}"),
-                ]
-            )
-        summary = grouped_counts.agg(*aggregate_exprs).head()
         group_count = int(summary["dq_group_count"] or 0)
 
-        metric_results = []
-        check_verifications = []
+        emit, metric_results, check_verifications = group_result_emitter(
+            name, level, dq_dimension
+        )
         for index, column in enumerate(columns):
             if group_count == 0:
                 break
@@ -179,17 +233,7 @@ class GroupedDistinctBoundsStrategy:
                     f"distinct counts of {group_count} groups in "
                     f"[{minimum}, {maximum}] meet the thresholds"
                 )
-            metric_results.append(metric_row(instance, dq_dimension, value))
-            check_verifications.append(
-                verification_row(
-                    name,
-                    level,
-                    check_status,
-                    instance,
-                    constraint_status,
-                    constraint_message,
-                )
-            )
+            emit(instance, value, check_status, constraint_status, constraint_message)
 
         if len(metric_results) == 0:
             instance = f"{name} {group_by} for {','.join(columns)}"
@@ -218,12 +262,7 @@ class ConsecutivePercentChangeStrategy:
         threshold_min,
         threshold_max,
     ) -> Tuple[List[list], List[list]]:
-        columns = column_list(columns, name, "columns")
-        group_by = column_list(group_by, name, "group_by")
-        if not group_by:
-            raise ValueError(
-                f"{name}: 'group_by' must name at least one grouping column"
-            )
+        columns, group_by = validated_grouped_params(columns, group_by, name)
         sort_columns = column_list(sort_by, name, "sort_by")
         if len(sort_columns) != 1:
             raise ValueError(
@@ -273,8 +312,9 @@ class ConsecutivePercentChangeStrategy:
             )
         summary = projected.agg(*aggregate_exprs).head()
 
-        metric_results = []
-        check_verifications = []
+        emit, metric_results, check_verifications = group_result_emitter(
+            name, level, dq_dimension
+        )
         for index, column in enumerate(columns):
             evaluated = int(summary[f"dq_roc_evaluated_{index}"] or 0)
             pairs_total = int(summary[f"dq_roc_pairs_{index}"] or 0)
@@ -303,17 +343,7 @@ class ConsecutivePercentChangeStrategy:
                     f"({minimum_change} to {maximum_change}%); "
                     f"{skipped} pairs skipped"
                 )
-            metric_results.append(metric_row(instance, dq_dimension, value))
-            check_verifications.append(
-                verification_row(
-                    name,
-                    level,
-                    check_status,
-                    instance,
-                    constraint_status,
-                    constraint_message,
-                )
-            )
+            emit(instance, value, check_status, constraint_status, constraint_message)
 
         if len(metric_results) == 0:
             instance = f"{name} {group_by} for {columns}"
@@ -371,9 +401,9 @@ class ColumnNamesInReferenceTableStrategy:
         }
         if source == "timeSeries":
             source = ""
-
-        metric_results = []
-        check_verifications = []
+        emit, metric_results, check_verifications = column_result_emitter(
+            name, level, dq_dimension, source
+        )
         for column in dataframe.columns:
             if column in matched_names:
                 value = 1
@@ -385,18 +415,7 @@ class ColumnNamesInReferenceTableStrategy:
                 check_status = "Failure"
                 constraint_status = "Failure"
                 message = "Column not found in the ref table"
-            instance = f"{name} for {column} {source}"
-            metric_results.append(metric_row(instance, dq_dimension, value))
-            check_verifications.append(
-                verification_row(
-                    name,
-                    level,
-                    check_status,
-                    f"{name}  for {column} {source}",
-                    constraint_status,
-                    message,
-                )
-            )
+            emit(column, value, check_status, constraint_status, message)
 
         return metric_results, check_verifications
 
@@ -431,9 +450,9 @@ class NoNegativeValuesStrategy:
         )
         if source == "timeSeries":
             source = ""
-
-        metric_results = []
-        check_verifications = []
+        emit, metric_results, check_verifications = column_result_emitter(
+            name, level, dq_dimension, source
+        )
         for column in dataframe.columns:
             count = negative_counts[column]
             if count is not None and isinstance(count, int) and count > 0:
@@ -446,17 +465,6 @@ class NoNegativeValuesStrategy:
                 check_status = "Success"
                 constraint_status = "Success"
                 message = f"Rule NoNegative values passed for {column} {source}"
-            instance = f"{name} for {column} {source}"
-            metric_results.append(metric_row(instance, dq_dimension, value))
-            check_verifications.append(
-                verification_row(
-                    name,
-                    level,
-                    check_status,
-                    f"{name}  for {column} {source}",
-                    constraint_status,
-                    message,
-                )
-            )
+            emit(column, value, check_status, constraint_status, message)
 
         return metric_results, check_verifications

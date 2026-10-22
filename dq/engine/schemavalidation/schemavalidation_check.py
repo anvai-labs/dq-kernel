@@ -87,6 +87,24 @@ class SchemavalidationCheck:
 
         return self._ref_cache[cache_key]
 
+    def _fk_binding(self, fk):
+        """Resolve one foreign-key config to its cached reference binding.
+
+        Args:
+            fk: FK config dict with src_column / ref_db / ref_table /
+                ref_column keys.
+
+        Returns:
+            Tuple of (src_column, full_tablename, ref_column, cached_data).
+        """
+        src_column = fk.get(constants.SCHEMA_VALIDATION_SRC_COLUMN)
+        ref_db = fk.get(constants.SCHEMA_VALIDATION_REF_DB, None)
+        ref_table = fk.get(constants.SCHEMA_VALIDATION_REF_TABLE)
+        ref_column = fk.get(constants.SCHEMA_VALIDATION_REF_COLUMN)
+        full_tablename = self._get_fulltable(db=ref_db, tbl=ref_table)
+        cached_data = self.get_ref_cached_data(full_tablename, ref_column)
+        return src_column, full_tablename, ref_column, cached_data
+
     def get_joined_dataframe_from_foreign_key_constraints(self, df: DataFrame):
         """
         Sequentially apply foregin key constraints to the given Dataframe using left outer join
@@ -100,12 +118,7 @@ class SchemavalidationCheck:
         for fk in self._schema_config.get(
             constants.SCHEMA_VALIDATION_FK_CONSTRAINTS, []
         ):
-            src_column = fk.get(constants.SCHEMA_VALIDATION_SRC_COLUMN)
-            ref_db = fk.get(constants.SCHEMA_VALIDATION_REF_DB, None)
-            ref_table = fk.get(constants.SCHEMA_VALIDATION_REF_TABLE)
-            ref_column = fk.get(constants.SCHEMA_VALIDATION_REF_COLUMN)
-            full_tablename = self._get_fulltable(db=ref_db, tbl=ref_table)
-            cached_data = self.get_ref_cached_data(full_tablename, ref_column)
+            src_column, full_tablename, ref_column, cached_data = self._fk_binding(fk)
 
             if not (cached_data[constants.SCHEMA_VALIDATION_CHECK_FK_USE_LIST_KEY]):
                 ref_df = cached_data["ref_df"]
@@ -131,12 +144,7 @@ class SchemavalidationCheck:
         for fk in self._schema_config.get(
             constants.SCHEMA_VALIDATION_FK_CONSTRAINTS, []
         ):
-            src_column = fk.get(constants.SCHEMA_VALIDATION_SRC_COLUMN)
-            ref_db = fk.get(constants.SCHEMA_VALIDATION_REF_DB, None)
-            ref_table = fk.get(constants.SCHEMA_VALIDATION_REF_TABLE)
-            ref_column = fk.get(constants.SCHEMA_VALIDATION_REF_COLUMN)
-            full_tablename = self._get_fulltable(db=ref_db, tbl=ref_table)
-            cached_data = self.get_ref_cached_data(full_tablename, ref_column)
+            src_column, full_tablename, ref_column, cached_data = self._fk_binding(fk)
 
             if cached_data[constants.SCHEMA_VALIDATION_CHECK_FK_USE_LIST_KEY]:
                 ref_df = cached_data["ref_df"]
@@ -176,24 +184,6 @@ class SchemavalidationCheck:
                 )
 
         return check
-
-    def _apply_catalog_datatype_checks(self, checks, tableSchema):
-        """Apply datatype checks for catalog-fetched schemas (Unity, Glue, Hive).
-
-        For non-Spark catalog types, the schema is fetched from the external
-        catalog API and may contain types like VarcharType or CharType that
-        appear in DDL metadata but not in Spark query plans. This method
-        delegates to the Spark datatype check logic since the schema has
-        already been converted to a Spark StructType.
-
-        Args:
-            checks: Check object (single_check_mode=True) or list of checks.
-            tableSchema: pyspark.sql.types.StructType from the catalog.
-
-        Returns:
-            Modified checks with all datatype constraints applied.
-        """
-        return self._apply_spark_datatype_checks(checks, tableSchema)
 
     def _get_typeofcheck_data_type(self, data_type, parameters):
         lookupvalue = constants.SCHEMA_VALIDATION_TYPEOF_DATATYPE_MAP.get(
@@ -248,107 +238,16 @@ class SchemavalidationCheck:
             )
 
             if self._single_check_mode:
-                if data_type in constants.SCHEVA_VALIDATION_PYDEEQU_DATATYPE_MAP:
-                    # Apply standard datatype checks directly supported within PyDeequ hasDataType constraint using  ConstrainableDataTypes
-                    if override:
-                        if (
-                            constants.SCHEMA_VALIDATION_OVERRIDE_CONFIG_PATTERN_KEY
-                            in override
-                        ):
-                            pattern_regex = override.get(
-                                constants.SCHEMA_VALIDATION_OVERRIDE_CONFIG_PATTERN_KEY
-                            )
-                            checks = checks.hasPattern(
-                                column=column_name,
-                                pattern=pattern_regex,
-                                assertion=assertion_lambda,
-                                name=f"override check for column {column_name}",
-                                hint=f"{hint_expr}. Pattern={pattern_regex}",
-                            )
-                            if not (
-                                override.get(
-                                    constants.SCHEMA_VALIDATION_OVERRIDE_CONFIG_REPLACE_KEY,
-                                    True,
-                                )
-                            ):
-                                # This means that pattern check is applied on top of data type.
-                                mapped_constrainable_datatype = constants.SCHEVA_VALIDATION_PYDEEQU_DATATYPE_MAP.get(
-                                    data_type
-                                )
-                                if not nullable:
-                                    checks = checks.hasDataType(
-                                        column=column_name,
-                                        datatype=mapped_constrainable_datatype,
-                                        assertion=assertion_lambda,
-                                        hint=hint_expr,
-                                    )
-                                else:
-                                    typeofcheck_data_type = (
-                                        self._get_typeofcheck_data_type(
-                                            data_type, parameters
-                                        )
-                                    )
-                                    checks = checks.satisfies(
-                                        columnCondition=f"{column_name} is NULL OR typeof({column_name}) = '{typeofcheck_data_type}'",
-                                        constraintName=f"column[{column_name}] constraint for datatype[{data_type}] with nullable[{nullable}]",
-                                        assertion=assertion_lambda,
-                                        hint=hint_expr,
-                                    )
-                    else:
-                        if not nullable:
-                            mapped_constrainable_datatype = (
-                                constants.SCHEVA_VALIDATION_PYDEEQU_DATATYPE_MAP.get(
-                                    data_type
-                                )
-                            )
-                            checks = checks.hasDataType(
-                                column=column_name,
-                                datatype=mapped_constrainable_datatype,
-                                assertion=assertion_lambda,
-                                hint=hint_expr,
-                            )
-                        else:
-                            typeofcheck_data_type = self._get_typeofcheck_data_type(
-                                data_type, parameters
-                            )
-                            checks = checks.satisfies(
-                                columnCondition=f"{column_name} is NULL OR typeof({column_name}) = '{typeofcheck_data_type}'",
-                                constraintName=f"column[{column_name}] constraint for datatype[{data_type}] with nullable[{nullable}]",
-                                assertion=assertion_lambda,
-                                hint=hint_expr,
-                            )
-                elif data_type in constants.SCHEVA_VALIDATION_CASTSPARKSQL_DATATYPE_MAP:
-                    cast_sparksql_type = (
-                        constants.SCHEVA_VALIDATION_CASTSPARKSQL_DATATYPE_MAP.get(
-                            data_type
-                        )
-                    )
-                    cast_datatype_expr = f"{column_name} is NULL OR CAST({column_name} AS {cast_sparksql_type}) IS NOT NULL"
-                    if not nullable:
-                        cast_datatype_expr = (
-                            f"CAST({column_name} AS {cast_sparksql_type}) IS NOT NULL"
-                        )
-                    checks = checks.satisfies(
-                        columnCondition=cast_datatype_expr,
-                        constraintName=f"column[{column_name}] constaint for datatype[{cast_sparksql_type}] AND nullable[{nullable}]",
-                        assertion=assertion_lambda,
-                        hint=hint_expr,
-                    )
-                # if isinstance(data_type, StringType) or isinstance(data_type, CharType) or isinstance(data_type, VarcharType):
-                #    checks =  checks.hasDataType(column = column_name, datatype = ConstrainableDataTypes.String, assertion = assertion_lambda, hint = hint_expr )
-                # elif isinstance(data_type, IntegerType) or isinstance(data_type, LongType):
-                #    checks =  checks.hasDataType(column = column_name, datatype = ConstrainableDataTypes.Integral, assertion = assertion_lambda, hint = hint_expr)
-                # elif isinstance(data_type, FloatType) or isinstance(data_type, DoubleType) :
-                #    checks =  checks.hasDataType(column = column_name, datatype = ConstrainableDataTypes.Fractional, assertion = assertion_lambda, hint = hint_expr)
-                # elif isinstance(data_type, DecimalType):
-                #    checks =  checks.hasDataType(column = column_name, datatype = ConstrainableDataTypes.Numeric, assertion = assertion_lambda, hint = hint_expr)
-                # elif isinstance(data_type, BooleanType):
-                #    checks =  checks.hasDataType(column = column_name, datatype = ConstrainableDataTypes.Boolean, assertion = assertion_lambda, hint = hint_expr)
-                # elif isinstance(data_type, DateType):
-                #    checks = checks
-
-                else:
-                    raise ValueError(f"Error: Unknown {data_type}")
+                checks = self._apply_datatype_constraints(
+                    checks,
+                    column_name,
+                    data_type,
+                    parameters,
+                    nullable,
+                    hint_expr,
+                    override,
+                    assertion_lambda,
+                )
                 if parameters:
                     if data_type in ["CharType", "VarcharType"]:
                         checks = checks.hasMaxLength(
@@ -375,104 +274,16 @@ class SchemavalidationCheck:
                     level=CheckLevel.Error,
                     description="Schema Validation",
                 )
-                if data_type in constants.SCHEVA_VALIDATION_PYDEEQU_DATATYPE_MAP:
-                    if override:
-                        if (
-                            constants.SCHEMA_VALIDATION_OVERRIDE_CONFIG_PATTERN_KEY
-                            in override
-                        ):
-                            pattern_regex = override.get(
-                                constants.SCHEMA_VALIDATION_OVERRIDE_CONFIG_PATTERN_KEY
-                            )
-                            check = check.hasPattern(
-                                column=column_name,
-                                pattern=pattern_regex,
-                                assertion=assertion_lambda,
-                                name=f"override check for column {column_name}",
-                                hint=f"{hint_expr}. Pattern={pattern_regex}",
-                            )
-                            if not (
-                                override.get(
-                                    constants.SCHEMA_VALIDATION_OVERRIDE_CONFIG_REPLACE_KEY,
-                                    True,
-                                )
-                            ):
-                                if not nullable:
-                                    # This means that pattern check is applied on top of data type.
-                                    mapped_constrainable_datatype = constants.SCHEVA_VALIDATION_PYDEEQU_DATATYPE_MAP.get(
-                                        data_type
-                                    )
-                                    check = check.hasDataType(
-                                        column=column_name,
-                                        datatype=mapped_constrainable_datatype,
-                                        assertion=assertion_lambda,
-                                        hint=hint_expr,
-                                    )
-                                else:
-                                    typeofcheck_data_type = (
-                                        self._get_typeofcheck_data_type(
-                                            data_type, parameters
-                                        )
-                                    )
-                                    check = check.satisfies(
-                                        columnCondition=f"{column_name} is NULL OR typeof({column_name}) = '{typeofcheck_data_type}'",
-                                        constraintName=f"column[{column_name}] constraint for datatype[{data_type}] with nullable[{nullable}]",
-                                        assertion=assertion_lambda,
-                                        hint=hint_expr,
-                                    )
-                    else:
-                        if not nullable:
-                            # Apply standard datatype checks directly supported within PyDeequ hasDataType constraint using  ConstrainableDataTypes
-                            mapped_constrainable_datatype = (
-                                constants.SCHEVA_VALIDATION_PYDEEQU_DATATYPE_MAP.get(
-                                    data_type
-                                )
-                            )
-                            check = check.hasDataType(
-                                column=column_name,
-                                datatype=mapped_constrainable_datatype,
-                                assertion=assertion_lambda,
-                                hint=hint_expr,
-                            )
-                        else:
-                            typeofcheck_data_type = self._get_typeofcheck_data_type(
-                                data_type, parameters
-                            )
-                            check = check.satisfies(
-                                columnCondition=f"{column_name} is NULL OR typeof({column_name}) = '{typeofcheck_data_type}'",
-                                constraintName=f"column[{column_name}] constraint for datatype[{data_type}] with nullable[{nullable}]",
-                                assertion=assertion_lambda,
-                                hint=hint_expr,
-                            )
-                elif data_type in constants.SCHEVA_VALIDATION_CASTSPARKSQL_DATATYPE_MAP:
-                    cast_sparksql_type = (
-                        constants.SCHEVA_VALIDATION_CASTSPARKSQL_DATATYPE_MAP.get(
-                            data_type
-                        )
-                    )
-                    cast_datatype_expr = f"{column_name} is NULL OR CAST({column_name} AS {cast_sparksql_type}) IS NOT NULL"
-                    if not nullable:
-                        cast_datatype_expr = (
-                            f"CAST({column_name} AS {cast_sparksql_type}) IS NOT NULL"
-                        )
-                    check = check.satisfies(
-                        columnCondition=cast_datatype_expr,
-                        constraintName=f"column[{column_name}] constaint for datatype[{cast_sparksql_type}] AND nullable[{nullable}]",
-                        assertion=assertion_lambda,
-                        hint=hint_expr,
-                    )
-                # if isinstance(data_type, StringType) or isinstance(data_type, CharType) or isinstance(data_type, VarcharType):
-                #    check =  Check(spark_session = spark_session, level = CheckLevel.Error, description= "Schema Validation").hasDataType(column = column_name, datatype = ConstrainableDataTypes.String, assertion = assertion_lambda, hint = hint_expr)
-                # elif isinstance(data_type, IntegerType) or isinstance(data_type, LongType):
-                #    check =  Check(spark_session = spark_session, level = CheckLevel.Error, description= "Schema Validation").hasDataType(column = column_name, datatype = ConstrainableDataTypes.Integral, assertion = assertion_lambda, hint = hint_expr)
-                # elif isinstance(data_type, FloatType):
-                #    check =  Check(spark_session = spark_session, level = CheckLevel.Error, description= "Schema Validation").hasDataType(column = column_name, datatype = ConstrainableDataTypes.Fractional, assertion = assertion_lambda, hint = hint_expr)
-                # elif isinstance(data_type, DecimalType):
-                #    check =  Check(spark_session = spark_session, level = CheckLevel.Error, description= "Schema Validation").hasDataType(column = column_name, datatype = ConstrainableDataTypes.Numeric, assertion = assertion_lambda, hint = hint_expr)
-                # elif isinstance(data_type, BooleanType):
-                #    check =  Check(spark_session = spark_session, level = CheckLevel.Error, description= "Schema Validation").hasDataType(column = column_name, datatype = ConstrainableDataTypes.Boolean, assertion = assertion_lambda, hint = hint_expr)
-                else:
-                    raise ValueError(f"Error: Unknown {data_type}")
+                check = self._apply_datatype_constraints(
+                    check,
+                    column_name,
+                    data_type,
+                    parameters,
+                    nullable,
+                    hint_expr,
+                    override,
+                    assertion_lambda,
+                )
                 checks.append(check)
                 if parameters:
                     if data_type in ["CharType", "VarcharType"]:
@@ -514,6 +325,109 @@ class SchemavalidationCheck:
                     )
 
         return checks
+
+    def _datatype_match_check(
+        self,
+        check,
+        column_name,
+        data_type,
+        parameters,
+        nullable,
+        hint_expr,
+        assertion_lambda,
+    ):
+        """Chain the datatype match constraint (hasDataType or typeof satisfies)."""
+        if not nullable:
+            mapped_constrainable_datatype = (
+                constants.SCHEVA_VALIDATION_PYDEEQU_DATATYPE_MAP.get(data_type)
+            )
+            return check.hasDataType(
+                column=column_name,
+                datatype=mapped_constrainable_datatype,
+                assertion=assertion_lambda,
+                hint=hint_expr,
+            )
+        typeofcheck_data_type = self._get_typeofcheck_data_type(data_type, parameters)
+        return check.satisfies(
+            columnCondition=f"{column_name} is NULL OR typeof({column_name}) = '{typeofcheck_data_type}'",
+            constraintName=f"column[{column_name}] constraint for datatype[{data_type}] with nullable[{nullable}]",
+            assertion=assertion_lambda,
+            hint=hint_expr,
+        )
+
+    def _apply_datatype_constraints(
+        self,
+        check,
+        column_name,
+        data_type,
+        parameters,
+        nullable,
+        hint_expr,
+        override,
+        assertion_lambda,
+    ):
+        """Chain one column's datatype constraints onto ``check``.
+
+        Shared by single-check mode (one chained Check) and multi-check
+        mode (one fresh Check per column); only the receiver differs.
+        """
+        if data_type in constants.SCHEVA_VALIDATION_PYDEEQU_DATATYPE_MAP:
+            if override:
+                if constants.SCHEMA_VALIDATION_OVERRIDE_CONFIG_PATTERN_KEY in override:
+                    pattern_regex = override.get(
+                        constants.SCHEMA_VALIDATION_OVERRIDE_CONFIG_PATTERN_KEY
+                    )
+                    check = check.hasPattern(
+                        column=column_name,
+                        pattern=pattern_regex,
+                        assertion=assertion_lambda,
+                        name=f"override check for column {column_name}",
+                        hint=f"{hint_expr}. Pattern={pattern_regex}",
+                    )
+                    if not (
+                        override.get(
+                            constants.SCHEMA_VALIDATION_OVERRIDE_CONFIG_REPLACE_KEY,
+                            True,
+                        )
+                    ):
+                        # Pattern check applied on top of the data-type check.
+                        check = self._datatype_match_check(
+                            check,
+                            column_name,
+                            data_type,
+                            parameters,
+                            nullable,
+                            hint_expr,
+                            assertion_lambda,
+                        )
+            else:
+                check = self._datatype_match_check(
+                    check,
+                    column_name,
+                    data_type,
+                    parameters,
+                    nullable,
+                    hint_expr,
+                    assertion_lambda,
+                )
+        elif data_type in constants.SCHEVA_VALIDATION_CASTSPARKSQL_DATATYPE_MAP:
+            cast_sparksql_type = (
+                constants.SCHEVA_VALIDATION_CASTSPARKSQL_DATATYPE_MAP.get(data_type)
+            )
+            cast_datatype_expr = f"{column_name} is NULL OR CAST({column_name} AS {cast_sparksql_type}) IS NOT NULL"
+            if not nullable:
+                cast_datatype_expr = (
+                    f"CAST({column_name} AS {cast_sparksql_type}) IS NOT NULL"
+                )
+            check = check.satisfies(
+                columnCondition=cast_datatype_expr,
+                constraintName=f"column[{column_name}] constaint for datatype[{cast_sparksql_type}] AND nullable[{nullable}]",
+                assertion=assertion_lambda,
+                hint=hint_expr,
+            )
+        else:
+            raise ValueError(f"Error: Unknown {data_type}")
+        return check
 
     def _get_fulltable(self, db: str, tbl: str):
         if db:
@@ -610,7 +524,9 @@ class SchemavalidationCheck:
             constants.SCHEMA_VALIDATION_CATALOG_TYPE_UNITY,
             constants.SCHEMA_VALIDATION_CATALOG_TYPE_HIVE,
         ]:
-            checks = self._apply_catalog_datatype_checks(
+            # Catalog schemas arrive pre-converted to a Spark StructType,
+            # so the Spark datatype checks apply unchanged.
+            checks = self._apply_spark_datatype_checks(
                 checks=checks, tableSchema=tableSchema
             )
 
