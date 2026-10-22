@@ -137,15 +137,14 @@ def column_result_emitter(name, level, dq_dimension, source):
     """Build the append pair for a per-column reference/negativity summary.
 
     The verification instance keeps its historical double space after the
-    constraint name; legacy outputs are pinned to that exact string. A
-    ``timeSeries`` source renders as empty, matching legacy output.
+    constraint name; legacy outputs are pinned to that exact string.
+    ``source`` must already be normalized (``timeSeries`` -> ``""``) by
+    the caller so messages and instances agree.
 
     Returns:
         Tuple of (emit callable, metric rows, verification rows); the
         lists are the emitter's own accumulators.
     """
-    if source == "timeSeries":
-        source = ""
     metric_results = []
     check_verifications = []
 
@@ -400,6 +399,8 @@ class ColumnNamesInReferenceTableStrategy:
                 "left_semi",
             ).collect()
         }
+        if source == "timeSeries":
+            source = ""
         emit, metric_results, check_verifications = column_result_emitter(
             name, level, dq_dimension, source
         )
@@ -447,6 +448,8 @@ class NoNegativeValuesStrategy:
             .collect()[0]
             .asDict()
         )
+        if source == "timeSeries":
+            source = ""
         emit, metric_results, check_verifications = column_result_emitter(
             name, level, dq_dimension, source
         )

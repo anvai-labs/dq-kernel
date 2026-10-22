@@ -92,7 +92,9 @@ def column_decisions(outcomes, columns):
     """Reduce portable outcomes to a per-column all-success decision.
 
     Args:
-        outcomes: CheckOutcome sequence from ``execute_plan``.
+        outcomes: CheckOutcome sequence from ``execute_plan``; every
+            outcome must cover a column named in ``columns`` (an
+            unexpected column raises KeyError by design).
         columns: Column names to seed the decision map with.
 
     Returns:
@@ -101,8 +103,7 @@ def column_decisions(outcomes, columns):
     """
     decisions = {column: True for column in columns}
     for outcome in outcomes:
-        details = outcome.to_legacy()["details"]
-        decisions[details["column"]] = (
-            decisions[details["column"]] and outcome.to_legacy()["success"]
-        )
+        legacy = outcome.to_legacy()
+        column = legacy["details"]["column"]
+        decisions[column] = decisions[column] and legacy["success"]
     return decisions

@@ -109,9 +109,8 @@ def test_engine_hands_artifacts_to_the_injected_sink(spark):
     sink = InMemorySink()
     results = CustomEngine(config).apply(frame, sink)
     assert len(results) == 1
-    writes = sink.writes()
-    assert set(kind for kind, _ in writes) == {"metrics", "verifications"}
-    stored_metrics = writes[("metrics", list(writes)[0][1])]
+    assert_sink_received_both_artifacts(results, sink)
+    stored_metrics = sink.writes()[("metrics", list(sink.writes())[0][1])]
     assert stored_metrics, "engine artifacts reach the sink as rows"
 
 
