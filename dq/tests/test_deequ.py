@@ -6,7 +6,7 @@ from pyhocon import ConfigFactory
 
 from dq.engine.deequ.deequ_engine import DeequEngine
 from dq.sinks import InMemorySink
-from dq.tests.helpers import assert_overall_success
+from dq.tests.helpers import assert_any_failure, assert_overall_success
 
 
 @pytest.fixture
@@ -94,8 +94,7 @@ def test_deequ_engine_success(sample_success_dataframe, single_check_mode):
 def test_deequ_engine_failure(sample_failure_dataframe, single_check_mode):
     engine = DeequEngine(deequ_checks_config(single_check_mode))
     summarymetrics = engine.apply(sample_failure_dataframe, repository=None)
-    failures = [metric for metric in summarymetrics if metric["success"] is not True]
-    assert failures, "At least one deequ check should have failed."
+    assert_any_failure(summarymetrics, "deequ")
 
 
 def test_deequ_engine_persists_repository_artifacts(spark, sample_success_dataframe):

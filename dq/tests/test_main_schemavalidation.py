@@ -158,7 +158,9 @@ def unique_fk_config(single_check_mode: bool = True):
     )
 
 
-DTYPES = ["integer", "double", "decimal", "date", "timestamp"]
+# "long" activates the LongType scenario that previously existed only
+# as a dead fixture (df_long_incoming) on main.
+DTYPES = ["long", "integer", "double", "decimal", "date", "timestamp"]
 
 
 @pytest.mark.parametrize("nullable", [False, True], ids=["required", "nullable"])

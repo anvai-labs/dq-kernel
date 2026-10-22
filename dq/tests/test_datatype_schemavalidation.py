@@ -64,9 +64,21 @@ def _varchar10_df(spark):
 
 
 def _short_df(spark):
-    # The cast result is intentionally discarded, mirroring the
-    # original scenario: the schema check sees plain IntegerType.
-    df = _name_age_df(spark)
+    # Original scenario data: the 45-character first name plus the
+    # discarded withColumn (kept verbatim — the schema check sees plain
+    # IntegerType, never ShortType).
+    data = [
+        ("John's name is greater than allowed 10 characters", 25),
+        ("Doe", 30),
+        ("Jane", 40),
+    ]
+    schema = StructType(
+        [
+            StructField("name", StringType(), False),
+            StructField("age", IntegerType(), False),
+        ]
+    )
+    df = spark.createDataFrame(data=data, schema=schema)
     df.withColumn("age", expr("CAST(age as SHORT)"))
     return df
 

@@ -24,12 +24,11 @@ from pyspark.sql.types import (
 from dq.engine.schemavalidation.schemavalidation_engine import (
     SchemavalidationEngine,
 )
-from dq.tests.helpers import assert_overall_success
-
-PEOPLE_COLUMNS = ("name", "age", "signup_date")
+from dq.tests.helpers import assert_any_failure, assert_overall_success
 
 # Rows shared by the unique/foreign-key constraint scenarios: the
 # duplicate (30, "2021-01-02") pair is what drives the failure cases.
+# Column order throughout is (name, age, signup_date).
 PEOPLE_ROWS: List[Tuple[Any, Any, Any]] = [
     ("John", 25, "2021-01-01"),
     ("Doe", 30, "2021-01-02"),
@@ -47,10 +46,11 @@ def people_df(
 
     Args:
         spark: Active SparkSession.
-        rows: Row values in PEOPLE_COLUMNS order.
+        rows: Row values in (name, age, signup_date) order.
         age_type: Spark datatype instance for the ``age`` column
             (e.g. ``IntegerType()``).
-        nullable: Per-column nullability flags in PEOPLE_COLUMNS order.
+        nullable: Per-column nullability flags, (name, age, signup_date)
+            order.
 
     Returns:
         DataFrame with an explicit schema (no inference).
@@ -130,6 +130,10 @@ def apply_and_assert(
     views each scenario needs, applies the engine, and asserts either
     all-success or at-least-one-failure.
 
+    The incoming DataFrame is registered under the temp view named by
+    the config's ``schema.table``, so the engine always validates the
+    frame this helper was handed.
+
     Args:
         spark: Active SparkSession.
         df: Incoming DataFrame under validation.
@@ -145,22 +149,22 @@ def apply_and_assert(
     Returns:
         The engine's summary metrics.
     """
-    df.createOrReplaceTempView("temp_data_table")
+    table = config.get("schema", {}).get("table", "temp_data_table")
+    df.createOrReplaceTempView(table)
     if register_users:
         users_limit = " limit 2" if limit_references else ""
         spark.sql(
-            f"select name, age from temp_data_table{users_limit}"
+            f"select name, age from {table}{users_limit}"
         ).createOrReplaceTempView("temp_users")
     if register_signups:
         signups_limit = " limit 1" if limit_references else ""
         spark.sql(
-            f"SELECT signup_date from temp_data_table{signups_limit}"
+            f"SELECT signup_date from {table}{signups_limit}"
         ).createOrReplaceTempView("temp_signup_dates")
 
     metrics = SchemavalidationEngine(config).apply(df, repository=None)
     if expected_success:
         assert_overall_success(metrics, context)
     else:
-        failures = [metric for metric in metrics if metric["success"] is not True]
-        assert failures, f"{context}: expected a failing check, got {metrics}"
+        assert_any_failure(metrics, context)
     return metrics

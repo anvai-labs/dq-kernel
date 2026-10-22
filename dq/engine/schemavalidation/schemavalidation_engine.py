@@ -29,13 +29,15 @@ class SchemavalidationEngine(DeequEngine):
     def _run_verification(self, dataframe: DataFrame):
         """Run schema validation via ``validate_dataframe``.
 
+        The template ``apply`` has already bound ``self._sparkSession``
+        from ``dataframe`` before this hook runs.
+
         Args:
             dataframe: Spark DataFrame to validate.
 
         Returns:
             Tuple of (successMetrics DataFrame, checkVerifications DataFrame).
         """
-        self._sparkSession = dataframe.sparkSession
         return self.validate_dataframe(dataframe)
 
     def validate_dataframe(self, df: DataFrame):

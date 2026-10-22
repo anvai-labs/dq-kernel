@@ -7,7 +7,6 @@ from typing import Optional, List, Dict, Any
 from pyhocon import ConfigTree
 from pyspark.sql import DataFrame
 from pydeequ.verification import VerificationSuite, VerificationResult
-from pydeequ.repository import FileSystemMetricsRepository
 
 from dq.engine.dq_engine import DQEngine
 from dq.engine.deequ.deequ_check import DeequCheck

@@ -9,8 +9,6 @@ from pyspark.sql import DataFrame
 
 from dq.utils import constants
 
-logger = logging.getLogger(__name__)
-
 
 class DQEngine(ABC):
     """Abstract base class for all data quality engines.
@@ -28,7 +26,11 @@ class DQEngine(ABC):
         """Log the rule/engine preamble shared by engine ``apply`` methods."""
         rule_name = self._config.get(constants.DQ_RULE_NAME, "Unknown")
         engine_name = self._config.get(constants.DQ_ENGINE_NAME, "Unknown")
-        logger.info("Processing %s with %s Engine", rule_name, engine_name)
+        # Log under the concrete engine's module channel so per-engine
+        # log routing keeps working after this shared-helper extraction.
+        logging.getLogger(type(self).__module__).info(
+            "Processing %s with %s Engine", rule_name, engine_name
+        )
 
     def _persist(self, repository, successMetrics, checkVerifications) -> None:
         """Persist metrics and verification DataFrames under one result key.
