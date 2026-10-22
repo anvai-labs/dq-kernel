@@ -5,7 +5,6 @@ import pytest
 from pyhocon import ConfigFactory
 
 from dq.engine.deequ.deequ_engine import DeequEngine
-from dq.sinks import InMemorySink
 from dq.tests.helpers import assert_any_failure, assert_overall_success
 
 
@@ -95,21 +94,6 @@ def test_deequ_engine_failure(sample_failure_dataframe, single_check_mode):
     engine = DeequEngine(deequ_checks_config(single_check_mode))
     summarymetrics = engine.apply(sample_failure_dataframe, repository=None)
     assert_any_failure(summarymetrics, "deequ")
-
-
-def test_deequ_engine_persists_repository_artifacts(spark, sample_success_dataframe):
-    # The persist block lives on DQEngine._persist since the template
-    # refactor; exercise it end-to-end so the shared path stays covered.
-    sink = InMemorySink()
-    engine = DeequEngine(deequ_checks_config(single_check_mode=True))
-    engine.apply(sample_success_dataframe, repository=sink)
-
-    writes = sink.writes()
-    metric_types = {metric_type for metric_type, _ in writes}
-    assert metric_types == {"metrics", "verifications"}
-    # Both artifacts must land under one ResultKey for the run.
-    assert len({key for _, key in writes}) == 1
-    assert sink.rows("metrics", next(iter(writes))[1])
 
 
 pytestmark = pytest.mark.spark

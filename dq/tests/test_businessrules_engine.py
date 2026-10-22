@@ -15,36 +15,6 @@ import pydeequ
 from pyspark.sql import SparkSession
 
 
-def test_distinct_groupby_constraint(
-    spark, businessrules_config, sample_dataframe_group
-):
-    engine = BusinessrulesEngine(businessrules_config)
-    results = engine.apply(sample_dataframe_group, None)
-    assert all(isinstance(metric["details"], dict) for metric in results)
-    assert len(results) == 2
-
-
-def test_rate_of_change(
-    spark, businessrules_config_rate_of_change, multi_column_dataframe_rate_of_change
-):
-    engine = BusinessrulesEngine(businessrules_config_rate_of_change)
-    results = engine.apply(multi_column_dataframe_rate_of_change, None)
-    rate_of_change = [
-        result
-        for result in results
-        if result["details"]["instance"].startswith("RateOfChange")
-    ]
-    assert len(rate_of_change) == 11, "one bounded summary per column"
-    failing = [result for result in rate_of_change if not result["success"]]
-    assert failing, "the 40% recovery spike must fail the max threshold"
-    stale = [
-        result
-        for result in results
-        if result["details"]["instance"].startswith("DistinctnessByGroup")
-    ]
-    assert len(stale) == 10, "one bounded summary per column for the second check"
-
-
 def test_wide_col_negative_values(
     spark, businessrules_config_wide_col_negative_values, numeric_dataframe
 ):

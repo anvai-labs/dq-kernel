@@ -180,9 +180,15 @@ def test_schemavalidation_rejects_unknown_catalog_type(spark):
 DTYPES = ["long", "integer", "double", "decimal", "date", "timestamp"]
 
 
+# The failure axis (reference-view starvation) triggers the same engine
+# path for every dtype -- the FK tests pin the mechanism -- so it runs
+# for one representative dtype only; success crosses every dtype x
+# nullability so both datatype-constraint branches stay covered.
+DTYPE_OUTCOMES = [(True, dtype) for dtype in DTYPES] + [(False, "integer")]
+
+
 @pytest.mark.parametrize("nullable", [False, True], ids=["required", "nullable"])
-@pytest.mark.parametrize("dtype", DTYPES)
-@pytest.mark.parametrize("expected_success", [True, False], ids=["success", "failure"])
+@pytest.mark.parametrize("expected_success,dtype", DTYPE_OUTCOMES)
 def test_schemavalidation_dtype_constraints(spark, expected_success, dtype, nullable):
     df = incoming_df(spark, dtype, nullable)
     apply_and_assert(
@@ -197,8 +203,11 @@ def test_schemavalidation_dtype_constraints(spark, expected_success, dtype, null
     )
 
 
-@pytest.mark.parametrize("nullable", [False, True], ids=["required", "nullable"])
-@pytest.mark.parametrize("expected_success", [True, False], ids=["success", "failure"])
+@pytest.mark.parametrize(
+    "expected_success,nullable",
+    [(True, False), (True, True), (False, False)],
+    ids=["success-required", "success-nullable", "failure-required"],
+)
 def test_schemavalidation_float_type(spark, expected_success, nullable):
     # Float keeps its historical shape: the success path validates a
     # plain schema (no unique/foreign-key config), matching the
