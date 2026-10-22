@@ -7,7 +7,7 @@ from typing import Optional, List, Dict, Any
 from pyhocon import ConfigTree
 from pyspark.sql import DataFrame
 from pydeequ.verification import VerificationSuite, VerificationResult
-from pydeequ.repository import FileSystemMetricsRepository, ResultKey
+from pydeequ.repository import FileSystemMetricsRepository
 
 from dq.engine.dq_engine import DQEngine
 from dq.engine.deequ.deequ_check import DeequCheck
@@ -23,6 +23,10 @@ class DeequEngine(DQEngine):
     defined in the HOCON configuration.  Supports both single-check
     mode (all constraints in one ``Check``) and multi-check mode
     (one ``Check`` per constraint).
+
+    ``apply`` is a template method: subclasses customize verification by
+    overriding ``_run_verification`` while sharing logging, persistence,
+    and summary conversion.
     """
 
     def __init__(self, config: ConfigTree, dqts: Optional[int] = None):
@@ -39,15 +43,36 @@ class DeequEngine(DQEngine):
         Returns:
             List of metric dicts with ``check``, ``success``, ``details`` keys.
         """
-        rule_name = self._config.get(constants.DQ_RULE_NAME, "Unknown")
-        engine_name = self._config.get(constants.DQ_ENGINE_NAME, "Unknown")
-        logger.info("Processing %s with %s Engine", rule_name, engine_name)
+        self._log_processing_start()
+        self._sparkSession = dataframe.sparkSession
+        successMetrics, checkVerifications = self._run_verification(dataframe)
+        self._persist(repository, successMetrics, checkVerifications)
 
+        summarymetrics = []
+        for check in checkVerifications.collect():
+            summarymetrics.append(
+                {
+                    "check": check["check"],
+                    "success": check["check_status"] == "Success",
+                    "details": check.asDict(recursive=True),
+                }
+            )
+
+        return summarymetrics
+
+    def _run_verification(self, dataframe: DataFrame):
+        """Build and run the Deequ ``VerificationSuite`` for configured checks.
+
+        Args:
+            dataframe: Spark DataFrame to validate.
+
+        Returns:
+            Tuple of (successMetrics DataFrame, checkVerifications DataFrame).
+        """
         deequ_check = DeequCheck(
             checks_config=self._config.get("checks", []),
             single_check_mode=self._config.get(constants.DQ_SINGLE_CHECK_MODE, False),
         )
-        self._sparkSession = dataframe.sparkSession
 
         verification_run_builder = VerificationSuite(
             spark_session=self._sparkSession
@@ -72,28 +97,4 @@ class DeequEngine(DQEngine):
             spark_session=self._sparkSession,
             verificationResult=verification_result,
         )
-
-        if repository:
-            current_milli_time = ResultKey.current_milli_time()
-            repository.save(
-                successMetrics,
-                constants.DQ_REPOSITORY_METRICS,
-                current_milli_time,
-            )
-            repository.save(
-                checkVerifications,
-                constants.DQ_REPOSITORY_VERIFICATIONS,
-                current_milli_time,
-            )
-
-        summarymetrics = []
-        for check in checkVerifications.collect():
-            summarymetrics.append(
-                {
-                    "check": check["check"],
-                    "success": check["check_status"] == "Success",
-                    "details": check.asDict(recursive=True),
-                }
-            )
-
-        return summarymetrics
+        return successMetrics, checkVerifications

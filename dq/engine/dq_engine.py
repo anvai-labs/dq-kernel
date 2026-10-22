@@ -1,10 +1,15 @@
 # Copyright 2024 Data Quality Framework Contributors
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any
 from pyhocon import ConfigTree
 from pyspark.sql import DataFrame
+
+from dq.utils import constants
+
+logger = logging.getLogger(__name__)
 
 
 class DQEngine(ABC):
@@ -18,6 +23,38 @@ class DQEngine(ABC):
     def __init__(self, config: ConfigTree, dqts: Optional[int] = None):
         self._config = config
         self._dqts = dqts
+
+    def _log_processing_start(self) -> None:
+        """Log the rule/engine preamble shared by engine ``apply`` methods."""
+        rule_name = self._config.get(constants.DQ_RULE_NAME, "Unknown")
+        engine_name = self._config.get(constants.DQ_ENGINE_NAME, "Unknown")
+        logger.info("Processing %s with %s Engine", rule_name, engine_name)
+
+    def _persist(self, repository, successMetrics, checkVerifications) -> None:
+        """Persist metrics and verification DataFrames under one result key.
+
+        Args:
+            repository: Optional ``OutcomeSink``; nothing is persisted when falsy.
+            successMetrics: Metrics DataFrame to save under ``DQ_REPOSITORY_METRICS``.
+            checkVerifications: Verification DataFrame to save under
+                ``DQ_REPOSITORY_VERIFICATIONS``.
+        """
+        if repository:
+            # Imported lazily: pydeequ is an optional extra and this base class
+            # stays importable in pyspark-only installations.
+            from pydeequ.repository import ResultKey
+
+            current_milli_time = ResultKey.current_milli_time()
+            repository.save(
+                successMetrics,
+                constants.DQ_REPOSITORY_METRICS,
+                current_milli_time,
+            )
+            repository.save(
+                checkVerifications,
+                constants.DQ_REPOSITORY_VERIFICATIONS,
+                current_milli_time,
+            )
 
     @abstractmethod
     def apply(self, dataframe: DataFrame, repository=None) -> List[Dict[str, Any]]:
