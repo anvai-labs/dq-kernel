@@ -12,7 +12,6 @@ from dq.engine.custom.strategies import (
     NoNegativeValuesStrategy,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
