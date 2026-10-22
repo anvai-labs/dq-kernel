@@ -98,3 +98,23 @@ the failure mode ADR-002 exists to prevent.
 * Every strategy decides through distributed aggregations; the driver receives
   only per-column summaries and schema-sized lookups.
 * Identifier validation rejects malformed reference names before execution.
+
+
+== Amendment (2026-10-22): engine renamed to businessrules
+
+The engine's configuration keyword and code family are renamed from
+`custom` to `businessrules`, matching what the engine does (named
+business-rule constraint strategies):
+
+* `engine = "custom"` is removed with no alias -- `dq-validate` rejects
+  it with a migration hint ("renamed to 'businessrules'"). Rule packs
+  must migrate the keyword; constraint names (canonical and legacy
+  aliases) are unaffected.
+* Code surface: `dq/engine/businessrules/businessrules_engine.py`
+  exports `BusinessrulesEngine`; tests and examples follow
+  (`test_businessrules_engine{,_bounded}.py`,
+  `examples/businessrules_constraints.conf`).
+
+This is the consumer migration plan the 2026-09-20 amendment requires
+for compatibility-surface changes: a hard break, chosen deliberately
+over a deprecation alias to keep exactly one engine keyword live.

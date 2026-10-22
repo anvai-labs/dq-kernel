@@ -65,7 +65,7 @@ validation and persistence in the same method.
 |===
 
 The principal runtime data structures are HOCON `ConfigTree` objects, mutable dictionaries
-for check outcomes, Python lists for intermediate custom-engine metrics, Spark DataFrames,
+for check outcomes, Python lists for intermediate businessrules-engine metrics, Spark DataFrames,
 and a dictionary cache for foreign-key reference data. Spark DataFrames are appropriate for
 dataset-scale state. Configuration and outcome dictionaries need typed immutable boundaries;
 driver-side row lists must remain bounded to check summaries.
@@ -86,7 +86,7 @@ become executable Python instead of declarative input.
 |TD-ARCH-2
 |P0
 |Table and column identifiers are validated in only one orchestrator fallback. Unity,
-schema, repository, and custom-engine SQL paths interpolate identifiers independently.
+schema, repository, and businessrules-engine SQL paths interpolate identifiers independently.
 |One validated identifier value object and quoting policy used at every catalog/SQL boundary.
 *Implemented 2026-09-21 (`dq.identifiers`); Unity DESCRIBE/SHOW/USE statements now use
 quoted validated names and provider behavior is characterized with fake Spark sessions.*
@@ -137,11 +137,11 @@ supported engine capability.
 
 |TD-ARCH-9
 |P2
-|Large schema/custom check classes mix rule parsing, Spark planning, execution, and formatting;
+|Large schema/businessrules check classes mix rule parsing, Spark planning, execution, and formatting;
 tests repeat manual success loops and diagnostic printing.
 |Constraint strategy objects, shared outcome assertions/fixtures, and focused unit versus
 Spark integration markers. *Constraint strategy objects implemented 2026-09-20 for the
-custom engine (ADR-003); shared assertions, unit/spark markers, and the lazy test
+businessrules engine (ADR-003); shared assertions, unit/spark markers, and the lazy test
 session implemented 2026-09-21 (U7).*
 
 |TD-ARCH-10
