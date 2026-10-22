@@ -1,16 +1,12 @@
 # Copyright 2024 Data Quality Framework Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-import logging
 from typing import Optional, List, Dict, Any
 
 from dq.engine.dq_engine import DQEngine
 from pyhocon import ConfigTree
 from pyspark.sql import DataFrame
 from dq.engine.greatexpectations.greatexpectations_check import GreatexpectationsCheck
-from dq.utils import constants
-
-logger = logging.getLogger(__name__)
 
 
 class GreatexpectationsEngine(DQEngine):
@@ -41,9 +37,7 @@ class GreatexpectationsEngine(DQEngine):
                 "great_expectations package."
             ) from exc
 
-        rule_name = self._config.get(constants.DQ_RULE_NAME, "Unknown")
-        engine_name = self._config.get(constants.DQ_ENGINE_NAME, "Unknown")
-        logger.info("Processing %s with %s Engine", rule_name, engine_name)
+        self._log_processing_start()
 
         ge_df = ge.dataset.SparkDFDataset(df)
         ge_checks = GreatexpectationsCheck(self._config.get("expectations", []))

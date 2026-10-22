@@ -2,13 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional
 
 from dq.engine.deequ.deequ_engine import DeequEngine
 from pyhocon import ConfigTree
 from pyspark.sql import DataFrame
 from pydeequ.verification import VerificationSuite, VerificationResult
-from pydeequ.repository import ResultKey
 
 from dq.utils import constants
 from dq.engine.schemavalidation.schemavalidation_check import SchemavalidationCheck
@@ -27,46 +26,19 @@ class SchemavalidationEngine(DeequEngine):
     def __init__(self, config: ConfigTree, dqts: Optional[int] = None):
         super().__init__(config, dqts)
 
-    def apply(self, dataframe: DataFrame, repository=None) -> List[Dict[str, Any]]:
-        """Run schema validation checks against the DataFrame.
+    def _run_verification(self, dataframe: DataFrame):
+        """Run schema validation via ``validate_dataframe``.
+
+        The template ``apply`` has already bound ``self._sparkSession``
+        from ``dataframe`` before this hook runs.
 
         Args:
             dataframe: Spark DataFrame to validate.
-            repository: Optional repository config for persisting metrics.
 
         Returns:
-            List of metric dicts with ``check``, ``success``, ``details`` keys.
+            Tuple of (successMetrics DataFrame, checkVerifications DataFrame).
         """
-        rule_name = self._config.get(constants.DQ_RULE_NAME, "Unknown")
-        engine_name = self._config.get(constants.DQ_ENGINE_NAME, "Unknown")
-        logger.info("Processing %s with %s Engine", rule_name, engine_name)
-
-        self._sparkSession = dataframe.sparkSession
-        successMetrics, checkVerifications = self.validate_dataframe(dataframe)
-
-        if repository:
-            current_milli_time = ResultKey.current_milli_time()
-            repository.save(
-                successMetrics,
-                constants.DQ_REPOSITORY_METRICS,
-                current_milli_time,
-            )
-            repository.save(
-                checkVerifications,
-                constants.DQ_REPOSITORY_VERIFICATIONS,
-                current_milli_time,
-            )
-
-        summarymetrics = []
-        for check in checkVerifications.collect():
-            summarymetrics.append(
-                {
-                    "check": check["check"],
-                    "success": check["check_status"] == "Success",
-                    "details": check.asDict(recursive=True),
-                }
-            )
-        return summarymetrics
+        return self.validate_dataframe(dataframe)
 
     def validate_dataframe(self, df: DataFrame):
         """Validate the DataFrame against schema and additional constraints.

@@ -4,8 +4,6 @@
 import logging
 from typing import Optional, List, Dict, Any
 
-from pydeequ.repository import ResultKey
-
 from dq.engine.dq_engine import DQEngine
 from dq.engine.custom.strategies import (
     ColumnNamesInReferenceTableStrategy,
@@ -13,8 +11,6 @@ from dq.engine.custom.strategies import (
     GroupedDistinctBoundsStrategy,
     NoNegativeValuesStrategy,
 )
-
-from dq.utils import constants
 
 logger = logging.getLogger(__name__)
 
@@ -141,18 +137,7 @@ class CustomEngine(DQEngine):
             ],
         )
 
-        if repository:
-            current_milli_time = ResultKey.current_milli_time()
-            repository.save(
-                df_metrics_results,
-                constants.DQ_REPOSITORY_METRICS,
-                current_milli_time,
-            )
-            repository.save(
-                df_check_verification_results,
-                constants.DQ_REPOSITORY_VERIFICATIONS,
-                current_milli_time,
-            )
+        self._persist(repository, df_metrics_results, df_check_verification_results)
         summarymetrics = [
             {
                 "check": row[2],

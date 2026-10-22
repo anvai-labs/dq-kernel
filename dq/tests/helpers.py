@@ -26,3 +26,9 @@ def assert_overall_success(results, context=""):
     """Assert every summary succeeded, naming the failures otherwise."""
     failures = [result for result in results if result["success"] is not True]
     assert not failures, f"{context}: failing outcomes {failures}"
+
+
+def assert_any_failure(results, context=""):
+    """Assert at least one summary failed, showing all outcomes otherwise."""
+    failures = [result for result in results if result["success"] is not True]
+    assert failures, f"{context}: expected a failing outcome, got {results}"

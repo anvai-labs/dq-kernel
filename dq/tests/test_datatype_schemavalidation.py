@@ -1,581 +1,157 @@
 # Copyright 2024 Data Quality Framework Contributors
 # SPDX-License-Identifier: Apache-2.0
 
+"""Datatype-detection scenarios for the schemavalidation engine.
+
+Each scenario is crossed with single_check_mode True/False; the two
+modes previously existed as separate, otherwise identical test bodies.
+"""
+
+from collections import namedtuple
+
 import pytest
-from unittest.mock import patch, MagicMock
-from pyhocon import ConfigFactory
-from pyspark.sql.functions import to_date, to_timestamp, round, expr
-from dq.engine.schemavalidation.schemavalidation_engine import SchemavalidationEngine
-import json
+from pyspark.sql.functions import expr
 from pyspark.sql.types import (
-    StructType,
-    StringType,
-    VarcharType,
-    CharType,
-    IntegerType,
-    LongType,
-    FloatType,
-    DoubleType,
-    DecimalType,
     BooleanType,
-    NullType,
-    ByteType,
+    IntegerType,
+    StringType,
     StructField,
-    DateType,
-    TimestampType,
-    TimestampNTZType,
+    StructType,
+)
+
+from dq.tests.schemavalidation_support import (
+    apply_and_assert,
+    schema_validation_config,
+)
+
+YYYYMMDD_PATTERN = "^20[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|(1|2)[0-9]|3[01])$"
+
+YYYYMMDD_ROWS = [
+    ("John", "20230101"),
+    ("Joe", "20230303"),
+    ("Jane", "20230401"),
+    ("James", "20230903"),
+]
+
+DatatypeScenario = namedtuple(
+    "DatatypeScenario", ["case", "build", "overrides", "expected"]
 )
 
 
-def test_schemavalidation_single_check_mode_true_stringtype_with_yyyymmdd_without_override_failure(
-    spark,
-):
-    data = [
-        ("John", "20230101"),
-        ("Joe", "20230303"),
-        ("Jane", "20230401"),
-        ("James", "20230903"),
-    ]
+def _string_signup_df(spark):
     schema = StructType(
         [
             StructField("name", StringType(), False),
             StructField("signup_date", StringType(), False),
         ]
     )
-    df = spark.createDataFrame(data=data, schema=schema)
-    df.createOrReplaceTempView("temp_data_table")
-    schema_config = ConfigFactory.parse_string("""
-    {
-        name="SchemaValidation for StringType with YYYYMMDD without override"
-        engine = schemavalidation
-        single_check_mode = True
-        schema = {
-            catalog_type = spark
-            table = temp_data_table
-        }
-    }
-    """)
-    # Apply Schema Validation including multi-column unique and foreign key constraints
-    schema_validation_engine = SchemavalidationEngine(schema_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert (
-        False == overallsuccess
-    ), "Schemavalidation should fail as signupo_date will be interpreted as IntType and StringType check constraint will fail"
+    return spark.createDataFrame(data=YYYYMMDD_ROWS, schema=schema)
 
 
-def test_schemavalidation_single_check_mode_true_stringtype_with_yyyymmdd_with_override_pattern_replace_true_success(
-    spark,
-):
-    data = [
-        ("John", "20230101"),
-        ("Joe", "20230303"),
-        ("Jane", "20230401"),
-        ("James", "20230903"),
-    ]
-    schema = StructType(
-        [
-            StructField("name", StringType(), False),
-            StructField("signup_date", StringType(), False),
-        ]
-    )
-    df = spark.createDataFrame(data=data, schema=schema)
-    df.createOrReplaceTempView("temp_data_table")
-    schema_config = ConfigFactory.parse_string("""
-    {
-        name="SchemaValidation for StringType with YYYYMMDD and Override with replace true(default)"
-        engine = schemavalidation
-        single_check_mode = True
-        schema = {
-            catalog_type = spark
-            table = temp_data_table
-            overrides = [
-                {
-                    column = signup_date
-                    pattern = "^20[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|(1|2)[0-9]|3[01])$"
-                }
-            ]
-        }
-    }
-    """)
-    # Apply Schema Validation including multi-column unique and foreign key constraints
-    schema_validation_engine = SchemavalidationEngine(schema_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert True == overallsuccess, "Schemavalidation should have passed."
-
-
-def test_schemavalidation_single_check_mode_true_stringtype_with_yyyymmdd_with_override_pattern_replace_false_failure(
-    spark,
-):
-    data = [
-        ("John", "20230101"),
-        ("Joe", "20230303"),
-        ("Jane", "20230401"),
-        ("James", "20230903"),
-    ]
-    schema = StructType(
-        [
-            StructField("name", StringType(), False),
-            StructField("signup_date", StringType(), False),
-        ]
-    )
-    df = spark.createDataFrame(data=data, schema=schema)
-    df.createOrReplaceTempView("temp_data_table")
-    schema_config = ConfigFactory.parse_string("""
-    {
-        name="SchemaValidation for StringType with YYYYMMDD and Override with replace true(default)"
-        engine = schemavalidation
-        single_check_mode = True
-        schema = {
-            catalog_type = spark
-            table = temp_data_table
-            overrides = [
-                { column = signup_date
-                  pattern = "^20[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|(1|2)[0-9]|3[01])$"
-                  replace = False
-                }
-            ]
-        }
-    }
-    """)
-    # Apply Schema Validation including multi-column unique and foreign key constraints
-    schema_validation_engine = SchemavalidationEngine(schema_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert False == overallsuccess, "Schemavalidation should have failed."
-
-
-def test_schemavalidation_single_check_mode_true_varchartype10_success(spark):
+def _name_age_df(spark):
     data = [("John", 25), ("Doe", 30), ("Jane", 40)]
-    data_schema = StructType(
+    schema = StructType(
         [
             StructField("name", StringType(), False),
             StructField("age", IntegerType(), False),
         ]
     )
-    df = spark.createDataFrame(data=data, schema=data_schema)
-    df = df.withColumn("name", expr("CAST( name as VARCHAR(10))"))
-    df.createOrReplaceTempView("temp_data_table")
-    scemavalidation_config = ConfigFactory.parse_string("""
-    {
-        name = "schemavalidation for varchartype10_success"
-        engine = schemavalidation
-        single_check_mode = True
-        schema = {
-            catalog_type = spark
-            table = "temp_data_table"
-        }
-    }
-    """)
-    schema_validation_engine = SchemavalidationEngine(scemavalidation_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert True == overallsuccess, "Atleast one metric failed."
+    return spark.createDataFrame(data=data, schema=schema)
 
 
-def test_schemavalidation_single_check_mode_true_shortType_success(spark):
+def _varchar10_df(spark):
+    return _name_age_df(spark).withColumn("name", expr("CAST( name as VARCHAR(10))"))
+
+
+def _short_df(spark):
+    # Original scenario data: the 45-character first name plus the
+    # discarded withColumn (kept verbatim — the schema check sees plain
+    # IntegerType, never ShortType).
     data = [
         ("John's name is greater than allowed 10 characters", 25),
         ("Doe", 30),
         ("Jane", 40),
     ]
-    data_schema = StructType(
+    schema = StructType(
         [
             StructField("name", StringType(), False),
             StructField("age", IntegerType(), False),
         ]
     )
-    df = spark.createDataFrame(data=data, schema=data_schema)
-    df.createOrReplaceTempView("temp_data_table")
+    df = spark.createDataFrame(data=data, schema=schema)
     df.withColumn("age", expr("CAST(age as SHORT)"))
-    scemavalidation_config = ConfigFactory.parse_string("""
-    {
-        name = "schemavalidation for varchartype10_failure"
-        engine = schemavalidation
-        single_check_mode = True
-        schema = {
-            catalog_type = spark
-            table = "temp_data_table"
-        }
-    }
-    """)
-    schema_validation_engine = SchemavalidationEngine(scemavalidation_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert True == overallsuccess, "Atleast one metric failed."
+    return df
 
 
-def test_schemavalidation_single_check_mode_true_chartype10_success(spark):
-    data = [("John", 25), ("Doe", 30), ("Jane", 40)]
-    data_schema = StructType(
-        [
-            StructField("name", StringType(), False),
-            StructField("age", IntegerType(), False),
-        ]
-    )
-    df = spark.createDataFrame(data=data, schema=data_schema)
-    df = df.withColumn("name", expr("CAST( name as CHAR(10))"))
-
-    df.createOrReplaceTempView("temp_data_table")
-    scemavalidation_config = ConfigFactory.parse_string("""
-    {
-        name = "schemavalidation for chartype10_success"
-        engine = schemavalidation
-        single_check_mode = True
-        schema = {
-            catalog_type = spark
-            table = "temp_data_table"
-        }
-    }
-    """)
-    schema_validation_engine = SchemavalidationEngine(scemavalidation_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert True == overallsuccess, "Atleast one metric failed."
+def _char10_df(spark):
+    return _name_age_df(spark).withColumn("name", expr("CAST( name as CHAR(10))"))
 
 
-def test_schemavalidation_single_check_mode_true_booleanType_success(spark):
+def _boolean_df(spark):
     data = [
         ("John's name is greater than allowed 10 characters", False),
         ("Doe", False),
         ("Jane", True),
     ]
-    data_schema = StructType(
+    schema = StructType(
         [
             StructField("name", StringType(), False),
             StructField("isteenager", BooleanType(), False),
         ]
     )
-    df = spark.createDataFrame(data=data, schema=data_schema)
-    df = df.withColumn("name", expr("CAST( name as CHAR(10))"))
-
-    df.createOrReplaceTempView("temp_data_table")
-    scemavalidation_config = ConfigFactory.parse_string("""
-    {
-        name = "schemavalidation for chartype10_failure"
-        engine = schemavalidation
-        single_check_mode = True
-        schema = {
-            catalog_type = spark
-            table = "temp_data_table"
-        }
-    }
-    """)
-    schema_validation_engine = SchemavalidationEngine(scemavalidation_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert True == overallsuccess, "Atleast one metric failed."
-
-
-def test_schemavalidation_single_check_mode_false_stringtype_with_yyyymmdd_without_override_failure(
-    spark,
-):
-    data = [
-        ("John", "20230101"),
-        ("Joe", "20230303"),
-        ("Jane", "20230401"),
-        ("James", "20230903"),
-    ]
-    schema = StructType(
-        [
-            StructField("name", StringType(), False),
-            StructField("signup_date", StringType(), False),
-        ]
-    )
     df = spark.createDataFrame(data=data, schema=schema)
-    df.createOrReplaceTempView("temp_data_table")
-    schema_config = ConfigFactory.parse_string("""
-    {
-        name="SchemaValidation for StringType with YYYYMMDD without override"
-        engine = schemavalidation
-        single_check_mode = False
-        schema = {
-            catalog_type = spark
-            table = temp_data_table
-        }
-    }
-    """)
-    # Apply Schema Validation including multi-column unique and foreign key constraints
-    schema_validation_engine = SchemavalidationEngine(schema_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert (
-        False == overallsuccess
-    ), "Schemavalidation should fail as signupo_date will be interpreted as IntType and StringType check constraint will fail"
+    return df.withColumn("name", expr("CAST( name as CHAR(10))"))
 
 
-def test_schemavalidation_single_check_mode_false_stringtype_with_yyyymmdd_with_override_pattern_replace_true_success(
-    spark,
-):
-    data = [
-        ("John", "20230101"),
-        ("Joe", "20230303"),
-        ("Jane", "20230401"),
-        ("James", "20230903"),
-    ]
-    schema = StructType(
-        [
-            StructField("name", StringType(), False),
-            StructField("signup_date", StringType(), False),
-        ]
+# (case id, dataframe builder, schema overrides, expected outcome).
+# Without an override the YYYYMMDD strings are inferred as integers and
+# the StringType expectation fails; a replace=True override rewrites the
+# column to a matching pattern, replace=False leaves it failing.
+DATATYPE_SCENARIOS = [
+    DatatypeScenario(
+        "stringtype_yyyymmdd_without_override", _string_signup_df, None, False
+    ),
+    DatatypeScenario(
+        "stringtype_yyyymmdd_override_pattern_replace_true",
+        _string_signup_df,
+        [{"column": "signup_date", "pattern": YYYYMMDD_PATTERN}],
+        True,
+    ),
+    DatatypeScenario(
+        "stringtype_yyyymmdd_override_pattern_replace_false",
+        _string_signup_df,
+        [{"column": "signup_date", "pattern": YYYYMMDD_PATTERN, "replace": False}],
+        False,
+    ),
+    DatatypeScenario("varchartype10", _varchar10_df, None, True),
+    DatatypeScenario("shorttype", _short_df, None, True),
+    DatatypeScenario("chartype10", _char10_df, None, True),
+    DatatypeScenario("booleantype", _boolean_df, None, True),
+]
+
+
+@pytest.mark.parametrize("single_check_mode", [True, False], ids=["true", "false"])
+@pytest.mark.parametrize(
+    "scenario",
+    DATATYPE_SCENARIOS,
+    ids=[scenario.case for scenario in DATATYPE_SCENARIOS],
+)
+def test_schemavalidation_datatype(scenario, single_check_mode, spark):
+    df = scenario.build(spark)
+    config = schema_validation_config(
+        name=f"schemavalidation datatype {scenario.case}",
+        single_check_mode=single_check_mode,
+        overrides=scenario.overrides,
     )
-    df = spark.createDataFrame(data=data, schema=schema)
-    df.createOrReplaceTempView("temp_data_table")
-    schema_config = ConfigFactory.parse_string("""
-    {
-        name="SchemaValidation for StringType with YYYYMMDD and Override with replace true(default)"
-        engine = schemavalidation
-        single_check_mode = False
-        schema = {
-            catalog_type = spark
-            table = temp_data_table
-            overrides = [
-                { column = signup_date
-                  pattern = "^20[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|(1|2)[0-9]|3[01])$"
-                }
-            ]
-        }
-    }
-    """)
-    # Apply Schema Validation including multi-column unique and foreign key constraints
-    schema_validation_engine = SchemavalidationEngine(schema_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert True == overallsuccess, "Schemavalidation should have passed."
-
-
-def test_schemavalidation_single_check_mode_false_stringtype_with_yyyymmdd_with_override_pattern_replace_false_failure(
-    spark,
-):
-    data = [
-        ("John", "20230101"),
-        ("Joe", "20230303"),
-        ("Jane", "20230401"),
-        ("James", "20230903"),
-    ]
-    schema = StructType(
-        [
-            StructField("name", StringType(), False),
-            StructField("signup_date", StringType(), False),
-        ]
+    apply_and_assert(
+        spark,
+        df,
+        config,
+        expected_success=scenario.expected,
+        context=f"{scenario.case}-single_check_mode_{single_check_mode}",
+        register_users=False,
+        register_signups=False,
     )
-    df = spark.createDataFrame(data=data, schema=schema)
-    df.createOrReplaceTempView("temp_data_table")
-    schema_config = ConfigFactory.parse_string("""
-    {
-        name="SchemaValidation for StringType with YYYYMMDD and Override with replace true(default)"
-        engine = schemavalidation
-        single_check_mode = False
-        schema = {
-            catalog_type = spark
-            table = temp_data_table
-            overrides = [
-                { column = signup_date
-                  pattern = "^20[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|(1|2)[0-9]|3[01])$"
-                  replace = False
-                }
-            ]
-        }
-    }
-    """)
-    # Apply Schema Validation including multi-column unique and foreign key constraints
-    schema_validation_engine = SchemavalidationEngine(schema_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert False == overallsuccess, "Schemavalidation should have failed."
-
-
-def test_schemavalidation_single_check_mode_false_varchartype10_success(spark):
-    data = [("John", 25), ("Doe", 30), ("Jane", 40)]
-    data_schema = StructType(
-        [
-            StructField("name", StringType(), False),
-            StructField("age", IntegerType(), False),
-        ]
-    )
-    df = spark.createDataFrame(data=data, schema=data_schema)
-    df = df.withColumn("name", expr("CAST( name as VARCHAR(10))"))
-    df.createOrReplaceTempView("temp_data_table")
-    scemavalidation_config = ConfigFactory.parse_string("""
-    {
-        name = "schemavalidation for varchartype10_success"
-        engine = schemavalidation
-        single_check_mode = False
-        schema = {
-            catalog_type = spark
-            table = "temp_data_table"
-        }
-    }
-    """)
-    schema_validation_engine = SchemavalidationEngine(scemavalidation_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert True == overallsuccess, "Atleast one metric failed."
-
-
-def test_schemavalidation_single_check_mode_false_shortType_success(spark):
-    data = [
-        ("John's name is greater than allowed 10 characters", 25),
-        ("Doe", 30),
-        ("Jane", 40),
-    ]
-    data_schema = StructType(
-        [
-            StructField("name", StringType(), False),
-            StructField("age", IntegerType(), False),
-        ]
-    )
-    df = spark.createDataFrame(data=data, schema=data_schema)
-    df.createOrReplaceTempView("temp_data_table")
-    df.withColumn("age", expr("CAST(age as SHORT)"))
-    scemavalidation_config = ConfigFactory.parse_string("""
-    {
-        name = "schemavalidation for varchartype10_failure"
-        engine = schemavalidation
-        single_check_mode = False
-        schema = {
-            catalog_type = spark
-            table = "temp_data_table"
-        }
-    }
-    """)
-    schema_validation_engine = SchemavalidationEngine(scemavalidation_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert True == overallsuccess, "Atleast one metric failed."
-
-
-def test_schemavalidation_single_check_mode_false_chartype10_success(spark):
-    data = [("John", 25), ("Doe", 30), ("Jane", 40)]
-    data_schema = StructType(
-        [
-            StructField("name", StringType(), False),
-            StructField("age", IntegerType(), False),
-        ]
-    )
-    df = spark.createDataFrame(data=data, schema=data_schema)
-    df = df.withColumn("name", expr("CAST( name as CHAR(10))"))
-
-    df.createOrReplaceTempView("temp_data_table")
-    scemavalidation_config = ConfigFactory.parse_string("""
-    {
-        name = "schemavalidation for chartype10_success"
-        engine = schemavalidation
-        single_check_mode = False
-        schema = {
-            catalog_type = spark
-            table = "temp_data_table"
-        }
-    }
-    """)
-    schema_validation_engine = SchemavalidationEngine(scemavalidation_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert True == overallsuccess, "Atleast one metric failed."
-
-
-def test_schemavalidation_single_check_mode_false_booleanType_success(spark):
-    data = [
-        ("John's name is greater than allowed 10 characters", False),
-        ("Doe", False),
-        ("Jane", True),
-    ]
-    data_schema = StructType(
-        [
-            StructField("name", StringType(), False),
-            StructField("isteenager", BooleanType(), False),
-        ]
-    )
-    df = spark.createDataFrame(data=data, schema=data_schema)
-    df = df.withColumn("name", expr("CAST( name as CHAR(10))"))
-
-    df.createOrReplaceTempView("temp_data_table")
-    scemavalidation_config = ConfigFactory.parse_string("""
-    {
-        name = "schemavalidation for chartype10_failure"
-        engine = schemavalidation
-        single_check_mode = False
-        schema = {
-            catalog_type = spark
-            table = "temp_data_table"
-        }
-    }
-    """)
-    schema_validation_engine = SchemavalidationEngine(scemavalidation_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert True == overallsuccess, "Atleast one metric failed."
 
 
 pytestmark = pytest.mark.spark
