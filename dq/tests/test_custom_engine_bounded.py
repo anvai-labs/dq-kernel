@@ -27,18 +27,9 @@ from dq.engine.custom.strategies import (
 )
 from dq.exceptions import ConfigurationError
 from dq.tests.helpers import summaries_by_instance
+from dq.tests.plan_support import GROUPS_ROWS
 
-_GROUPS_DATA = [
-    ("east", "a", 1.0),
-    ("east", "b", 2.0),
-    ("east", "c", 3.0),
-    ("west", "a", 9.0),
-    ("west", "a", 9.0),
-    ("west", "b", 5.0),
-    ("north", "a", 7.0),
-    ("north", "a", 7.0),
-    ("north", "a", 8.0),
-]
+_GROUPS_DATA = GROUPS_ROWS
 _GROUPS_SCHEMA = StructType(
     [
         StructField("region", StringType(), True),
@@ -69,8 +60,19 @@ _RATE_SCHEMA = StructType(
 # Pairs and |change|%: g1 10,10; g2 100; g3 prev=0 (not evaluable); g4 null prev (skipped).
 
 
-def distinctness_config(columns, group_by, min_value=None, max_value=None):
+def bounded_check_config(
+    constraint,
+    constraint_name,
+    columns,
+    group_by,
+    min_value=None,
+    max_value=None,
+    sort_by=None,
+):
+    """Build a one-check ``sync`` config for a bounded custom constraint."""
     settings = f"columns = {dumps(columns)}\n        group_by = {dumps(group_by)}"
+    if sort_by is not None:
+        settings += f'\n        sort_by = "{sort_by}"'
     if min_value is not None:
         settings += f"\n        min = {min_value}"
     if max_value is not None:
@@ -79,8 +81,8 @@ def distinctness_config(columns, group_by, min_value=None, max_value=None):
     sync {{
         checks = [
         {{
-            constraint_name = "distinct_check"
-            constraint = "DistinctnessByGroup"
+            constraint_name = "{constraint_name}"
+            constraint = "{constraint}"
             {settings}
             level = "Error"
         }}
@@ -88,30 +90,24 @@ def distinctness_config(columns, group_by, min_value=None, max_value=None):
     }}
     """
     return ConfigFactory.parse_string(config).get("sync", {})
+
+
+def distinctness_config(columns, group_by, min_value=None, max_value=None):
+    return bounded_check_config(
+        "DistinctnessByGroup", "distinct_check", columns, group_by, min_value, max_value
+    )
 
 
 def rate_of_change_config(columns, group_by, sort_by, min_value=None, max_value=None):
-    settings = (
-        f"columns = {dumps(columns)}\n        group_by = {dumps(group_by)}"
-        f'\n        sort_by = "{sort_by}"'
+    return bounded_check_config(
+        "RateOfChange",
+        "roc_check",
+        columns,
+        group_by,
+        min_value,
+        max_value,
+        sort_by=sort_by,
     )
-    if min_value is not None:
-        settings += f"\n        min = {min_value}"
-    if max_value is not None:
-        settings += f"\n        max = {max_value}"
-    config = f"""
-    sync {{
-        checks = [
-        {{
-            constraint_name = "roc_check"
-            constraint = "RateOfChange"
-            {settings}
-            level = "Error"
-        }}
-        ]
-    }}
-    """
-    return ConfigFactory.parse_string(config).get("sync", {})
 
 
 def lookup_config(ref_table, ref_columns="item_id", ignore_columns=None):

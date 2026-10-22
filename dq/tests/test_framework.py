@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from dq.dq_framework import DQFramework
+from dq.tests.helpers import assert_any_failure, assert_overall_success
 import pytest
 from unittest.mock import patch, MagicMock
 from pyspark.sql import SparkSession
@@ -42,23 +43,13 @@ def test_framework_success(spark, sample_dataframe_with_success, framework_confi
     dqf = DQFramework(spark, framework_config, sample_dataframe_with_success)
     cum_metris = dqf.run()
     assert all(isinstance(metric["details"], dict) for metric in cum_metris)
-    overallsuccess = True
-    for metric in cum_metris:
-        assert "success" in metric, "Error: no success key in metric"
-        if not (metric["success"]):
-            overallsuccess = False
-    assert overallsuccess == True, "Error: Some checks have failed"
+    assert_overall_success(cum_metris, "framework")
 
 
 def test_framework_failure(spark, sample_dataframe_with_failure, framework_config):
     dqf = DQFramework(spark, framework_config, sample_dataframe_with_failure)
     cum_metris = dqf.run()
-    overallsuccess = True
-    for metric in cum_metris:
-        assert "success" in metric, "Error: no success key in metric"
-        if not (metric["success"]):
-            overallsuccess = False
-    assert overallsuccess == False, "Error: All checks should not have passed"
+    assert_any_failure(cum_metris, "framework")
 
 
 pytestmark = pytest.mark.spark

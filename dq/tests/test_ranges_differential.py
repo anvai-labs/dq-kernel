@@ -32,6 +32,7 @@ from dq.plan import (
     RuleSpec,
 )
 from dq.spark_adapter import execute_plan
+from dq.tests.plan_support import column_decisions
 
 pytestmark = pytest.mark.spark
 
@@ -79,13 +80,7 @@ def portable_decisions(frame):
         for column in _COLUMNS
     ]
     outcomes = execute_plan(ExecutionPlan(tuple(rules)), {"bars": frame})
-    decisions = {column: True for column in _COLUMNS}
-    for outcome in outcomes:
-        details = outcome.to_legacy()["details"]
-        decisions[details["column"]] = (
-            decisions[details["column"]] and outcome.to_legacy()["success"]
-        )
-    return decisions
+    return column_decisions(outcomes, _COLUMNS)
 
 
 def test_non_negative_decisions_identically(spark):

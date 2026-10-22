@@ -29,21 +29,12 @@ from dq.plan import (
 )
 from dq.portable_config import translate_plan
 from dq.spark_adapter import execute_plan
+from dq.tests.plan_support import GROUPS_ROWS, column_decisions
 
 pytestmark = pytest.mark.spark
 
 DATASET = DatasetRef("bars", "b" * 64)
-_ROWS = [
-    ("east", "a", 1.0),
-    ("east", "b", 2.0),
-    ("east", "c", 3.0),
-    ("west", "a", 9.0),
-    ("west", "a", 9.0),
-    ("west", "b", 5.0),
-    ("north", "a", 7.0),
-    ("north", "a", 7.0),
-    ("north", "a", 8.0),
-]
+_ROWS = GROUPS_ROWS
 _SCHEMA = "region string, id string, val double"
 # Per-group distinct counts: east id=3 val=3; west id=2 val=2; north id=1 val=2.
 
@@ -104,13 +95,7 @@ def portable_column_decisions(columns, group_by, minimum, maximum, frame):
                 )
             )
     outcomes = execute_plan(ExecutionPlan(tuple(rules)), {"bars": frame})
-    decisions = {column: True for column in columns}
-    for outcome in outcomes:
-        details = outcome.to_legacy()["details"]
-        decisions[details["column"]] = (
-            decisions[details["column"]] and outcome.to_legacy()["success"]
-        )
-    return decisions
+    return column_decisions(outcomes, columns)
 
 
 @pytest.mark.parametrize(

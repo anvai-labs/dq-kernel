@@ -35,6 +35,7 @@ from dq.plan import (
     RuleSpec,
 )
 from dq.spark_adapter import execute_envelope
+from dq.tests import plan_support
 
 pytestmark = pytest.mark.spark
 
@@ -77,34 +78,11 @@ def counts_plan(completeness_threshold=Decimal("0.5")):
 
 
 def groups_plan():
-    return ExecutionPlan(
-        (
-            RuleSpec(
-                "region_group_min_distinct",
-                DATASET,
-                RuleKind.GROUPED_DISTINCT,
-                Predicate(Comparison.GE, Decimal(1)),
-                ColumnRef("id"),
-                group_by=(ColumnRef("region"),),
-                target=MetricKind.GROUP_MIN_DISTINCT,
-            ),
-        )
-    )
+    return plan_support.groups_plan("region_group_min_distinct", DATASET)
 
 
 def ranges_plan():
-    return ExecutionPlan(
-        (
-            RuleSpec(
-                "amount_min",
-                DATASET,
-                RuleKind.VALUE_RANGE,
-                Predicate(Comparison.GE, Decimal(0)),
-                ColumnRef("amount"),
-                target=MetricKind.COLUMN_MIN,
-            ),
-        )
-    )
+    return plan_support.ranges_plan("amount_min", DATASET)
 
 
 def orders_dataframe(spark):

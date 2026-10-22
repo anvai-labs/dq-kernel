@@ -12,24 +12,11 @@ from pyspark.sql.types import StringType, StructField, StructType
 from dq.engine.custom.custom_engine import CustomEngine
 from dq.exceptions import ConfigurationError, RepositoryError
 from dq.sinks import InMemorySink, RepositorySink, sink_from_config
-
-
-class FakeRow:
-    def __init__(self, values):
-        self._values = values
-
-    def asDict(self, recursive=True):
-        return dict(self._values)
-
-
-class FakeDataFrame:
-    """Stands in for a DataFrame where a sink only needs collect()."""
-
-    def __init__(self, rows):
-        self._rows = [FakeRow(row) for row in rows]
-
-    def collect(self):
-        return self._rows
+from dq.tests.helpers import (
+    FakeDataFrame,
+    FakeRow,
+    assert_sink_received_both_artifacts,
+)
 
 
 def test_in_memory_sink_records_bounded_artifacts():
@@ -145,9 +132,7 @@ def test_deequ_engine_hands_artifacts_to_the_injected_sink(spark):
     frame = spark.createDataFrame([("a",), ("b",)], ["id"])
     sink = InMemorySink()
     results = DeequEngine(config).apply(frame, sink)
-    assert results
-    writes = sink.writes()
-    assert set(kind for kind, _ in writes) == {"metrics", "verifications"}
+    assert_sink_received_both_artifacts(results, sink)
 
 
 def test_schemavalidation_engine_hands_artifacts_to_the_injected_sink(spark):
@@ -173,9 +158,7 @@ def test_schemavalidation_engine_hands_artifacts_to_the_injected_sink(spark):
         """)
     sink = InMemorySink()
     results = SchemavalidationEngine(config).apply(frame, sink)
-    assert results
-    writes = sink.writes()
-    assert set(kind for kind, _ in writes) == {"metrics", "verifications"}
+    assert_sink_received_both_artifacts(results, sink)
 
 
 def test_repository_sink_appends_files_keyed_by_write(spark, tmp_path):
