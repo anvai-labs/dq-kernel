@@ -107,10 +107,15 @@ def validated_grouped_params(columns, group_by, name):
     return columns, group_by
 
 
-def group_result_emitter(
-    name, level, dq_dimension, metric_results, check_verifications
-):
-    """Build the bounded append pair for a per-column grouped summary."""
+def group_result_emitter(name, level, dq_dimension):
+    """Build the bounded append pair for a per-column grouped summary.
+
+    Returns:
+        Tuple of (emit callable, metric rows, verification rows); the
+        lists are the emitter's own accumulators.
+    """
+    metric_results = []
+    check_verifications = []
 
     def emit(instance, value, check_status, constraint_status, constraint_message):
         metric_results.append(metric_row(instance, dq_dimension, value))
@@ -125,17 +130,24 @@ def group_result_emitter(
             )
         )
 
-    return emit
+    return emit, metric_results, check_verifications
 
 
-def column_result_emitter(
-    name, level, dq_dimension, source, metric_results, check_verifications
-):
+def column_result_emitter(name, level, dq_dimension, source):
     """Build the append pair for a per-column reference/negativity summary.
 
     The verification instance keeps its historical double space after the
-    constraint name; legacy outputs are pinned to that exact string.
+    constraint name; legacy outputs are pinned to that exact string. A
+    ``timeSeries`` source renders as empty, matching legacy output.
+
+    Returns:
+        Tuple of (emit callable, metric rows, verification rows); the
+        lists are the emitter's own accumulators.
     """
+    if source == "timeSeries":
+        source = ""
+    metric_results = []
+    check_verifications = []
 
     def emit(column, value, check_status, constraint_status, message):
         metric_results.append(
@@ -152,7 +164,7 @@ def column_result_emitter(
             )
         )
 
-    return emit
+    return emit, metric_results, check_verifications
 
 
 class GroupedDistinctBoundsStrategy:
@@ -190,10 +202,8 @@ class GroupedDistinctBoundsStrategy:
         )
         group_count = int(summary["dq_group_count"] or 0)
 
-        metric_results = []
-        check_verifications = []
-        emit = group_result_emitter(
-            name, level, dq_dimension, metric_results, check_verifications
+        emit, metric_results, check_verifications = group_result_emitter(
+            name, level, dq_dimension
         )
         for index, column in enumerate(columns):
             if group_count == 0:
@@ -303,10 +313,8 @@ class ConsecutivePercentChangeStrategy:
             )
         summary = projected.agg(*aggregate_exprs).head()
 
-        metric_results = []
-        check_verifications = []
-        emit = group_result_emitter(
-            name, level, dq_dimension, metric_results, check_verifications
+        emit, metric_results, check_verifications = group_result_emitter(
+            name, level, dq_dimension
         )
         for index, column in enumerate(columns):
             evaluated = int(summary[f"dq_roc_evaluated_{index}"] or 0)
@@ -392,13 +400,8 @@ class ColumnNamesInReferenceTableStrategy:
                 "left_semi",
             ).collect()
         }
-        if source == "timeSeries":
-            source = ""
-
-        metric_results = []
-        check_verifications = []
-        emit = column_result_emitter(
-            name, level, dq_dimension, source, metric_results, check_verifications
+        emit, metric_results, check_verifications = column_result_emitter(
+            name, level, dq_dimension, source
         )
         for column in dataframe.columns:
             if column in matched_names:
@@ -444,13 +447,8 @@ class NoNegativeValuesStrategy:
             .collect()[0]
             .asDict()
         )
-        if source == "timeSeries":
-            source = ""
-
-        metric_results = []
-        check_verifications = []
-        emit = column_result_emitter(
-            name, level, dq_dimension, source, metric_results, check_verifications
+        emit, metric_results, check_verifications = column_result_emitter(
+            name, level, dq_dimension, source
         )
         for column in dataframe.columns:
             count = negative_counts[column]
