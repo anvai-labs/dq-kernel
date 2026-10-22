@@ -2,29 +2,22 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from unittest.mock import patch, MagicMock
-from pyhocon import ConfigFactory
-from pyspark.sql.functions import to_date, to_timestamp, round
-from dq.engine.schemavalidation.schemavalidation_engine import SchemavalidationEngine
-import json
-from pyspark.sql.types import (
-    StructType,
-    StringType,
-    VarcharType,
-    CharType,
-    IntegerType,
-    LongType,
-    FloatType,
-    DoubleType,
-    DecimalType,
-    BooleanType,
-    NullType,
-    ByteType,
-    StructField,
-    DateType,
-    TimestampType,
-    TimestampNTZType,
+from pyspark.sql.types import LongType, StringType, StructField, StructType
+
+from dq.tests.schemavalidation_support import (
+    apply_and_assert,
+    schema_validation_config,
 )
+
+# LATENT DEFECT (flag-fix commit pending): the fixtures historically
+# named "single_check_mode" also ran with single_check_mode = False,
+# so both labels exercise the multi-check path today.
+CHECK_MODE_FLAGS = {
+    "single_check_mode": False,
+    "multiple_check_mode": False,
+}
+
+FOREIGN_KEY = ("age", "temp_users", "age")
 
 
 @pytest.fixture
@@ -41,222 +34,62 @@ def df_long_incoming(spark):
     return df
 
 
-@pytest.fixture
-def list_check_true_single_check_mode_schemavalidation_config():
-    config_str = """
-    {
-        name = list_check_true_single_check_mode_schemavalidation
-        engine = schemavalidation
-        single_check_mode = False
-        schema = {
-            table = temp_data_table
-            catalog_type = spark
-            foreign_key_constraints=[
-                {
-                    src_column      = age
-                    ref_table       = temp_users
-                    ref_column      = age
-                    use_list_check  = True
-                }
-            ]
-        }
-    }
+def fk_config(use_list_check: bool, check_mode: str):
+    """Build the single-column FK validation config for a case.
+
+    Args:
+        use_list_check: Value for the constraint's use_list_check flag.
+        check_mode: Label from CHECK_MODE_FLAGS driving the flag value.
+
+    Returns:
+        Parsed ConfigTree for SchemavalidationEngine.
     """
-    return ConfigFactory.parse_string(config_str)
+    src_column, ref_table, ref_column = FOREIGN_KEY
+    return schema_validation_config(
+        name=f"list_check_{str(use_list_check).lower()}_{check_mode}_schemavalidation",
+        single_check_mode=CHECK_MODE_FLAGS[check_mode],
+        foreign_key_constraints=[
+            {
+                "src_column": src_column,
+                "ref_table": ref_table,
+                "ref_column": ref_column,
+                "use_list_check": use_list_check,
+            }
+        ],
+    )
 
 
-@pytest.fixture
-def list_check_false_single_check_mode_schemavalidation_config():
-    config_str = """
-    {
-        name = list_check_false_single_check_mode_schemavalidation
-        engine = schemavalidation
-        single_check_mode = False
-        schema = {
-            table = temp_data_table
-            catalog_type = spark
-            foreign_key_constraints=[
-                {
-                    src_column      = age
-                    ref_table       = temp_users
-                    ref_column      = age
-                    use_list_check  = False
-                }
-            ]
-        }
-    }
-    """
-    return ConfigFactory.parse_string(config_str)
-
-
-@pytest.fixture
-def list_check_true_multiple_check_mode_schemavalidation_config():
-    config_str = """
-    {
-        name = list_check_true_multiple_check_mode_schemavalidation
-        engine = schemavalidation
-        single_check_mode = False
-        schema = {
-            table = temp_data_table
-            catalog_type = spark
-            foreign_key_constraints=[
-                {
-                    src_column      = age
-                    ref_table       = temp_users
-                    ref_column      = age
-                    use_list_check  = True
-                }
-            ]
-        }
-    }
-    """
-    return ConfigFactory.parse_string(config_str)
-
-
-@pytest.fixture
-def list_check_false_multiple_check_mode_schemavalidation_config():
-    config_str = """
-    {
-        name = list_check_false_multiple_check_mode_schemavalidation
-        engine = schemavalidation
-        single_check_mode = False
-        schema = {
-            table = temp_data_table
-            catalog_type = spark
-            foreign_key_constraints=[
-                {
-                    src_column      = age
-                    ref_table       = temp_users
-                    ref_column      = age
-                    use_list_check  = False
-                }
-            ]
-        }
-    }
-    """
-    return ConfigFactory.parse_string(config_str)
-
-
-def process_schemavalidation_success(spark, df, config):
-    # Initialize Schema Validation Engine with single_check_mode = False for granular reporting
-    schema_validation_engine = SchemavalidationEngine(config)
-    df.createOrReplaceTempView("temp_data_table")
-    dfusers = spark.sql("select name, age from temp_data_table")
-    dfusers.createOrReplaceTempView("temp_users")
-
-    # Apply Schema Validation including multi-column unique and foreign key constraints
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        print(json.dumps(metric, indent=2))
-        assert metric["success"] == True, f"{metric} failed."
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-    return overallsuccess
-
-
-def process_schemavalidation_failure(spark, df, config):
-    # Initialize Schema Validation Engine with single_check_mode = False for granular reporting
-    schema_validation_engine = SchemavalidationEngine(config)
-    df.createOrReplaceTempView("temp_data_table")
-
-    dfusers = spark.sql("select name, age from temp_data_table limit 2")
-    dfusers.createOrReplaceTempView("temp_users")
-    #
-    # Apply Schema Validation including multi-column unique and foreign key constraints
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    return overallsuccess
-
-
-def test_schemavalidation_fk_use_list_check_true_single_check_mode_success(
-    spark, df_long_incoming, list_check_true_single_check_mode_schemavalidation_config
+@pytest.mark.parametrize("use_list_check", [True, False], ids=["true", "false"])
+@pytest.mark.parametrize("check_mode", list(CHECK_MODE_FLAGS))
+def test_schemavalidation_fk_use_list_check_success(
+    spark, df_long_incoming, use_list_check, check_mode
 ):
-    assert True == process_schemavalidation_success(
+    apply_and_assert(
         spark,
         df_long_incoming,
-        list_check_true_single_check_mode_schemavalidation_config,
-    ), "Atleast one metric should have failed."
+        fk_config(use_list_check, check_mode),
+        expected_success=True,
+        context=f"use_list_check-{use_list_check}-{check_mode}",
+        register_signups=False,
+    )
 
 
-def test_schemavalidation_fk_use_list_check_false_single_check_mode_success(
-    spark, df_long_incoming, list_check_false_single_check_mode_schemavalidation_config
+@pytest.mark.parametrize("use_list_check", [True, False], ids=["true", "false"])
+@pytest.mark.parametrize("check_mode", list(CHECK_MODE_FLAGS))
+def test_schemavalidation_fk_use_list_check_failure(
+    spark, df_long_incoming, use_list_check, check_mode
 ):
-    assert True == process_schemavalidation_success(
+    # Limiting the reference view to two rows starves the third
+    # incoming row's foreign key, forcing the constraint to fail.
+    apply_and_assert(
         spark,
         df_long_incoming,
-        list_check_false_single_check_mode_schemavalidation_config,
-    ), "Atleast one metric should have failed."
-
-
-def test_schemavalidation_fk_use_list_check_true_single_check_mode_failure(
-    spark, df_long_incoming, list_check_true_single_check_mode_schemavalidation_config
-):
-    assert False == process_schemavalidation_failure(
-        spark,
-        df_long_incoming,
-        list_check_true_single_check_mode_schemavalidation_config,
-    ), "Atleast one metric should have failed."
-
-
-def test_schemavalidation_fk_use_list_check_false_single_check_mode_failure(
-    spark, df_long_incoming, list_check_false_single_check_mode_schemavalidation_config
-):
-    assert False == process_schemavalidation_failure(
-        spark,
-        df_long_incoming,
-        list_check_false_single_check_mode_schemavalidation_config,
-    ), "Atleast one metric should have failed."
-
-
-def test_schemavalidation_fk_use_list_check_true_multiple_check_mode_success(
-    spark, df_long_incoming, list_check_true_multiple_check_mode_schemavalidation_config
-):
-    assert True == process_schemavalidation_success(
-        spark,
-        df_long_incoming,
-        list_check_true_multiple_check_mode_schemavalidation_config,
-    ), "Atleast one metric should have failed."
-
-
-def test_schemavalidation_fk_use_list_check_false_multiple_check_mode_success(
-    spark,
-    df_long_incoming,
-    list_check_false_multiple_check_mode_schemavalidation_config,
-):
-    assert True == process_schemavalidation_success(
-        spark,
-        df_long_incoming,
-        list_check_false_multiple_check_mode_schemavalidation_config,
-    ), "Atleast one metric should have failed."
-
-
-def test_schemavalidation_fk_use_list_check_true_multiple_check_mode_failure(
-    spark, df_long_incoming, list_check_true_multiple_check_mode_schemavalidation_config
-):
-    assert False == process_schemavalidation_failure(
-        spark,
-        df_long_incoming,
-        list_check_true_multiple_check_mode_schemavalidation_config,
-    ), "Atleast one metric should have failed."
-
-
-def test_schemavalidation_fk_use_list_check_false_multiple_check_mode_failure(
-    spark,
-    df_long_incoming,
-    list_check_false_multiple_check_mode_schemavalidation_config,
-):
-    assert False == process_schemavalidation_failure(
-        spark,
-        df_long_incoming,
-        list_check_false_multiple_check_mode_schemavalidation_config,
-    ), "Atleast one metric should have failed."
+        fk_config(use_list_check, check_mode),
+        expected_success=False,
+        context=f"use_list_check-{use_list_check}-{check_mode}",
+        register_signups=False,
+        limit_references=True,
+    )
 
 
 pytestmark = pytest.mark.spark

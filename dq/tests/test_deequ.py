@@ -2,12 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from unittest.mock import patch, MagicMock
-from pyspark.sql import SparkSession
 from pyhocon import ConfigFactory
+
 from dq.engine.deequ.deequ_engine import DeequEngine
-from dq.engine.deequ.deequ_check import DeequCheck
-import json
+from dq.tests.helpers import assert_overall_success
 
 
 @pytest.fixture
@@ -32,24 +30,32 @@ def sample_failure_dataframe(spark):
     return spark.createDataFrame(data, columns)
 
 
-@pytest.fixture
-def deequ_single_check_config():
-    config_str = """
-    deequ {
+def deequ_checks_config(single_check_mode: bool):
+    """Build the four-check deequ config used by the engine tests.
+
+    Args:
+        single_check_mode: True bundles every constraint in one Check;
+            False emits one Check per constraint.
+
+    Returns:
+        The parsed ``deequ`` config subtree.
+    """
+    config_str = f"""
+    deequ {{
         name = "myrule1"
         engine = "deequ"
-        single_check_mode = True
+        single_check_mode = {single_check_mode}
         checks = [
-            {
+            {{
                 constraint = "containsEmail"
                 column = "email"
                 assertion = "lambda i : i == 1"
-            },
-            {
+            }},
+            {{
                 constraint = "isPositive"
                 column = "age"
-            },
-            {
+            }},
+            {{
                 alias = "check-datatype"
                 constraint = "hasDataType"
                 column = "age"
@@ -57,117 +63,38 @@ def deequ_single_check_config():
                 hint = "Check failed as age may not be integer type"
                 datatype = Integral
                 assertion = "lambda i : i == 1"
-            },
-	        {
-		        constraint = "hasCompleteness",
-                column = "name",
+            }},
+            {{
+                constraint = "hasCompleteness"
+                column = "name"
                 assertion = "lambda i : i == 1"
                 hint = "Check failed as name may not be complete"
                 description = "Check if name is complete"
-
-            }
+            }}
         ]
-    }
+    }}
 
     """
     return ConfigFactory.parse_string(config_str).get("deequ", {})
 
 
-@pytest.fixture
-def deequ_multi_check_config():
-    config_str = """
-    deequ {
-        name = "myrule1"
-        engine = "deequ"
-        single_check_mode = False
-        checks = [
-            {
-                constraint = "containsEmail"
-                column = "email"
-                assertion = "lambda i : i == 1"
-            },
-            {
-                constraint = "isPositive"
-                column = "age"
-            },
-            {
-                alias = "check-datatype"
-                constraint = "hasDataType"
-                column = "age"
-                description = "Check if age is integer type"
-                hint = "Check failed as age may not be integer type"
-                datatype = Integral
-                assertion = "lambda i : i == 1"
-            },
-	        {
-		        constraint = "hasCompleteness",
-                column = "name",
-                assertion = "lambda i : i == 1"
-                hint = "Check failed as name may not be complete"
-                description = "Check if name is complete"
-
-            }
-        ]
-    }
-
-    """
-    return ConfigFactory.parse_string(config_str).get("deequ", {})
-
-
-def test_single_check_deequ_engine_success(
-    sample_success_dataframe, deequ_single_check_config
-):
-    engine = DeequEngine(deequ_single_check_config)
+@pytest.mark.parametrize(
+    "single_check_mode", [True, False], ids=["single_check", "multi_check"]
+)
+def test_deequ_engine_success(sample_success_dataframe, single_check_mode):
+    engine = DeequEngine(deequ_checks_config(single_check_mode))
     summarymetrics = engine.apply(sample_success_dataframe, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        assert metric["success"] == True, f"{metric} failed."
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert True == overallsuccess, "Atleast one metric failed."
+    assert_overall_success(summarymetrics, "deequ")
 
 
-def test_multi_check_deequ_engine_success(
-    sample_success_dataframe, deequ_multi_check_config
-):
-    engine = DeequEngine(deequ_multi_check_config)
-    summarymetrics = engine.apply(sample_success_dataframe, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        assert metric["success"] == True, f"{metric} failed."
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert True == overallsuccess, "Atleast one metric failed."
-
-
-def test_single_check_deequ_engine_failure(
-    sample_failure_dataframe, deequ_single_check_config
-):
-    engine = DeequEngine(deequ_single_check_config)
+@pytest.mark.parametrize(
+    "single_check_mode", [True, False], ids=["single_check", "multi_check"]
+)
+def test_deequ_engine_failure(sample_failure_dataframe, single_check_mode):
+    engine = DeequEngine(deequ_checks_config(single_check_mode))
     summarymetrics = engine.apply(sample_failure_dataframe, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            overallsuccess = False
-
-    assert False == overallsuccess, "Atleast one metric should have failed."
-
-
-def test_multi_check_deequ_engine_failure(
-    sample_failure_dataframe, deequ_multi_check_config
-):
-    engine = DeequEngine(deequ_multi_check_config)
-    summarymetrics = engine.apply(sample_failure_dataframe, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            overallsuccess = False
-
-    assert False == overallsuccess, "Atleast one metric should have failed."
+    failures = [metric for metric in summarymetrics if metric["success"] is not True]
+    assert failures, "At least one deequ check should have failed."
 
 
 pytestmark = pytest.mark.spark

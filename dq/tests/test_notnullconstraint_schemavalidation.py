@@ -2,80 +2,55 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from pyhocon import ConfigFactory
-from dq.engine.schemavalidation.schemavalidation_engine import SchemavalidationEngine
-import json
-from pyspark.sql.types import StructType, StringType, LongType, StructField
+from pyspark.sql.types import LongType
 
+from dq.tests.schemavalidation_support import (
+    apply_and_assert,
+    people_df,
+    schema_validation_config,
+)
 
-def test_schemavalidation_with_nullvalue_and_disabled_notnull_success(spark):
-    data = [("John", 25, "2021-01-01"), ("Doe", None, "2021-01-02"), ("Jane", 40, None)]
-    data_schema = StructType(
+# (case id, rows, per-column nullability, expected outcome). Nullability
+# is the not-null contract: with it disabled the null-bearing rows pass;
+# with it enabled the same shape only passes because no nulls arrive.
+NOT_NULL_CASES = [
+    (
+        "with_nullvalue_disabled_notnull",
+        [("John", 25, "2021-01-01"), ("Doe", None, "2021-01-02"), ("Jane", 40, None)],
+        (False, True, True),
+    ),
+    (
+        "without_nullvalue_enabled_notnull",
         [
-            StructField("name", StringType(), False),
-            StructField("age", LongType(), True),
-            StructField("signup_date", StringType(), True),
-        ]
+            ("John", 25, "2021-01-01"),
+            ("Doe", 30, "2021-01-02"),
+            ("Jane", 40, "2024-05-05"),
+        ],
+        (False, False, False),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "case,rows,nullable",
+    NOT_NULL_CASES,
+    ids=[case[0] for case in NOT_NULL_CASES],
+)
+def test_schemavalidation_notnull_constraints(spark, case, rows, nullable):
+    df = people_df(spark, rows=rows, age_type=LongType(), nullable=nullable)
+    config = schema_validation_config(
+        name=f"schemavalidation notnull case {case}",
+        single_check_mode=True,
     )
-    df = spark.createDataFrame(data=data, schema=data_schema)
-    df.createOrReplaceTempView("temp_data_table")
-    scemavalidation_config = ConfigFactory.parse_string("""
-    {
-        name = "schemavalidation with null values and not null enabled constraint for receving failure"
-        engine = schemavalidation
-        single_check_mode = True
-        schema = {
-            catalog_type = spark
-            table = "temp_data_table"
-        }
-    }
-    """)
-    schema_validation_engine = SchemavalidationEngine(scemavalidation_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert True == overallsuccess
-
-
-def test_schemavalidation_without_nullvalue_and_enabled_notnull_success(spark):
-    data = [
-        ("John", 25, "2021-01-01"),
-        ("Doe", 30, "2021-01-02"),
-        ("Jane", 40, "2024-05-05"),
-    ]
-    data_schema = StructType(
-        [
-            StructField("name", StringType(), False),
-            StructField("age", LongType(), False),
-            StructField("signup_date", StringType(), False),
-        ]
+    apply_and_assert(
+        spark,
+        df,
+        config,
+        expected_success=True,
+        context=case,
+        register_users=False,
+        register_signups=False,
     )
-    df = spark.createDataFrame(data=data, schema=data_schema)
-    df.createOrReplaceTempView("temp_data_table")
-    scemavalidation_config = ConfigFactory.parse_string("""
-    {
-        name = "schemavalidation with null values and not null enabled constraint for receving failure"
-        engine = schemavalidation
-        single_check_mode = True
-        schema = {
-            catalog_type = spark
-            table = "temp_data_table"
-        }
-    }
-    """)
-    schema_validation_engine = SchemavalidationEngine(scemavalidation_config)
-    summarymetrics = schema_validation_engine.apply(df, repository=None)
-    overallsuccess = True
-    for metric in summarymetrics:
-        if not (metric["success"]):
-            print("Error in : " + json.dumps(metric))
-            overallsuccess = False
-
-    assert True == overallsuccess
 
 
 pytestmark = pytest.mark.spark
