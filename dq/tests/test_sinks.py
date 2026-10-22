@@ -9,7 +9,7 @@ import uuid
 
 from pyspark.sql.types import StringType, StructField, StructType
 
-from dq.engine.custom.custom_engine import CustomEngine
+from dq.engine.businessrules.businessrules_engine import BusinessrulesEngine
 from dq.exceptions import ConfigurationError, RepositoryError
 from dq.sinks import InMemorySink, RepositorySink, sink_from_config
 from dq.tests.helpers import (
@@ -107,7 +107,7 @@ def test_engine_hands_artifacts_to_the_injected_sink(spark):
         } ] }
         """).get("sync", {})
     sink = InMemorySink()
-    results = CustomEngine(config).apply(frame, sink)
+    results = BusinessrulesEngine(config).apply(frame, sink)
     assert len(results) == 1
     assert_sink_received_both_artifacts(results, sink)
     stored_metrics = sink.writes()[("metrics", list(sink.writes())[0][1])]
@@ -206,7 +206,7 @@ def test_framework_persists_through_the_sink_to_files(spark, tmp_path):
     dqframework {{
       dqrules = [ {{
         name = "sink_lane"
-        engine = "custom"
+        engine = "businessrules"
         checks = [ {{ constraint = "DistinctnessByGroup", columns = ["id"], group_by = ["region"], min = 1, level = "Error" }} ]
       }} ]
       repository {{

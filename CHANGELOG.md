@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking**: the `custom` engine is renamed to `businessrules` --
+  `engine = "custom"` no longer resolves. Update rule packs to
+  `engine = "businessrules"` (constraint names are unchanged;
+  `dq-validate` rejects the old keyword with a migration hint). Code
+  surface moves to `dq.engine.businessrules.businessrules_engine.BusinessrulesEngine`
+  and tests/examples follow the new name
+
 ### Added
 
 - `dq.spark_adapter.execute_envelope`: one entry point that computes every

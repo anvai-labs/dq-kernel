@@ -678,7 +678,7 @@ class CustomEnginePlugin(DQEnginePlugin):
     @property
     def metadata(self) -> PluginMetadata:
         return PluginMetadata(
-            name="custom",
+            name="businessrules",
             version="1.0.0",
             description="Custom business logic data quality engine",
             supported_constraints=[
@@ -689,11 +689,11 @@ class CustomEnginePlugin(DQEnginePlugin):
         )
     
     def create_engine(self, config: Dict[str, Any], context: Dict[str, Any]) -> 'DQEngine':
-        from dq.engine.custom.custom_engine import CustomEngine
+        from dq.engine.businessrules.businessrules_engine import BusinessrulesEngine
         return CustomEngine(config, context.get("timestamp"))
     
     def validate_config(self, config: Dict[str, Any]) -> bool:
-        """Validate custom engine configuration"""
+        """Validate businessrules engine configuration"""
         
         checks = config.get("checks", [])
         if not checks:
@@ -721,7 +721,7 @@ class PluginDiscovery:
         
         default_paths = [
             "dq.engine.deequ.plugin",
-            "dq.engine.custom.plugin", 
+            "dq.engine.businessrules.plugin", 
             "dq.engine.greatexpectations.plugin",
             "dq.engine.schemavalidation.plugin"
         ]

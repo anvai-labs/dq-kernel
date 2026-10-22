@@ -7,7 +7,7 @@ This directory contains example configurations and scripts demonstrating how to 
 - `basic_deequ_validation.conf` - Basic data quality checks using the Deequ engine
 - `dqdl_validation.conf` - Vendor-specific DQDL compatibility rules through PyDeequ
 - `schema_validation.conf` - Schema validation with datatype, nullable, and unique constraints
-- `custom_constraints.conf` - Custom engine constraints (distinctness, rate-of-change, negative values)
+- `businessrules_constraints.conf` - Businessrules engine constraints (distinctness, rate-of-change, negative values)
 - `multi_engine_pipeline.conf` - Multi-engine pipeline combining Deequ and schema validation
 - `unity_catalog.conf` - Configuration using Databricks Unity Catalog
 - `glue_catalog.conf` - Configuration using AWS Glue Data Catalog

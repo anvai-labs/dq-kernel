@@ -71,7 +71,7 @@ def test_structured_dataframe_references_resolve_through_the_catalog(spark):
       }
       dqrules = [ {
         name = "resolution"
-        engine = "custom"
+        engine = "businessrules"
         checks = [ { constraint = "DistinctnessByGroup", columns = ["id"], group_by = ["id"], min = 1, level = "Error" } ]
       } ]
     }
@@ -86,7 +86,7 @@ def test_rule_referencing_a_missing_table_fails_closed(spark):
     dqframework {
       dqrules = [ {
         name = "missing"
-        engine = "custom"
+        engine = "businessrules"
         dataframes = ["does_not_exist"]
         checks = [ { constraint = "DistinctnessByGroup", columns = ["id"], group_by = ["region"], min = 1, level = "Error" } ]
       } ]

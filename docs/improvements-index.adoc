@@ -138,10 +138,10 @@ git checkout -b security-fixes
 # Edit deequ_check.py to replace eval()
 
 # 2. Fix SQL injection
-# Edit custom_engine.py to use parameterized queries
+# Edit businessrules_engine.py to use parameterized queries
 
 # 3. Remove collect() operations  
-# Edit custom_engine.py to use distributed processing
+# Edit businessrules_engine.py to use distributed processing
 
 # 4. Test fixes
 pytest tests/ -k security

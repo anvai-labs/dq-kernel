@@ -14,12 +14,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _BUILT_IN_PAYLOAD_KEYS = {
-    "custom": "checks",
+    "businessrules": "checks",
     "deequ": "checks",
     "dqdl": "ruleset",
     "greatexpectations": "expectations",
     "schemavalidation": "schema",
 }
+
+_RENAMED_ENGINES = {"custom": "businessrules"}
 
 
 def is_local_config_reference(config_path: str) -> bool:
@@ -77,7 +79,18 @@ def validate_config(config_path: str) -> bool:
             if not engine:
                 logger.error(f"Rule {i}: Missing required key 'engine'")
                 return False
-            payload_key = _BUILT_IN_PAYLOAD_KEYS.get(str(engine).lower())
+            engine_key = str(engine).lower()
+            renamed = _RENAMED_ENGINES.get(engine_key)
+            if renamed:
+                logger.error(
+                    "Rule %s: Engine '%s' was renamed to '%s'; "
+                    "update the configuration",
+                    i,
+                    engine,
+                    renamed,
+                )
+                return False
+            payload_key = _BUILT_IN_PAYLOAD_KEYS.get(engine_key)
             if payload_key and not rule.get(payload_key):
                 logger.error(
                     "Rule %s: Engine '%s' requires a non-empty '%s' payload",

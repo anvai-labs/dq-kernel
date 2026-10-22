@@ -7,26 +7,28 @@ os.environ["SPARK_VERSION"] = "3.5"
 import pytest
 from pyhocon import ConfigFactory
 
-from dq.engine.custom.custom_engine import CustomEngine
-from dq.engine.custom.strategies import NoNegativeValuesStrategy
+from dq.engine.businessrules.businessrules_engine import BusinessrulesEngine
+from dq.engine.businessrules.strategies import NoNegativeValuesStrategy
 from dq.tests.helpers import assert_overall_success
 import pydeequ
 
 from pyspark.sql import SparkSession
 
 
-def test_distinct_groupby_constraint(spark, custom_config, sample_dataframe_group):
-    custom_engine = CustomEngine(custom_config)
-    results = custom_engine.apply(sample_dataframe_group, None)
+def test_distinct_groupby_constraint(
+    spark, businessrules_config, sample_dataframe_group
+):
+    engine = BusinessrulesEngine(businessrules_config)
+    results = engine.apply(sample_dataframe_group, None)
     assert all(isinstance(metric["details"], dict) for metric in results)
     assert len(results) == 2
 
 
 def test_rate_of_change(
-    spark, custom_config_rate_of_change, multi_column_dataframe_rate_of_change
+    spark, businessrules_config_rate_of_change, multi_column_dataframe_rate_of_change
 ):
-    custom_engine = CustomEngine(custom_config_rate_of_change)
-    results = custom_engine.apply(multi_column_dataframe_rate_of_change, None)
+    engine = BusinessrulesEngine(businessrules_config_rate_of_change)
+    results = engine.apply(multi_column_dataframe_rate_of_change, None)
     rate_of_change = [
         result
         for result in results
@@ -44,10 +46,10 @@ def test_rate_of_change(
 
 
 def test_wide_col_negative_values(
-    spark, custom_config_wide_col_negative_values, numeric_dataframe
+    spark, businessrules_config_wide_col_negative_values, numeric_dataframe
 ):
-    custom_engine = CustomEngine(custom_config_wide_col_negative_values)
-    results = custom_engine.apply(numeric_dataframe, None)
+    engine = BusinessrulesEngine(businessrules_config_wide_col_negative_values)
+    results = engine.apply(numeric_dataframe, None)
     assert_overall_success(results, "wide-table negative values")
 
 

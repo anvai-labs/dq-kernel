@@ -5,7 +5,7 @@ import logging
 from typing import Optional, List, Dict, Any
 
 from dq.engine.dq_engine import DQEngine
-from dq.engine.custom.strategies import (
+from dq.engine.businessrules.strategies import (
     ColumnNamesInReferenceTableStrategy,
     ConsecutivePercentChangeStrategy,
     GroupedDistinctBoundsStrategy,
@@ -15,8 +15,8 @@ from dq.engine.custom.strategies import (
 logger = logging.getLogger(__name__)
 
 
-class CustomEngine(DQEngine):
-    """Engine providing custom business-rule constraints.
+class BusinessrulesEngine(DQEngine):
+    """Engine applying named business-rule constraint strategies.
 
     Supports four built-in constraint types, addressed by canonical name:
 
@@ -56,7 +56,7 @@ class CustomEngine(DQEngine):
         super().__init__(config, dqts)
 
     def apply(self, dataframe, repository=None) -> List[Dict[str, Any]]:
-        """Apply custom constraint checks to the DataFrame.
+        """Apply business-rule constraint checks to the DataFrame.
 
         Args:
             dataframe: Spark DataFrame to validate.
@@ -65,11 +65,11 @@ class CustomEngine(DQEngine):
         Returns:
             List of metric dicts with ``check``, ``success``, ``details`` keys.
         """
-        custom_checks = self._config.get("checks", {})
+        rule_checks = self._config.get("checks", {})
         self._sparkSession = dataframe.sparkSession
         _metrics_results = []
         _verification_results = []
-        for check_config in custom_checks:
+        for check_config in rule_checks:
             constraint = check_config.get("constraint", None)
             strategy = self._STRATEGIES.get(constraint)
             if strategy is not None:
@@ -77,10 +77,12 @@ class CustomEngine(DQEngine):
             else:
                 canonical = self._LEGACY_ALIASES.get(constraint)
                 if canonical is None:
-                    raise ValueError(f"Unsupported custom constraint: {constraint}")
+                    raise ValueError(
+                        f"Unsupported businessrules constraint: {constraint}"
+                    )
                 strategy = self._STRATEGIES[canonical]
                 logger.warning(
-                    "custom constraint %r was renamed to %r; update the configuration",
+                    "constraint %r was renamed to %r; update the configuration",
                     constraint,
                     canonical,
                 )

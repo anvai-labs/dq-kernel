@@ -1,11 +1,11 @@
 # Copyright 2024 Data Quality Framework Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Constraint strategy objects for the custom engine (TD-ARCH-9).
+"""Constraint strategy objects for the businessrules engine (TD-ARCH-9).
 
 Each strategy owns one constraint's Spark planning and its bounded outcome
 rows. Strategies are stateless and addressable by their legacy constraint
-name; the ``CustomEngine`` facade only extracts configuration and dispatches.
+name; the ``BusinessrulesEngine`` facade only extracts configuration and dispatches.
 Result shapes are permanent contracts: rule packs depend on the metric and
 verification row layouts, so strategies may change how they compute a
 summary, never what they return (ADR-003).

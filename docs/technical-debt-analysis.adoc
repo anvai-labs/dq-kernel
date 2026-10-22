@@ -51,7 +51,7 @@ def safe_lambda_parser(lambda_str: str):
 
 === SQL Injection Risk
 
-**Location**: `build/lib/dq/engine/custom/custom_engine.py:90`
+**Location**: `build/lib/dq/engine/businessrules/businessrules_engine.py:90`
 
 [source,python]
 ----
@@ -109,7 +109,7 @@ class DQFramework:
 
 === Critical Memory Issue
 
-**Location**: `build/lib/dq/engine/custom/custom_engine.py:164`
+**Location**: `build/lib/dq/engine/businessrules/businessrules_engine.py:164`
 
 [source,python]
 ----

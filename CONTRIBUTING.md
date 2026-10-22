@@ -328,7 +328,7 @@ To add a new validation engine:
 
 ## Adding Custom Constraints
 
-Custom constraints can be added to the CustomEngine in `dq/engine/custom/custom_engine.py`. Follow the pattern of existing constraints:
+Business-rule constraints can be added to the BusinessrulesEngine in `dq/engine/businessrules/businessrules_engine.py`. Follow the pattern of existing constraints:
 
 1. Add the constraint class/function
 2. Register it in the constraint dispatcher

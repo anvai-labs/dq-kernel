@@ -152,11 +152,11 @@ def sample_dataframe_group(spark):
 
 
 @pytest.fixture
-def custom_config():
+def businessrules_config():
     config_str = """
     sync {
         name = "myrule1"
-        engine = "custom"
+        engine = "businessrules"
         checks = [
         {
             constraint_name = "DistinctnessByGroup-check"
@@ -173,11 +173,11 @@ def custom_config():
 
 
 @pytest.fixture
-def custom_config_rate_of_change():
+def businessrules_config_rate_of_change():
     config_str = """
     sync {
         name = "myrule1"
-        engine = "custom"
+        engine = "businessrules"
         checks = [
         {
             constraint_name = "rate_of_change_check"
@@ -203,11 +203,11 @@ def custom_config_rate_of_change():
 
 
 @pytest.fixture
-def custom_config_lookup_based_column():
+def businessrules_config_lookup_based_column():
     config_str = """
     sync {
         name = "reflookup"
-        engine = "custom"
+        engine = "businessrules"
         checks = [
         {
             constraint_name = "ref_table_lookup"
@@ -224,11 +224,11 @@ def custom_config_lookup_based_column():
 
 
 @pytest.fixture
-def custom_config_wide_col_negative_values():
+def businessrules_config_wide_col_negative_values():
     config_str = """
     sync {
         name = "NonNegativeCheckforWidetables"
-        engine = "custom"
+        engine = "businessrules"
         checks = [
         {
             constraint_name = "Negative_values"

@@ -20,7 +20,7 @@ from pyspark.sql.types import (
     StructType,
 )
 
-from dq.engine.custom.strategies import NoNegativeValuesStrategy
+from dq.engine.businessrules.strategies import NoNegativeValuesStrategy
 from dq.plan import (
     ColumnRef,
     Comparison,
