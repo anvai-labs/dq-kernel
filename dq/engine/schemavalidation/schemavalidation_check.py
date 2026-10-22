@@ -26,6 +26,23 @@ from dq.identifiers import ColumnName, TableName
 from dq.utils import constants
 
 
+def _fraction_is_one(value):
+    """Shared assertion that a fraction metric is fully satisfied.
+
+    Single definition for every call site that asserts a deequ fraction
+    equals 1.0. Note: multi-check mode plus uniqueness constraints
+    still crashes inside pydeequ regardless of assertion identity —
+    deequ's VerificationSuite.evaluate hashes Checks into a Scala Map,
+    and once the check set is large enough for a hash collision the
+    comparison reaches the JVM-side ScalaFunction1 wrapper, which has
+    no hashCode ("'ScalaFunction1' object has no attribute
+    'hashCode'"). Verified unfixable from Python (a callable class
+    implementing hashCode/equals still crashes); pinned by the
+    xfail(strict) unique-constraint multi-mode cases.
+    """
+    return value == 1.0
+
+
 class SchemavalidationCheck:
     """Builds PyDeequ checks from schema definitions.
 
@@ -206,7 +223,7 @@ class SchemavalidationCheck:
         Output
             Returns finalized modified checks object or list of checks with all constraints applied.
         """
-        assertion_lambda = lambda x: x == 1.0
+        assertion_lambda = _fraction_is_one
         # Validate schema for each column
         not_null_contraints = self._schema_config.get(
             constants.SCHEMA_VALIDATION_NOT_NULL_COLUMNS_KEY, []
@@ -539,7 +556,7 @@ class SchemavalidationCheck:
                 if self._single_check_mode:
                     checks = checks.hasUniqueness(
                         unique_set,
-                        lambda x: x == 1.0,
+                        _fraction_is_one,
                         "Error: Unique Constraint Check failure",
                     )
                 else:
@@ -550,7 +567,7 @@ class SchemavalidationCheck:
                             description="Schema Validation Unique Check",
                         ).hasUniqueness(
                             unique_set,
-                            lambda x: x == 1.0,
+                            _fraction_is_one,
                             "Error: Unique Constraint Check failure",
                         )
                     )

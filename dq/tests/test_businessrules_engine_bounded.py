@@ -131,6 +131,27 @@ def lookup_config(ref_table, ref_columns="item_id", ignore_columns=None):
     return ConfigFactory.parse_string(config).get("sync", {})
 
 
+def test_check_without_level_defaults_to_error(spark):
+    # A rule pack omitting level must still produce a usable StringType
+    # check_level column: the engine passes "Error" through to the
+    # verification rows, where a None default would infer NullType and
+    # break sink persistence downstream.
+    from dq.engine.businessrules.businessrules_engine import BusinessrulesEngine
+    from dq.sinks import InMemorySink
+
+    config = bounded_check_config(
+        "DistinctnessByGroup", "no_level_check", ["id"], ["region"]
+    )
+    del config["checks"][0]["level"]
+    frame = spark.createDataFrame(_GROUPS_DATA, _GROUPS_SCHEMA)
+    sink = InMemorySink()
+    BusinessrulesEngine(config).apply(frame, sink)
+    (key,) = [key for kind, key in sink.writes() if kind == "verifications"]
+    rows = sink.rows("verifications", key)
+    assert rows
+    assert all(row["check_level"] == "Error" for row in rows)
+
+
 def test_distinctness_emits_one_bounded_summary_per_column(spark):
     frame = spark.createDataFrame(_GROUPS_DATA, _GROUPS_SCHEMA)
     results = BusinessrulesEngine(
