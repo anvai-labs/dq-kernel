@@ -217,6 +217,10 @@ def _dataset_group_metrics(name: str, dataframe, plan: ExecutionPlan) -> dict:
     """
     from pyspark.sql import functions as F
 
+    # Lazy like the pyspark imports above: keeps this module importable
+    # without a JVM (see test_kernel_imports_without_optional_dependencies).
+    from dq.utils.spark_expr import grouped_bounds_summary
+
     metrics = [metric for metric in plan.metrics if metric.dataset.name == name]
     groupings = {}
     for metric in metrics:
@@ -239,23 +243,11 @@ def _dataset_group_metrics(name: str, dataframe, plan: ExecutionPlan) -> dict:
         for column_ref in grouping:
             _require_exact_column(dataframe, name, column_ref.name)
 
-        grouped_counts = dataframe.groupBy(
-            *[F.col(column_ref.name) for column_ref in grouping]
-        ).agg(
-            *[
-                F.countDistinct(F.col(column)).alias(f"dq_distinct_{index}")
-                for index, column in enumerate(columns)
-            ]
+        summary = grouped_bounds_summary(
+            dataframe,
+            [F.col(column_ref.name) for column_ref in grouping],
+            columns,
         )
-        aggregate_exprs = [F.count(F.lit(1)).alias("dq_group_count")]
-        for index in range(len(columns)):
-            aggregate_exprs.extend(
-                [
-                    F.min(F.col(f"dq_distinct_{index}")).alias(f"dq_min_{index}"),
-                    F.max(F.col(f"dq_distinct_{index}")).alias(f"dq_max_{index}"),
-                ]
-            )
-        summary = grouped_counts.agg(*aggregate_exprs).head()
         group_count = int(summary["dq_group_count"])
 
         column_index = {column: index for index, column in enumerate(columns)}
