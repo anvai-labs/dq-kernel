@@ -9,6 +9,7 @@ the nullable variant of every scenario is now a parametrize axis
 """
 
 import pytest
+from pyhocon import ConfigFactory
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import round as spark_round, to_date, to_timestamp
 from pyspark.sql.types import (
@@ -156,6 +157,22 @@ def unique_fk_config(single_check_mode: bool = True):
             },
         ],
     )
+
+
+# "long" activates the LongType scenario that previously existed only
+# as a dead fixture (df_long_incoming) on main.
+def test_schemavalidation_rejects_unknown_catalog_type(spark):
+    df = spark.createDataFrame(INFERRED_ROWS, COLUMNS)
+    df.createOrReplaceTempView("temp_data_table")
+    config = ConfigFactory.from_dict(
+        {
+            "name": "schemavalidation unknown catalog type",
+            "engine": "schemavalidation",
+            "schema": {"catalog_type": "bogus", "table": "temp_data_table"},
+        }
+    )
+    with pytest.raises(ValueError, match="Unsupported catalog_type"):
+        apply_and_assert(spark, df, config, expected_success=True)
 
 
 # "long" activates the LongType scenario that previously existed only
