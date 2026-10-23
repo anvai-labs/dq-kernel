@@ -218,6 +218,48 @@ def test_cdf_plan_must_target_one_dataset(spark, mixed_changes):
         execute_cdf_plan(plan, mixed_changes)
 
 
+def test_frame_type_guard_fails_closed(spark, mixed_changes):
+    with pytest.raises(ConfigurationError, match="must be a Spark DataFrame"):
+        execute_cdf_plan(counts_plan(), ["not", "a", "frame"])
+
+
+def test_scan_time_delta_errors_translate_to_remediation(spark, mixed_changes):
+    # A Delta error surfacing at action time (inside metric execution)
+    # must arrive as the documented ConfigurationError, not a raw
+    # Spark exception.
+
+    class ExplodingFrame:
+        """Duck-types DataFrame just enough to pass the guard."""
+
+        def __getattr__(self, name):
+            from pyspark.sql.utils import AnalysisException
+
+            try:
+                raise AnalysisException(
+                    "DELTA_CHANGE_DATA_NOT_RECORDED: change data was not "
+                    "recorded for version 5"
+                )
+            except AnalysisException as exc:
+                raise exc
+
+    frame = ExplodingFrame()
+    frame.__class__.__name__ = "DataFrame"
+    # bypass the isinstance guard the honest way: subclass DataFrame
+    from pyspark.sql import DataFrame
+
+    class FakeChangesFrame(DataFrame):
+        def agg(self, *args):
+            from pyspark.sql.utils import AnalysisException
+
+            raise AnalysisException("change data was not recorded for version 5")
+
+    with pytest.raises(ConfigurationError, match="delta.enableChangeDataFeed"):
+        execute_cdf_plan(
+            counts_plan(),
+            FakeChangesFrame(mixed_changes._jdf, mixed_changes.sparkSession),
+        )
+
+
 # ------------------------------------------------------------- reader
 
 
