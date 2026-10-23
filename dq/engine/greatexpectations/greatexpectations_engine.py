@@ -13,7 +13,6 @@ import datetime
 import json
 import logging
 import math
-import time
 from collections.abc import Mapping
 from typing import Any, Dict, List, Optional
 
@@ -29,9 +28,14 @@ from dq.utils import constants
 
 logger = logging.getLogger(__name__)
 
-# Outcome diagnostics are capped at depth 16 by dq.outcomes; sanitize
-# one level above so a nested container can never exceed the gate.
-_MAX_SANITIZE_DEPTH = 15
+# Outcome diagnostics are capped at depth 16 by dq.outcomes, and the
+# framework wraps details two levels deep ({check, success, details} ->
+# details) before that gate counts, so the sanitizer must stop two
+# levels earlier. Strings and lists are also truncated well inside the
+# 1 MiB per-outcome byte budget.
+_MAX_SANITIZE_DEPTH = 14
+_MAX_SANITIZE_STRING = 65_536
+_MAX_SANITIZE_LIST = 2_000
 
 
 def _to_strict_json(value: Any, depth: int = 0) -> Any:
@@ -50,24 +54,34 @@ def _to_strict_json(value: Any, depth: int = 0) -> Any:
     """
     if depth > _MAX_SANITIZE_DEPTH:
         return str(value)
-    if value is None or isinstance(value, (bool, str)):
+    if value is None or isinstance(value, bool):
         return value
+    if isinstance(value, str):
+        if len(value) <= _MAX_SANITIZE_STRING:
+            return value
+        return value[:_MAX_SANITIZE_STRING] + "...[truncated]"
     if isinstance(value, int):
         return value
     if isinstance(value, float):
         return value if math.isfinite(value) else None
     if isinstance(value, bytes):
-        return value.decode("utf-8", "replace")
+        return value[:_MAX_SANITIZE_STRING].decode("utf-8", "replace")
     if isinstance(value, Mapping):
         return {
             str(key): _to_strict_json(item, depth + 1) for key, item in value.items()
         }
     if isinstance(value, (list, tuple, set, frozenset)):
-        return [_to_strict_json(item, depth + 1) for item in value]
+        if len(value) <= _MAX_SANITIZE_LIST:
+            return [_to_strict_json(item, depth + 1) for item in value]
+        truncated = [
+            _to_strict_json(item, depth + 1)
+            for item in list(value)[:_MAX_SANITIZE_LIST]
+        ]
+        return truncated + ["...[truncated]"]
     item = getattr(value, "item", None)
     if callable(item):
         try:
-            return _to_strict_json(item(), depth)
+            return _to_strict_json(item(), depth + 1)
         except Exception:  # noqa: BLE001 - numpy-like scalar unwrap
             pass
     if isinstance(value, (datetime.date, datetime.datetime)):
@@ -83,6 +97,7 @@ class GreatexpectationsEngine(DQEngine):
         # Ephemeral context plumbing is built once per engine and reused
         # across apply() calls; building it per run is measurably costly.
         self._gx_batch_definition = None
+        self._gx_suite = None
 
     def apply(self, dataframe: DataFrame, repository=None) -> List[Dict[str, Any]]:
         """Apply the configured expectations to the DataFrame.
@@ -109,14 +124,17 @@ class GreatexpectationsEngine(DQEngine):
             batch_parameters={"dataframe": dataframe}
         )
 
-        rule_name = self._config.get(constants.DQ_RULE_NAME, "gx-rule")
-        suite = GreatexpectationsCheck(
-            self._config.get("expectations", [])
-        ).build_suite(gx, rule_name)
-        validation = batch.validate(suite)
+        if self._gx_suite is None:
+            rule_name = self._config.get(constants.DQ_RULE_NAME, "gx-rule")
+            self._gx_suite = GreatexpectationsCheck(
+                self._config.get("expectations", [])
+            ).build_suite(gx, rule_name)
+        validation = batch.validate(self._gx_suite)
 
         metrics = self._extract_metrics_from_validation_output(validation)
-        self._persist_run(repository, metrics, dataframe)
+        if repository:
+            metrics_df, verifications_df = self._artifact_frames(metrics, dataframe)
+            self._persist(repository, metrics_df, verifications_df)
         return metrics
 
     @staticmethod
@@ -137,8 +155,9 @@ class GreatexpectationsEngine(DQEngine):
     ) -> List[Dict[str, Any]]:
         """Extract metric dictionaries from the GX validation output.
 
-        Every result is coerced through the strict-JSON sanitizer so the
-        framework's outcome boundary can never reject a payload.
+        Every result is coerced through the strict-JSON sanitizer (type
+        normalization, depth and size truncation) so payload shape can
+        never breach the outcome boundary's structural gates.
         """
         summarymetrics = []
         for exp_result in validation_output.results:
@@ -152,21 +171,15 @@ class GreatexpectationsEngine(DQEngine):
             )
         return summarymetrics
 
-    def _persist_run(self, repository, metrics, dataframe) -> None:
-        """Persist the run's artifacts under one millisecond key.
-
-        Deliberately pydeequ-free (unlike DQEngine._persist) so a
-        spark+greatexpectations-only installation persists fine.
-        """
-        if not repository:
-            return
-        key = int(time.time() * 1000)
+    @staticmethod
+    def _artifact_frames(metrics, dataframe):
+        """Build the run's metrics and verifications artifact DataFrames."""
         spark = dataframe.sparkSession
         metrics_df = spark.createDataFrame(
             [(metric["check"], metric["success"]) for metric in metrics],
             StructType(
                 [
-                    StructField("expectation", StringType()),
+                    StructField("check", StringType()),
                     StructField("success", BooleanType()),
                 ]
             ),
@@ -188,5 +201,4 @@ class GreatexpectationsEngine(DQEngine):
                 ]
             ),
         )
-        repository.save(metrics_df, constants.DQ_REPOSITORY_METRICS, key)
-        repository.save(verifications_df, constants.DQ_REPOSITORY_VERIFICATIONS, key)
+        return metrics_df, verifications_df

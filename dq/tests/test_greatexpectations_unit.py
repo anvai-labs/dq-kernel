@@ -100,6 +100,43 @@ def test_sanitizer_bounds_recursion_depth():
     assert out == _to_strict_json(out)  # stable, no recursion error
 
 
+def test_sanitized_payloads_always_clear_the_outcome_gate():
+    # The engine-level contract: for ANY nesting depth, a sanitized
+    # payload must pass CheckOutcome.from_legacy without raising.
+    from dq.outcomes import CheckOutcome
+
+    def nest(n):
+        value = {"leaf": "value"}
+        for _ in range(n):
+            value = {"child": value}
+        return value
+
+    for depth in (0, 5, 14, 15, 20, 60):
+        payload = {
+            "check": "t",
+            "success": True,
+            "details": _to_strict_json(nest(depth)),
+        }
+        CheckOutcome.from_legacy(payload)  # must not raise
+
+
+def test_sanitizer_truncates_oversized_strings_and_lists():
+    huge_string = "x" * 200_000
+    huge_list = list(range(5_000))
+    out = _to_strict_json({"s": huge_string, "l": huge_list})
+    assert len(out["s"]) < 100_000 and out["s"].endswith("...[truncated]")
+    assert len(out["l"]) <= 2_001 and out["l"][-1] == "...[truncated]"
+
+
+def test_sanitizer_survives_cyclic_item_unwrapping():
+    class CyclicScalar:
+        def item(self):
+            return CyclicScalar()
+
+    out = _to_strict_json({"c": CyclicScalar()})
+    assert isinstance(out["c"], str)  # depth bound forces the str() fallback
+
+
 # ------------------------------------------------------------- vendor fake
 
 
@@ -271,5 +308,7 @@ def test_engine_caches_batch_definition_across_applies(monkeypatch):
     )
     engine.apply(_FakeFrame())
     first = engine._gx_batch_definition
+    first_suite = engine._gx_suite
     engine.apply(_FakeFrame())
     assert engine._gx_batch_definition is first
+    assert engine._gx_suite is first_suite

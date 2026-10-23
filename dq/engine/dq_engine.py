@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import time
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any
 from pyhocon import ConfigTree
@@ -42,11 +43,9 @@ class DQEngine(ABC):
                 ``DQ_REPOSITORY_VERIFICATIONS``.
         """
         if repository:
-            # Imported lazily: pydeequ is an optional extra and this base class
-            # stays importable in pyspark-only installations.
-            from pydeequ.repository import ResultKey
-
-            current_milli_time = ResultKey.current_milli_time()
+            # Epoch millis, equivalent to pydeequ's ResultKey.current_milli_time()
+            # but pydeequ-free so any extras combination can persist.
+            current_milli_time = int(time.time() * 1000)
             repository.save(
                 successMetrics,
                 constants.DQ_REPOSITORY_METRICS,
