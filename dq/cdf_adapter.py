@@ -36,13 +36,10 @@ from dq.plan import (
     SEMANTIC_RANGES_VERSION,
 )
 from dq.spark_adapter import (
-    capabilities_for as _spark_capabilities_for,
-    compute_plan_values,
-)
-from dq.spark_adapter import (
     CAPABILITIES as _SPARK_COUNTS,
     GROUP_CAPABILITIES as _SPARK_GROUPS,
     RANGES_CAPABILITIES as _SPARK_RANGES,
+    compute_plan_values,
 )
 
 ADAPTER_NAME = "spark-cdf"

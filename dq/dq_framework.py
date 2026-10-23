@@ -5,7 +5,6 @@
 
 import logging
 import time
-from collections import defaultdict
 from urllib.parse import urlparse
 
 from pyhocon import ConfigFactory
@@ -282,17 +281,3 @@ class DQFramework:
                     f"DataFrame '{df_name}' not found in config, Spark catalog, "
                     f"or {self._catalog_type or 'default'} catalog."
                 )
-
-    def pivot_configuration(self, config):
-        """Pivot configuration so all engines and their checks are grouped.
-
-        Args:
-            config: Configuration object with rules attribute.
-
-        Returns:
-            Dict mapping engine names to lists of checks.
-        """
-        engine_check_map = defaultdict(list)
-        for rule in config.rules:
-            engine_check_map[rule.engine].extend(rule.checks)
-        return engine_check_map
