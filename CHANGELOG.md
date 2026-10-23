@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `PipelineExpectationsHarvester`
+  (`dq.engine.databricks.pipeline_expectations`): harvests Lakeflow
+  Declarative Pipeline expectation metrics from the Unity Catalog
+  event log (`flow_progress` events via the `event_log(TABLE(...))`
+  function or the pipeline's configured event-log table) into the
+  framework outcome contract, joining platform-native checks with the
+  engines' evidence stream; ADR-011 records the DQ-federation and
+  JVM-bound deployment strategy
+
 - The `greatexpectations` engine is now fully fledged on GX Core
   (`great_expectations >=1.24,<2`, install with the `greatexpectations`
   extra): modern ephemeral-context Spark validation, snake-case

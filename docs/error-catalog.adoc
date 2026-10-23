@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 162 raise sites across the modules below; the contract
+The framework raises 170 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -152,6 +152,21 @@ the evidence store refused an unsafe write.
   workspace client with explicit credentials.
 * Fix: supply an HTTPS workspace origin without a path and a nonblank
   token; prefer the injected client.
+
+== dq/engine/databricks/pipeline_expectations.py
+
+Fail-closed harvesting of Lakeflow pipeline expectation metrics.
+
+* `ValueError` -- constructor misuse (injected client combined with
+  explicit credentials, malformed workspace URL or token, reusing the
+  DatabricksCheck guards), ambiguous or blank event-log source
+  (exactly one of `table_ref` / `pipeline_id`), a pipeline with no
+  Unity Catalog event log, or a `flow_progress` event row whose
+  details are unparseable, missing expectation fields, or carry
+  non-numeric counts. Fix the source arguments or the pipeline's
+  expectations/event-log configuration; the error names the row
+  origin (dataset, expectation, timestamp).
+
 
 == dq/engine/schemavalidation/schemavalidation_check.py
 
