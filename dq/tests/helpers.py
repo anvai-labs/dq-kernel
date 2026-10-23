@@ -37,10 +37,19 @@ def assert_any_failure(results, context=""):
 
 
 def assert_sink_received_both_artifacts(results, sink):
-    """Assert an engine run produced results and persisted both artifact kinds."""
+    """Assert an engine run persisted both artifact kinds under one key.
+
+    Both artifacts of a run must share a single ResultKey so downstream
+    consumers joining on the run timestamp see the complete run, and
+    the metrics payload must carry actual rows.
+    """
     assert results
     writes = sink.writes()
     assert set(kind for kind, _ in writes) == {"metrics", "verifications"}
+    keys = {key for _, key in writes}
+    assert len(keys) == 1, f"run artifacts split across keys {keys}"
+    (key,) = keys
+    assert sink.rows("metrics", key), "metrics artifact has no rows"
 
 
 class FakeRow:
