@@ -8,6 +8,7 @@ This directory contains example configurations and scripts demonstrating how to 
 - `dqdl_validation.conf` - Vendor-specific DQDL compatibility rules through PyDeequ
 - `schema_validation.conf` - Schema validation with datatype, nullable, and unique constraints
 - `businessrules_constraints.conf` - Businessrules engine constraints (distinctness, rate-of-change, negative values)
+- `greatexpectations_validation.conf` - GX Core expectations (snake-case `type` entries) through the greatexpectations engine
 - `multi_engine_pipeline.conf` - Multi-engine pipeline combining Deequ and schema validation
 - `unity_catalog.conf` - Configuration using Databricks Unity Catalog
 - `glue_catalog.conf` - Configuration using AWS Glue Data Catalog
@@ -25,6 +26,9 @@ Ensure you have the framework installed with Spark and Deequ support:
 ```bash
 pip install dq-kernel[spark,deequ]
 ```
+
+The Great Expectations example additionally needs the `greatexpectations` extra
+(`pip install dq-kernel[spark,greatexpectations]`, GX Core >=1.24,<2).
 
 Then run the sample job:
 

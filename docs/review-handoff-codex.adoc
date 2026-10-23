@@ -101,7 +101,7 @@ revisions.
 * No real-PostgreSQL integration lane (fake DB-API only); psycopg is a
 deployment concern by design.
 * Scale benchmarks are manual/scheduled, not in CI.
-* Schema/custom engine tests carry legacy loose-assertion style (U7
+* Schema/businessrules engine tests carry legacy loose-assertion style (U7
 partially consolidated).
 * The error catalog pins modules and types but not message families.
 

@@ -15,14 +15,14 @@ graph TB
         DeequEngine[Deequ Engine<br/>Amazon Deequ Integration]
         GEEngine[Great Expectations<br/>Statistical Validation] 
         SchemaEngine[Schema Validation<br/>Data Type Checking]
-        CustomEngine[Custom Engine<br/>Business Logic]
+        BusinessrulesEngine[Business Rules Engine<br/>Business Logic]
     end
     
     subgraph "Constraint System"
         DeequChecks[Deequ Checks<br/>Core & Completeness]
         GEChecks[GE Expectations<br/>Statistical & Range]
         SchemaChecks[Schema Checks<br/>Structure & Data]
-        CustomChecks[Custom Checks<br/>Business & Rate]
+        BusinessrulesChecks[Business Rule Checks<br/>Business & Rate]
     end
     
     subgraph "Results & Repository"
@@ -39,22 +39,22 @@ graph TB
     EngineLoader --> DeequEngine
     EngineLoader --> GEEngine
     EngineLoader --> SchemaEngine
-    EngineLoader --> CustomEngine
+    EngineLoader --> BusinessrulesEngine
     
     DeequEngine --> DeequChecks
     GEEngine --> GEChecks
     SchemaEngine --> SchemaChecks
-    CustomEngine --> CustomChecks
+    BusinessrulesEngine --> BusinessrulesChecks
     
     DeequChecks --> Metrics
     GEChecks --> Metrics
     SchemaChecks --> Metrics
-    CustomChecks --> Metrics
+    BusinessrulesChecks --> Metrics
     
     DeequChecks --> Verifications
     GEChecks --> Verifications
     SchemaChecks --> Verifications
-    CustomChecks --> Verifications
+    BusinessrulesChecks --> Verifications
     
     Metrics --> Repository
     Verifications --> Repository
@@ -68,6 +68,6 @@ graph TB
     
     class Config,ConfigLoader configLayer
     class DQF,EngineLoader,DataFrames coreFramework
-    class DeequEngine,GEEngine,SchemaEngine,CustomEngine engineLayer
-    class DeequChecks,GEChecks,SchemaChecks,CustomChecks constraintLayer
+    class DeequEngine,GEEngine,SchemaEngine,BusinessrulesEngine engineLayer
+    class DeequChecks,GEChecks,SchemaChecks,BusinessrulesChecks constraintLayer
     class Metrics,Verifications,Repository resultLayer

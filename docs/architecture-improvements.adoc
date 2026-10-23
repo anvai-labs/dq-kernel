@@ -674,7 +674,7 @@ class DeequEnginePlugin(DQEnginePlugin):
         
         return True
 
-class CustomEnginePlugin(DQEnginePlugin):
+class BusinessrulesEnginePlugin(DQEnginePlugin):
     @property
     def metadata(self) -> PluginMetadata:
         return PluginMetadata(
@@ -690,7 +690,7 @@ class CustomEnginePlugin(DQEnginePlugin):
     
     def create_engine(self, config: Dict[str, Any], context: Dict[str, Any]) -> 'DQEngine':
         from dq.engine.businessrules.businessrules_engine import BusinessrulesEngine
-        return CustomEngine(config, context.get("timestamp"))
+        return BusinessrulesEngine(config, context.get("timestamp"))
     
     def validate_config(self, config: Dict[str, Any]) -> bool:
         """Validate businessrules engine configuration"""

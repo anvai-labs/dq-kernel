@@ -26,10 +26,9 @@ Install the framework path used by the orchestrator and built-in engines:
 pip install 'dq-kernel[spark,deequ]'
 ----
 
-Add `aws` for Glue/S3 support and `databricks` for the Databricks SDK integration. The Great
-Expectations adapter imports `great_expectations` at runtime, but the project does not pin that
-third-party package because the adapter uses its legacy `SparkDFDataset` API. Install and test a
-compatible version explicitly before selecting that engine.
+Add `aws` for Glue/S3 support, `databricks` for the Databricks SDK integration, and
+`greatexpectations` for the Great Expectations engine. That extra pins GX Core
+(`great_expectations >=1.24,<2`) and is imported lazily, so the base package stays GE-free.
 
 == Architecture
 
@@ -271,12 +270,20 @@ The `businessrules` engine currently implements `DistinctnessByGroup`, `RateOfCh
 `LookupBasedOnColumnNameList`, and `WideTablesNegativeValuesCheck`. See
 `examples/businessrules_constraints.conf`.
 
-=== Great Expectations adapter
+=== Great Expectations
 
-The `greatexpectations` engine is an optional compatibility adapter. It requires a separately
-installed Great Expectations release that still exposes `ge.dataset.SparkDFDataset`; current CI
-tests the adapter boundary with a controlled substitute and does not certify a live external
-Great Expectations/Spark combination.
+The `greatexpectations` engine is a first-class engine on GX Core (`great_expectations
+>=1.24,<2`), installed with its optional extra (`poetry install -E greatexpectations` in a
+source checkout, or `pip install 'dq-kernel[greatexpectations]'`). It validates a Spark
+DataFrame through the modern GX datasource API — an ephemeral context, a Spark dataframe
+asset, and one `ExpectationSuite` per rule — with the batch definition built once per engine
+and reused across runs. Each expectation entry uses a snake-case `type` resolved against
+`gx.expectations`; unknown or missing types fail closed with `ValueError`. Result payloads
+are sanitized to strict JSON before crossing the outcome boundary, and repository runs
+persist metrics and verifications under one millisecond key without requiring PyDeequ. CI
+installs the extra and certifies live GX Core round trips (`dq/tests/test_greatexpectations.py`,
+skipped only when the extra is absent); mocked-gx unit contract tests run in
+`dq/tests/test_greatexpectations_unit.py`. See `examples/greatexpectations_validation.conf`.
 
 == Results and repositories
 

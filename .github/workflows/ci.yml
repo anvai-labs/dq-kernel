@@ -78,7 +78,7 @@ jobs:
       - name: Install Poetry
         run: pip install poetry==2.4.2
       - name: Install dependencies
-        run: poetry install --with dev -E spark -E deequ -E aws -E databricks
+        run: poetry install --with dev -E spark -E deequ -E aws -E databricks -E greatexpectations
       - name: Download Deequ JAR
         run: |
           mkdir -p lib

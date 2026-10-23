@@ -100,7 +100,7 @@ serializer. Unknown/ambiguous outcomes fail at the engine boundary.
 
 |TD-ARCH-4
 |P1
-|`CustomEngine` collects full rate-of-change and grouped result datasets to the driver,
+|`BusinessrulesEngine` collects full rate-of-change and grouped result datasets to the driver,
 performs an extra count for logging, and can divide by zero.
 |Distributed window/aggregation expressions that collect only bounded check summaries;
 property and scale fixtures prove equivalence and memory shape. *Implemented 2026-09-20;
@@ -264,7 +264,7 @@ characterized with fakes.
 |Pure tests, then targeted Spark catalog tests.
 
 |U5
-|Replace custom-engine driver collections with distributed transformations.
+|Replace businessrules-engine driver collections with distributed transformations.
 |Equivalence, zero-denominator, empty-input, and bounded-summary tests; benchmark evidence on
 a scheduled/manual runner.
 |Targeted Spark tests; scale test outside ordinary PRs.
@@ -341,9 +341,11 @@ raising the repository-wide percentage is not a substitute for boundary and nega
   caller-certified, and no runtime selects this API automatically.
   U3a is a compatibility boundary, not the full
   portable kernel. Direct engine calls still return legacy dictionaries; the facade/report
-  enforce the new boundary. Great Expectations runtime compatibility is not certified by
-  the current Spark suite; its existing integration tests are disabled.
-* U5: implemented for the custom engine. `DistinctnessByGroup` reduces per-group
+  enforce the new boundary. Great Expectations compatibility is now certified on GX Core: a
+  live round-trip suite (`dq/tests/test_greatexpectations.py`, skipped only when the optional
+  extra is absent) runs in CI, and mocked-gx unit contract tests
+  (`dq/tests/test_greatexpectations_unit.py`) pin the engine contract without the dependency.
+* U5: implemented for the businessrules engine. `DistinctnessByGroup` reduces per-group
   distinct counts to one bounded summary per column (observed range plus violation
   count), `RateOfChange` computes consecutive-pair changes with a distributed lag
   window and one aggregate per column, and `LookupBasedOnColumnNameList` matches
@@ -355,9 +357,9 @@ raising the repository-wide percentage is not a substitute for boundary and nega
   diagnostics; empty-input outcomes ("No suitable data", value 1 for distinctness,
   value 0 for rate of change) and all metric/verification string shapes are
   preserved. Local validation: 305 full-suite tests passed on Python 3.13; changed
-  lines in the custom engine exceed the 90 percent diff-cover gate. Scheduled scale
+  lines in the businessrules engine exceed the 90 percent diff-cover gate. Scheduled scale
   benchmarks remain manual per the CI cost policy. The engine is now four stateless
-  strategy objects behind the `CustomEngine` facade with reference identifiers validated
+  strategy objects behind the `BusinessrulesEngine` facade with reference identifiers validated
   before SQL, and its constraint surface is frozen as a first-class adapter contract
   (ADR-003).
 * U4: implemented. `dq.identifiers` provides the validated `TableName` and
@@ -365,7 +367,7 @@ raising the repository-wide percentage is not a substitute for boundary and nega
   backtick-quoted SQL rendering) and every catalog/SQL boundary now parses
   through them: the orchestrator fallback, all three catalog providers,
   Unity DESCRIBE/SHOW/USE statements, the schema-validation foreign-key
-  reference query, the custom-engine reference lookup, and repository table
+  reference query, the businessrules-engine reference lookup, and repository table
   names. Injection and malformed identifier fixtures fail before any Spark
   call, and provider behavior is characterized with fake Spark sessions.
 * U6: implemented. `dq.sinks` owns persistence: the framework builds one
@@ -400,7 +402,7 @@ raising the repository-wide percentage is not a substitute for boundary and nega
 
 U3a limits are 10,000 outcomes, 1 MiB per encoded outcome, 16 MiB across one batch/run,
 10,000 diagnostic nodes per outcome, and nesting depth 16. Limits reject rather than truncate.
-They bound the evidence boundary, not upstream Spark collection: custom-engine raw-row
+They bound the evidence boundary, not upstream Spark collection: businessrules-engine raw-row
 collection was TD-ARCH-4/U5 and now returns bounded per-column summaries. Engine-owned
 persistence still happens before boundary
 validation and is not promotion-grade admission evidence; U6 moves persistence behind the

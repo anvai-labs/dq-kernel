@@ -13,20 +13,20 @@ classDiagram
         -_process_verification_result()
     }
     
-    class CustomEngine {
+    class BusinessrulesEngine {
         -_sparkSession: SparkSession
         +apply(dataframe, repository) List~Dict~
-        +_check_distinctness_by_group()
-        +_check_rate_of_change()
-        +_lookupBasedOnColumnNameList()
-        +_check_for_negative_values()
-        -__checkMinMaxThreshold()
+        +GroupedDistinctBoundsStrategy
+        +ConsecutivePercentChangeStrategy
+        +ColumnNamesInReferenceTableStrategy
+        +NoNegativeValuesStrategy
     }
-    
-    class GreatExpectationsEngine {
+
+    class GreatexpectationsEngine {
         +apply(dataframe, repository) List~Dict~
-        -_create_expectation_suite()
-        -_run_expectations()
+        -_import_gx()
+        -_extract_metrics_from_validation_output()
+        -_persist_run()
     }
     
     class SchemaValidationEngine {
@@ -58,8 +58,8 @@ classDiagram
     }
     
     DQEngine <|-- DeequEngine
-    DQEngine <|-- CustomEngine
-    DQEngine <|-- GreatExpectationsEngine
+    DQEngine <|-- BusinessrulesEngine
+    DQEngine <|-- GreatexpectationsEngine
     DQEngine <|-- SchemaValidationEngine
     
     EngineLoader ..> DQEngine : creates
@@ -68,4 +68,4 @@ classDiagram
     
     note for DQEngine "Base class defining the\nengine interface contract"
     note for EngineLoader "Uses Python reflection to\ndynamically load engines"
-    note for CustomEngine "Implements business-specific\nvalidation logic"
+    note for BusinessrulesEngine "Implements business-specific\nvalidation logic"

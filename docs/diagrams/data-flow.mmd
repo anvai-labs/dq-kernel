@@ -36,8 +36,8 @@ sequenceDiagram
             alt Deequ Engine
                 CheckSystem->>Spark: VerificationSuite.run()
                 Spark-->>CheckSystem: VerificationResult
-            else Custom Engine
-                CheckSystem->>CheckSystem: Custom Logic Execution
+            else Businessrules Engine
+                CheckSystem->>CheckSystem: Business-rule Logic Execution
             else Schema Engine
                 CheckSystem->>CheckSystem: Schema Validation
             end
