@@ -34,7 +34,8 @@ gate notifier). Four roles:
 ** (A) _Compiler_ -- rule pack to pipeline expectation clauses
 (future; the aggregate/FK/unique residue stays ours).
 ** (B) _Post-refresh validator_ -- Delta Change Data Feed scoped checks
-over the portable kernel's versioned semantics (future).
+over the portable kernel's versioned semantics (implemented 2026-10-23
+in `dq/cdf_adapter.py`: delta-scoped v1 semantics, `spark-cdf` adapter).
 ** (C) _Event-log harvester_ -- read Lakeflow `flow_progress`
 expectation metrics into the evidence stream (implemented alongside
 this ADR in `dq/engine/databricks/pipeline_expectations.py`).

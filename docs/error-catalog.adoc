@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 172 raise sites across the modules below; the contract
+The framework raises 177 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -90,6 +90,17 @@ the evidence store refused an unsafe write.
 * Fix: align binding names with the plan, pass DataFrames, and use the
   exact column casing listed in the error; execute single-semantics plans
   with `execute_plan`.
+
+== dq/cdf_adapter.py
+
+Fail-closed guards for the Delta Change Data Feed adapter.
+
+* `ConfigurationError` -- 5 sites: invalid version windows (negative or
+  boolean starting version, ending version below the start), a blank
+  table reference, a table without `delta.enableChangeDataFeed`
+  enabled (translated from Spark's analysis error into an ALTER TABLE
+  remediation hint), or a plan spanning more than one dataset (CDF
+  validation is per-table).
 
 == dq/dq_framework.py
 
