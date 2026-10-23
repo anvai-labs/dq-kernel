@@ -3,13 +3,17 @@
 
 import logging
 from datetime import datetime
-from urllib.parse import urlsplit
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.jobs import RunType, RunResultState
 from pyspark.sql import functions as F
 from time import time
 from cstriggers.core.trigger import QuartzCron
+
+from dq.engine.databricks.workspace_auth import (
+    validate_token,
+    validate_workspace_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,32 +50,8 @@ class DatabricksCheck:
             options["token"] = self._validate_token(databricks_token)
         self._workspace_client = WorkspaceClient(**options)
 
-    @staticmethod
-    def _validate_workspace_url(value):
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError("Databricks workspace URL must not be blank")
-        parsed = urlsplit(value.strip())
-        if (
-            parsed.scheme.lower() != "https"
-            or not parsed.hostname
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.query
-            or parsed.fragment
-        ):
-            raise ValueError("Databricks workspace URL must be an HTTPS origin")
-        path = parsed.path.rstrip("/")
-        if path:
-            raise ValueError("Databricks workspace URL must not contain a path")
-        return value.strip().rstrip("/")
-
-    @staticmethod
-    def _validate_token(value):
-        if not isinstance(value, str) or not value or any(ch.isspace() for ch in value):
-            raise ValueError(
-                "Databricks token must be nonblank and contain no whitespace"
-            )
-        return value
+    _validate_workspace_url = staticmethod(validate_workspace_url)
+    _validate_token = staticmethod(validate_token)
 
     def check_scheduled_jobs_timeliness(
         self, spark, domain, jobs_to_monitor, job_created_by, last_run

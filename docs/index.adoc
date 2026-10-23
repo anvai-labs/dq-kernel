@@ -335,6 +335,20 @@ Every checked-in `.conf` example is validated in CI.
 
 See link:databricks-authentication.adoc[Databricks authentication and runtime compatibility].
 
+=== Lakeflow pipeline expectations
+
+`dq.engine.databricks.pipeline_expectations.PipelineExpectationsHarvester`
+reads the expectation metrics a Lakeflow Declarative Pipeline already
+records (per-dataset pass/drop counts in `flow_progress` events of the
+Unity Catalog event log, read from the configured Unity Catalog event-log table (resolved from the pipeline's spec, or a
+published table passed directly) or, for managed event logs, the
+`event_log('<pipeline_id>')` function) and normalizes
+them into the framework outcome contract -- so platform-native checks
+join the same report, sinks, and gate as every engine (ADR-011). The
+harvester only reads; it never runs validations, and `FAIL UPDATE`
+expectations that halt an update emit no aggregate metrics for it to
+harvest.
+
 == Tests and CI
 
 CI runs the Spark-backed test suite on Python 3.12 and 3.13 with Java 17. It rejects missing tests,

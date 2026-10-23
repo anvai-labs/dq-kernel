@@ -1,0 +1,72 @@
+= ADR-011: DQ federation and JVM-bound deployment
+:toc:
+:sectlinks.
+
+Status: Accepted +
+Date: 2026-10-23
+
+== Context
+
+Platform-native data quality is converging on the same shape everywhere:
+declarative, incrementally-maintained tables with built-in checks.
+Databricks Lakeflow Declarative Pipelines enforce row-level SQL boolean
+expectations (`CONSTRAINT ... EXPECT ... ON VIOLATION DROP ROW | FAIL
+UPDATE`) and publish per-expectation pass/drop counts to a Unity Catalog
+event log; Snowflake ships Data Metric Functions with scheduled
+measurement, thresholds, and (as of 2026) an AI-assisted setup and an
+account-wide quality dashboard. Both are convenient inside their
+platform and both are bounded: Databricks expectations are row-level
+only (no aggregates, no UDFs, no subqueries; `FAIL UPDATE` emits no
+aggregate metrics), and Snowflake's metrics are scheduled rather than
+inline gates (practitioners route them through task graphs to get
+pipeline gating), with dynamic tables supported only via view wrappers.
+
+Meanwhile Spark Declarative Pipelines are landing in OSS Spark 4.x, so
+the declarative pattern is not Databricks-specific.
+
+== Decision
+
+* *Federate, don't compete.* dq-kernel does not race platform-native
+checks on their own platform. One rule pack is enforced by whatever the
+platform can express natively; dq-kernel validates what it cannot, and
+unifies everything into one evidence stream (outcomes, report, sinks,
+gate notifier). Four roles:
+** (A) _Compiler_ -- rule pack to pipeline expectation clauses
+(future; the aggregate/FK/unique residue stays ours).
+** (B) _Post-refresh validator_ -- Delta Change Data Feed scoped checks
+over the portable kernel's versioned semantics (future).
+** (C) _Event-log harvester_ -- read Lakeflow `flow_progress`
+expectation metrics into the evidence stream (implemented alongside
+this ADR in `dq/engine/databricks/pipeline_expectations.py`).
+** (D) _Quarantine complement_ -- generate drop/quarantine splits,
+aggregate-check both streams (future).
+Sequencing: C first (read-only, zero runtime coupling), then B, then A
+as OSS Spark 4 adoption grows.
+* *Deployment constraint.* The validation path is JVM-bound (PySpark +
+deequ/dqdl jars over py4j). It does not run on edge runtimes or
+serverless function platforms -- Cloudflare Workers is explicitly ruled
+out (API-shaped execution; binary protocols such as JDBC/ODBC are gaps;
+the JVM requirement is fatal regardless). Supported targets:
+Databricks, AWS EMR/Glue, Kubernetes Spark, self-hosted runners. At
+most an HTTP edge layer may sit in front of the webhook notifier.
+* *Snowflake stance.* Not a validation target (no JVM). The ADR-002
+engine-neutral kernel (versioned counts/groups/ranges semantics,
+adapter-declared capabilities) deliberately preserves the option of a
+SQL adapter should the evidence ever need to originate there; nothing
+in the kernel assumes Spark.
+* *Evidence unification.* Five engines, the job SLA monitor
+(`DatabricksCheck`), and pipeline expectations all converge on the one
+`CheckOutcome` contract: same strict-JSON limits, same report format,
+same sinks, same gate. A quality signal's origin is metadata, not a
+silo.
+
+== Consequences
+
+* The harvester is a standalone component (like `DatabricksCheck`),
+  not an `EngineLoader` engine: expectations are not DataFrame
+  validations and the pipeline owns execution.
+* Platform check expressiveness bounds what role (A) can compile;
+  inexpressible rules are documented as residue and remain dq-kernel's
+  durable surface.
+* Adding platform-native signals never widens the outcome contract --
+  they normalize into it or are rejected.
