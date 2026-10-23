@@ -18,13 +18,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The `greatexpectations` engine is now fully fledged on GX Core
+  (`great_expectations >=1.24,<2`, install with the `greatexpectations`
+  extra): modern ephemeral-context Spark validation, snake-case
+  expectation `type` resolution that fails closed on typos, a
+  strict-JSON result sanitizer (depth/size bounded) so GX payloads can
+  never breach the outcome limits, metrics+verifications persistence
+  under one run key, live and mocked test suites in CI, and
+  `examples/greatexpectations_validation.conf`
 - `dq.spark_adapter.execute_envelope`: one entry point that computes every
   subplan of a `RulesetEnvelope` with its own semantics and capabilities and
   returns the envelope's aggregate verdict; Spark-backed end-to-end tests
   pin the dispatch across counts/v1, groups/v1, and ranges/v1
 
+
+### Performance
+
+- Test-suite CI cost cut by 13 Spark executions (~12s per lane) with
+  production coverage byte-identical to the pre-cut baseline: the dtype
+  failure axis runs for one representative dtype, an exact duplicate
+  persistence test and two legacy alias tests are removed (paths covered
+  elsewhere), and five dead conftest fixtures are deleted
+
 ### Fixed
 
+- Businessrules checks omitting `level` now default to `"Error"`: the
+  previous `None` default inferred a NullType `check_level` column that
+  broke sink persistence
+- `DQEngine._persist` no longer requires pydeequ (epoch-millis run key
+  computed directly), so any extras combination can persist artifacts
 - `GroupedDistinctBounds` and `ConsecutivePercentChange` custom constraints
   accept a bare string for `columns` and `group_by` as the one-column form
   (previously the string was iterated character by character and died inside
