@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 160 raise sites across the modules below; the contract
+The framework raises 162 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -203,6 +203,7 @@ the evidence store refused an unsafe write.
 
 == dq/engine/businessrules/strategies.py
 
+
 *Content:* 1 `ConfigurationError` site (re-raised from identifier
 validation) and 4 `ValueError` sites guarding the grouped constraints'
 column parameters.
@@ -215,3 +216,13 @@ column parameters.
 * Fix: supply bounded alphanumeric identifiers; see the error catalog entry
   on identifier shapes and ADR-006. Pass each column parameter as a column
   name or a list of column names (`sort_by`: exactly one ordering column).
+
+== dq/engine/greatexpectations/greatexpectations_check.py
+
+Fail-closed expectation resolution for the greatexpectations engine.
+
+* `ValueError` -- an expectation entry has no `type`, or the `type` does
+  not resolve to a GX Core expectation class. Fix the rule's
+  `expectations` payload: every entry needs a snake-case GX expectation
+  `type` (e.g. `expect_column_values_to_not_be_null`).
+
