@@ -353,13 +353,16 @@ harvest.
 
 `dq.cdf_adapter` (ADR-011 role B) validates the increment: read a
 Delta table's change data feed window (`read_changes`) and evaluate
-aggregate checks scoped to the net-change batch (`execute_cdf_plan`)
+aggregate checks scoped to the change batch (`execute_cdf_plan`)
 through the portable kernel's versioned semantics -- counts,
 within-batch distinct bounds, and value ranges over `insert` /
 `update_postimage` rows, stamped with the `spark-cdf` adapter. V1 is
-delta-scoped: uniqueness and totals are evaluated within the change
-batch only; full-table semantics remain a future mode. Reading
-requires the table property `delta.enableChangeDataFeed=true`.
+change-batch scoped: counts measure change volume (a record committed
+twice in the window counts twice), and uniqueness and totals are
+evaluated within the change batch only; deduplicated-by-key and
+full-table semantics remain future modes. Reading requires the table
+property `delta.enableChangeDataFeed=true`; outside Databricks/EMR
+install the `delta` extra for the Delta data source.
 
 == Tests and CI
 

@@ -68,12 +68,16 @@ RANGES_CAPABILITIES = CapabilitySet(
 _MAX_LISTED_COLUMNS = 8
 
 
-def _capabilities_for(plan: ExecutionPlan) -> CapabilitySet:
+def capabilities_for(plan: ExecutionPlan) -> CapabilitySet:
+    """The Spark adapter capabilities matching a plan's semantics."""
     if plan.semantic_version == SEMANTIC_GROUPS_VERSION:
         return GROUP_CAPABILITIES
     if plan.semantic_version == SEMANTIC_RANGES_VERSION:
         return RANGES_CAPABILITIES
     return CAPABILITIES
+
+
+_capabilities_for = capabilities_for
 
 
 def execute_plan(
@@ -83,7 +87,7 @@ def execute_plan(
     capabilities = _capabilities_for(plan)
     plan.validate_for(capabilities)
     bindings = _validated_bindings(plan, datasets)
-    values = _compute_values(plan, bindings)
+    values = compute_plan_values(plan, bindings)
     return plan.evaluate(values, capabilities)
 
 
@@ -110,11 +114,13 @@ def execute_envelope(
         plan.validate_for(capabilities)
         capabilities_by_version.setdefault(plan.semantic_version, capabilities)
         bindings = _validated_bindings(plan, datasets)
-        values.update(_compute_values(plan, bindings))
+        values.update(compute_plan_values(plan, bindings))
     return tuple(envelope.evaluate(values, capabilities_by_version))
 
 
-def _compute_values(plan: ExecutionPlan, bindings: dict) -> dict:
+def compute_plan_values(plan: ExecutionPlan, bindings: dict) -> dict:
+    """Compute every plan metric over the bound DataFrames."""
+
     values = {}
     for name in sorted(bindings):
         if plan.semantic_version == SEMANTIC_GROUPS_VERSION:

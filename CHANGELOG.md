@@ -20,11 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `dq.cdf_adapter` (ADR-011 role B): validates Delta table increments
   through the portable kernel -- `read_changes` reads a Change Data
-  Feed window (net-change batch of insert/update_postimage rows,
-  fail-closed on missing `delta.enableChangeDataFeed`), and
-  `execute_cdf_plan` evaluates counts/groups/ranges semantics scoped
-  to the change batch under the `spark-cdf` adapter, reusing the Spark
-  adapter's metric computation
+  Feed window (change batch of insert/update_postimage rows; counts
+  measure change volume, one row per commit), fail-closed on missing
+  `delta.enableChangeDataFeed`, and `execute_cdf_plan` evaluates
+  counts/groups/ranges semantics scoped to the change batch under the
+  `spark-cdf` adapter, reusing the Spark adapter's metric computation;
+  new `delta` extra provides delta-spark for OSS Spark
 
 - `PipelineExpectationsHarvester`
   (`dq.engine.databricks.pipeline_expectations`): harvests Lakeflow

@@ -38,6 +38,7 @@ from dq.plan import (
     SEMANTICS_VERSION,
 )
 from dq.spark_adapter import execute_plan
+from dq.tests.test_package_contract import _run_with_blocked_imports
 from dq.tests.helpers import legacy_by_rule
 from dq.tests.plan_support import groups_plan, ranges_plan
 
@@ -224,6 +225,9 @@ class _FakeChanges:
     # stands in for the _change_type Column the adapter resolves on the frame
     _change_type = SimpleNamespace(isin=lambda types: ("isin", types))
 
+    def __getitem__(self, key):
+        return getattr(self, key)
+
     def filter(self, condition):
         self.filter_condition = str(condition)
         return self
@@ -322,25 +326,61 @@ def test_read_changes_translates_missing_feed_into_enablement_hint():
         read_changes(SimpleNamespace(read=Reader()), "t", 0)
 
 
+def test_read_changes_filter_runs_against_a_real_dataframe(spark):
+    # A struct fake let the isin-tuple crash ship once; this test runs
+    # the real filter/drop pipeline on a real session DataFrame, with
+    # only spark.read stubbed to hand back a change-feed-like frame.
+    from types import SimpleNamespace
+
+    from pyspark.sql.types import (
+        LongType,
+        StringType,
+        StructField,
+        StructType,
+        TimestampType,
+    )
+
+    schema = StructType(
+        [
+            StructField("id", StringType(), True),
+            StructField("_change_type", StringType(), True),
+            StructField("_commit_version", LongType(), True),
+            StructField("_commit_timestamp", TimestampType(), True),
+        ]
+    )
+    import datetime as dt
+
+    frame = spark.createDataFrame(
+        [
+            ("a", "insert", 5, dt.datetime(2026, 10, 23)),
+            ("b", "delete", 5, dt.datetime(2026, 10, 23)),
+            ("c", "update_preimage", 6, dt.datetime(2026, 10, 23)),
+            ("d", "update_postimage", 6, dt.datetime(2026, 10, 23)),
+        ],
+        schema,
+    )
+
+    class Reader:
+        def option(self, key, value):
+            return self
+
+        def table(self, ref):
+            return frame
+
+    # SparkSession.read is a read-only property; pass a shimming session
+    shim = SimpleNamespace(read=Reader())
+    changes = read_changes(shim, "main.dq.orders", 5, 6)
+    rows = sorted(row["id"] for row in changes.collect())
+    assert rows == ["a", "d"]
+    assert set(changes.schema.fieldNames()) == {"id"}
+
+
 # ------------------------------------------------------ import hygiene
 
 
 def test_cdf_adapter_imports_without_pyspark():
-    import subprocess
-    import sys
-
-    code = """
-import sys
-class BlockSpark:
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'pyspark', 'pydeequ'}:
-            raise ImportError('blocked: ' + fullname)
-sys.meta_path.insert(0, BlockSpark())
-import dq.cdf_adapter
-print('ok')
-"""
-    result = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, timeout=60
+    result = _run_with_blocked_imports(
+        "pyspark", "pydeequ", statement="import dq.cdf_adapter; print('ok')"
     )
     assert result.returncode == 0, result.stderr
     assert "ok" in result.stdout
