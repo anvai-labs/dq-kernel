@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 170 raise sites across the modules below; the contract
+The framework raises 172 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -146,12 +146,23 @@ the evidence store refused an unsafe write.
 
 == dq/engine/databricks/databricks_check.py
 
-*Content:* 5 `ValueError` sites.
+*Content:* 1 `ValueError` site (the client/credentials guard; the URL
+and token validators live in `workspace_auth.py`).
 
 * Cause: workspace URL/token validation failures, or combining an injected
   workspace client with explicit credentials.
 * Fix: supply an HTTPS workspace origin without a path and a nonblank
   token; prefer the injected client.
+
+== dq/engine/databricks/workspace_auth.py
+
+Shared workspace-credential validation for the Databricks components.
+
+* `ValueError` -- 4 sites: a blank workspace URL, a non-HTTPS URL
+  (or one with credentials/query/fragment), a URL carrying a path, or a
+  blank/whitespace token. Fix the supplied workspace URL and token, or
+  rely on unified authentication and supply neither.
+
 
 == dq/engine/databricks/pipeline_expectations.py
 

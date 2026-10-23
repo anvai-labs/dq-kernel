@@ -90,12 +90,21 @@ def sample_rows():
 
 def test_normalizer_names_checks_dataset_dot_expectation(sample_rows):
     outcomes = expectation_outcomes(sample_rows)
+    # latest-wins: amount_positive appears in two emissions, kept once
     assert [o["check"] for o in outcomes] == [
         "silver_orders.order_id_not_null",
         "silver_orders.amount_positive",
         "gold_summary.row_count_floor",
-        "silver_orders.amount_positive",
     ]
+    latest = outcomes[1]["details"]
+    assert latest["passed_records"] == 50  # newest emission
+
+
+def test_normalizer_keep_all_returns_every_emission(sample_rows):
+    outcomes = expectation_outcomes(sample_rows, keep="all")
+    assert len(outcomes) == 4
+    with pytest.raises(ValueError, match="keep must be"):
+        expectation_outcomes(sample_rows, keep="nope")
 
 
 def test_normalizer_fails_only_on_drops_by_default(sample_rows):
@@ -123,6 +132,19 @@ def test_normalizer_carries_counts_and_origin(sample_rows):
         "timestamp": 1_700_000_000_000,
         "batch_id": "b-1",
     }
+
+
+def test_normalizer_coerces_datetime_timestamps_to_epoch_millis():
+    import datetime as dt
+
+    row = _flow_row(
+        dt.datetime(2023, 11, 14, tzinfo=dt.timezone.utc),
+        {"t": _output([{"name": "e", "passed_records": 1, "dropped_records": 0}])},
+    )
+    outcome = expectation_outcomes([row])[0]
+    assert outcome["details"]["timestamp"] == int(
+        dt.datetime(2023, 11, 14, tzinfo=dt.timezone.utc).timestamp() * 1000
+    )
 
 
 def test_normalizer_parses_json_string_details(sample_rows):
@@ -155,6 +177,38 @@ def test_normalizer_fails_closed_on_malformed_rows():
                             "outputs": {
                                 "silver": _output(
                                     [{"passed_records": 1, "dropped_records": 0}]
+                                )
+                            }
+                        }
+                    },
+                }
+            ]
+        )
+    with pytest.raises(ValueError, match="non-object"):
+        expectation_outcomes(
+            [
+                {
+                    "timestamp": 1,
+                    "details": {"flow_progress": {"outputs": {"silver": []}}},
+                }
+            ]
+        )
+    with pytest.raises(ValueError, match="non-numeric"):
+        expectation_outcomes(
+            [
+                {
+                    "timestamp": 1,
+                    "details": {
+                        "flow_progress": {
+                            "outputs": {
+                                "silver": _output(
+                                    [
+                                        {
+                                            "name": "x",
+                                            "passed_records": True,
+                                            "dropped_records": 0,
+                                        }
+                                    ]
                                 )
                             }
                         }
@@ -245,8 +299,9 @@ def test_harvest_queries_the_event_log_tvf_with_since_filter(sample_rows):
     outcomes = harvester.harvest(
         spark, table_ref="main.dq.my_pipeline", since_ms=1_700_000_000_000
     )
-    assert len(outcomes) == 4
-    assert "event_log(TABLE(main.dq.my_pipeline))" in spark.queries[0]
+    assert len(outcomes) == 3
+    assert "FROM main.dq.my_pipeline" in spark.queries[0]
+    assert "event_log(TABLE(" not in spark.queries[0]
     assert "flow_progress" in spark.queries[0]
     assert "timestamp_millis(1700000000000)" in spark.queries[0]
 
@@ -257,8 +312,8 @@ def test_harvest_resolves_event_log_table_from_pipeline_id(sample_rows):
     harvester = PipelineExpectationsHarvester(workspace_client=client)
     outcomes = harvester.harvest(spark, pipeline_id="abc-123")
     assert calls == ["abc-123"]
-    assert "event_log(TABLE(main.dq.pl_events))" in spark.queries[0]
-    assert len(outcomes) == 4
+    assert "FROM main.dq.pl_events" in spark.queries[0]
+    assert len(outcomes) == 3
 
 
 def test_harvest_rejects_ambiguous_and_missing_sources():
@@ -269,14 +324,23 @@ def test_harvest_rejects_ambiguous_and_missing_sources():
         harvester.harvest(_FakeSpark([]), table_ref="a.b.c", pipeline_id="p")
 
 
-def test_harvest_rejects_pipeline_without_event_log():
+def test_harvest_falls_back_to_managed_event_log_tvf():
+    spark = _FakeSpark([])
     client, _ = _client_with_event_log()
     client.pipelines.get = lambda pid: SimpleNamespace(
         spec=SimpleNamespace(event_log=None)
     )
     harvester = PipelineExpectationsHarvester(workspace_client=client)
-    with pytest.raises(ValueError, match="no Unity Catalog event log"):
-        harvester.harvest(_FakeSpark([]), pipeline_id="p")
+    harvester.harvest(spark, pipeline_id="p-1")
+    assert "event_log('p-1')" in spark.queries[0]
+    assert "event_log(TABLE(" not in spark.queries[0]
+
+
+def test_harvest_empty_window_returns_empty_list():
+    spark = _FakeSpark([])
+    harvester = PipelineExpectationsHarvester(workspace_client=SimpleNamespace())
+    outcomes = harvester.harvest(spark, table_ref="main.dq.my_pipeline")
+    assert outcomes == []
 
 
 # -------------------------------------------------------- evidence path
@@ -297,7 +361,7 @@ def test_harvested_outcomes_feed_report_and_gate(sample_rows):
         application_id="app-1",
         spark_version="3.5.9",
     )
-    assert report["summary"]["total"] == len(normalized)
+    assert report["summary"]["total"] == len(normalized) == 3
     assert report["summary"]["failed"] == 1
 
     event = GateEvent.from_outcomes(
