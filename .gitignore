@@ -98,3 +98,4 @@ bandit-report.json
 !lib/
 lib/*
 !lib/.gitkeep
+.victor/

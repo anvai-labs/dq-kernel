@@ -58,6 +58,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   persistence test and two legacy alias tests are removed (paths covered
   elsewhere), and five dead conftest fixtures are deleted
 
+### Removed
+
+- **Breaking** (for external consumers only): compiler-graph-guided
+  dead-code removal (victor tier-3 SCIP index, 1,836 compiler-proven
+  reference edges; every target verified two ways -- zero incoming
+  graph edges, zero repo references): the unused `dq.utils.catalog_utils`
+  module, the relic `dq.dq_repository` package, the unused
+  `dq.utils.s3_utils` wrapper, and the uncalled
+  `DQFramework.pivot_configuration` method. None were referenced inside
+  this repository; downstream code importing them must migrate
+
 ### Fixed
 
 - Businessrules checks omitting `level` now default to `"Error"`: the
