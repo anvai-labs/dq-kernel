@@ -33,6 +33,9 @@ python = ">=3.12,<3.14"
 pyhocon = "^0.3.59"              # Configuration parsing (HOCON format)
 pyyaml = "^6.0"                  # YAML configuration support
 requests = "^2.33.0"             # HTTP requests (for remote config)
+pyasn1 = ">=0.6.5"                  # security: quadratic-complexity DoS fix
+msgpack = ">=1.2.3"                 # security: unbounded memory leak fix
+filelock = ">=4.2.1"                # security: SQLite lock DB reopen fix
 
 # Windows compatibility (lightweight)
 pywin32-ctypes = {version = "^0.2.0", markers = "sys_platform == 'win32'"}
