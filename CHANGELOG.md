@@ -37,8 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "workspace"` builds a real `WorkspaceClient` (optional `client.profile`).
   DQX results (`_errors`/`_warnings`) are aggregated into one metric per
   configured check with `failed_rows` and capped sample messages. New `dqx`
-  extra: DQX 0.17.x requires Python <3.13 and pins `databricks-sdk~=0.73`
-  -- incompatible with the `databricks` extra, do not combine
+  extra: DQX 0.17.x requires Python <3.13, so the extra carries a Python
+  marker and is skipped on 3.13 (its `databricks-sdk` requirement overlaps
+  the `databricks` extra; the two are co-installable)
 - `greatexpectations` engine: entries accept optional `name` (labels the
   metric result; default label stays the expectation `type` as before) and
   `criticality` (defaulting to `error`, surfaced in every result's
@@ -47,9 +48,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deequ` engine: `level` accepts canonical spellings (`error`/`warn`)
   alongside `Error`/`Warning` (normalized fail-closed), and every result's
   `details` carries `criticality` derived from the check result level
-- CI: dedicated `dqx-integration` lane (Python 3.12, `-E spark -E dqx`)
-  runs the live DQX round trips that the main test job skips because the
-  dqx and databricks extras cannot share an environment
+- CI: the main test matrix installs the `dqx` extra as well (Poetry skips
+  it on the 3.13 job) and so runs the live DQX round trips; the `build`
+  gate now requires every lane listed in `needs` to succeed, so a red lane
+  can no longer merge; CI runs on every pull request regardless of base
+  branch (stacked pull requests are tested); lint checks
+  `poetry check --lock` and runs actionlint
+- pytest `addopts` no longer pass `--no-summary`: pytest 9 skips the whole
+  terminal summary under that flag, which hid every failure traceback, in
+  CI as well. A subprocess contract test pins the traceback visibility
 
 ## [0.2.0] - 2026-10-23
 

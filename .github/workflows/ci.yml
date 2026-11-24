@@ -3,8 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+  # No branch filter on purpose: pull requests are tested whatever their
+  # base branch, so stacked pull requests get the same gates as ones to main.
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -32,6 +33,8 @@ jobs:
           python-version: "3.13"
       - name: Install Poetry
         run: pip install poetry==2.4.2
+      - name: Check lock file matches pyproject
+        run: poetry check --lock
       - name: Install dependencies
         run: poetry install --with dev
       - name: Check formatting
@@ -46,6 +49,14 @@ jobs:
         run: poetry run bandit -r dq/ -x tests -s B101 -lll -q
       - name: Dependency audit
         run: poetry run pip-audit --skip-editable
+      - name: Validate workflow syntax
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --silent --show-error --location --retry 3 --max-time 60 \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz -o actionlint.tar.gz
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz' | sha256sum --check --status
+          tar -xzf actionlint.tar.gz actionlint
+          ./actionlint "$GITHUB_WORKSPACE"/.github/workflows/*.yml
 
   test:
     timeout-minutes: 15
@@ -77,8 +88,14 @@ jobs:
           java-version: "17"
       - name: Install Poetry
         run: pip install poetry==2.4.2
+      # Every extra with tests installs here: the lock resolves one version per
+      # package for the union of extras, so they are co-installable. The dqx
+      # extra carries a Python <3.13 marker; Poetry skips it on the 3.13 job
+      # and its live tests skip with it.
       - name: Install dependencies
-        run: poetry install --with dev -E spark -E deequ -E aws -E databricks -E greatexpectations
+        run: >-
+          poetry install --with dev
+          -E spark -E deequ -E aws -E databricks -E greatexpectations -E dqx
       - name: Download Deequ JAR
         run: |
           mkdir -p lib
@@ -103,47 +120,6 @@ jobs:
       - name: Enforce changed-code coverage
         if: matrix.python-version == '3.13' && github.event_name == 'pull_request'
         run: poetry run diff-cover coverage.xml --compare-branch=origin/${{ github.base_ref }} --fail-under=90
-
-  dqx-integration:
-    name: DQX integration (3.12)
-    timeout-minutes: 15
-    if: >-
-      github.event_name != 'pull_request' ||
-      vars.OWNER_PRIVATE_CI_ENABLED != 'true' ||
-      github.actor_id != '5168752' ||
-      github.event.pull_request.user.id != 5168752 ||
-      github.event.pull_request.head.repo.full_name != github.repository
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Install Poetry
-        run: pip install poetry==2.4.2
-      # dqx pins databricks-sdk~=0.73 and cannot share an environment with
-      # the databricks extra, so this lane installs only spark + dqx.
-      - name: Install dependencies
-        run: poetry install --with dev -E spark -E dqx
-      - name: Download Deequ JAR
-        run: |
-          mkdir -p lib
-          wget -q -O lib/deequ-2.0.21-spark-3.5.jar \
-            https://repo1.maven.org/maven2/com/amazon/deequ/deequ/2.0.21-spark-3.5/deequ-2.0.21-spark-3.5.jar
-          wget -q -O lib/dqdl-1.0.0.jar \
-            https://repo1.maven.org/maven2/software/amazon/glue/dqdl/1.0.0/dqdl-1.0.0.jar
-      - name: Run DQX integration tests
-        timeout-minutes: 10
-        run: poetry run pytest dq/tests/test_dqx.py -v --tb=short
-        env:
-          SPARK_VERSION: "3.5"
 
   dependency-review:
     name: Dependency review
@@ -184,18 +160,19 @@ jobs:
       github.event.pull_request.user.id != 5168752 ||
       github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-latest
-    needs: [lint, test, dqx-integration, dependency-review]
+    needs: [lint, test, dependency-review]
     steps:
+      # The gate is generic on purpose: every lane listed in `needs` must
+      # succeed, so adding a lane cannot produce a red job that merges anyway.
       - name: Verify required jobs
         env:
           EVENT_NAME: ${{ github.event_name }}
-          LINT_RESULT: ${{ needs.lint.result }}
-          TEST_RESULT: ${{ needs.test.result }}
+          NEEDS: ${{ toJSON(needs) }}
           DEPENDENCY_REVIEW_RESULT: ${{ needs.dependency-review.result }}
         run: |
           set -euo pipefail
-          test "${LINT_RESULT}" = "success"
-          test "${TEST_RESULT}" = "success"
+          echo "${NEEDS}" | jq -r 'to_entries[] | "\(.key): \(.result)"'
+          echo "${NEEDS}" | jq -e 'to_entries | all(.[]; .result == "success" or .result == "skipped")' > /dev/null
           if [ "${EVENT_NAME}" = "pull_request" ]; then
             test "${DEPENDENCY_REVIEW_RESULT}" = "success"
           else

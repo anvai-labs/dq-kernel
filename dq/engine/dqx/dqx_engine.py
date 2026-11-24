@@ -140,8 +140,7 @@ class DqxEngine(DQEngine):
             "databricks-labs-dqx",
             "dqx",
             pin="databricks-labs-dqx>=0.17.2,<0.18",
-            note="DQX 0.17.x requires Python <3.13 and pins databricks-sdk"
-            "~=0.73, which is incompatible with the databricks extra.",
+            note="DQX 0.17.x requires Python <3.13.",
         )
         try:
             from databricks.labs.dqx import __version__ as dqx_version_module
