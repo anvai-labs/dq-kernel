@@ -8,7 +8,10 @@ lane, a trigger filter that left stacked pull requests untested, and
 unpinned actions. Workflow YAML is code, so it gets contracts too.
 """
 
+import json
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -68,15 +71,83 @@ def test_merge_gate_lists_every_other_lane():
     )
 
 
-def test_merge_gate_verifies_every_lane_not_a_hand_written_subset():
+def _gate_script():
     steps = _load("ci.yml")["jobs"]["build"]["steps"]
     verify = next(step for step in steps if step.get("name") == "Verify required jobs")
     assert "toJSON(needs)" in verify["env"].get(
         "NEEDS", ""
     ), "the gate must read the whole needs map, not named single-job results"
-    script = verify["run"]
-    assert "all(" in script and ".result" in script
-    assert "success" in script and "skipped" in script
+    return verify["run"]
+
+
+def _lanes(**results):
+    """Build a `needs` map the way toJSON(needs) renders it."""
+    return {name: {"result": result, "outputs": {}} for name, result in results.items()}
+
+
+def _run_gate(tmp_path, lanes, event="pull_request"):
+    """Execute the real gate script from ci.yml against a sample needs map."""
+    script = tmp_path / "gate.sh"
+    script.write_text(_gate_script(), encoding="utf-8")
+    return subprocess.run(
+        ["bash", str(script)],
+        env={
+            "PATH": os.environ["PATH"],
+            "EVENT_NAME": event,
+            "NEEDS": json.dumps(lanes),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+
+
+def test_gate_passes_when_every_lane_succeeds(tmp_path):
+    result = _run_gate(
+        tmp_path,
+        _lanes(lint="success", test="success", **{"dependency-review": "success"}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "lint: success" in result.stdout
+
+
+def test_gate_fails_when_any_lane_fails(tmp_path):
+    result = _run_gate(
+        tmp_path,
+        _lanes(lint="success", test="failure", **{"dependency-review": "success"}),
+    )
+    assert result.returncode == 1
+    assert "test: failure" in result.stdout
+
+
+@pytest.mark.parametrize("result", ["failure", "cancelled", "timed_out"])
+def test_gate_fails_on_every_non_success_result(tmp_path, result):
+    lanes = _lanes(lint=result, test="success", **{"dependency-review": "success"})
+    assert _run_gate(tmp_path, lanes).returncode == 1
+
+
+def test_gate_passes_when_a_lane_is_legitimately_skipped(tmp_path):
+    lanes = _lanes(
+        lint="success",
+        test="success",
+        **{"dependency-review": "success", "docs-only": "skipped"},
+    )
+    assert _run_gate(tmp_path, lanes).returncode == 0
+
+
+def test_gate_requires_the_dependency_review_on_pull_requests(tmp_path):
+    result = _run_gate(
+        tmp_path,
+        _lanes(lint="success", test="success", **{"dependency-review": "skipped"}),
+    )
+    assert result.returncode == 1
+    assert "dependency-review" in result.stdout
+
+
+def test_gate_accepts_a_skipped_dependency_review_on_push(tmp_path):
+    lanes = _lanes(lint="success", test="success", **{"dependency-review": "skipped"})
+    assert _run_gate(tmp_path, lanes, event="push").returncode == 0
 
 
 def test_merge_gate_runs_even_when_a_lane_fails():

@@ -168,16 +168,29 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           NEEDS: ${{ toJSON(needs) }}
-          DEPENDENCY_REVIEW_RESULT: ${{ needs.dependency-review.result }}
+        # Plain Python rather than jq: dq/tests/test_ci_workflow_contract.py
+        # executes this exact script against sample `needs` maps, so the gate
+        # logic is tested instead of eyeballed.
         run: |
-          set -euo pipefail
-          echo "${NEEDS}" | jq -r 'to_entries[] | "\(.key): \(.result)"'
-          echo "${NEEDS}" | jq -e 'to_entries | all(.[]; .result == "success" or .result == "skipped")' > /dev/null
-          if [ "${EVENT_NAME}" = "pull_request" ]; then
-            test "${DEPENDENCY_REVIEW_RESULT}" = "success"
-          else
-            test "${DEPENDENCY_REVIEW_RESULT}" = "skipped"
-          fi
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS"])
+          failed = False
+          for name, lane in sorted(needs.items()):
+              result = lane.get("result")
+              print(f"{name}: {result}")
+              if result not in ("success", "skipped"):
+                  failed = True
+          # On pull requests the dependency review must actually have run.
+          review = needs.get("dependency-review", {}).get("result")
+          if os.environ["EVENT_NAME"] == "pull_request" and review != "success":
+              print("dependency-review must run and succeed on pull requests")
+              failed = True
+          sys.exit(1 if failed else 0)
+          PY
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
