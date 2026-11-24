@@ -1,0 +1,64 @@
+= SPEC-014: Run observability
+:toc:
+:sectlinks.
+
+Status: Accepted +
+Date: 2026-11-24 +
+Driven by: ADR-008 (the port pattern), SPEC-012 +
+Milestone: M2 +
+
+== Purpose
+
+Make a run explainable after the fact. Today a run leaves free-text log
+lines with no run identifier on most of them, no per-rule timing, and no way
+for an embedding platform to observe runs without reading this framework's
+logs. This spec adds one narrow observer port and two adapters.
+
+== In scope
+
+* A `RunObserver` port with five notifications: run started, rule started,
+  rule finished, run finished, gate event.
+* A default `LoggingObserver` that puts the run key, the rule name, and the
+  engine on every line, with an optional JSON-lines format
+  (`DQ_LOG_FORMAT=json`).
+* Per-rule durations, measured by the run core and handed to observers.
+* An `OpenTelemetryObserver` behind an optional `otel` extra: one span per
+  run and per rule, and counters for outcomes by status and criticality.
+* Configuration in the style of the notifiers: `dqframework.observers`.
+
+== Out of scope
+
+* Metrics backends other than OpenTelemetry;
+* tracing inside an engine or the kernel;
+* a UI, a store, or a long-running collector.
+
+== Contracts
+
+* Observers are notified after the fact and never receive a value they can
+  mutate that affects the run.
+* An observer that raises is logged and swallowed: observation never alters
+  a run's outcome or its evidence.
+* No observer is configured by default beyond logging, and nothing here
+  adds a mandatory dependency.
+
+== Acceptance gates
+
+* G1 — For a two-rule run the observer receives the specified event sequence
+  in order, with correct rule and engine names.
+* G2 — An observer that raises on every notification leaves the run's
+  returned outcomes and persisted artifacts identical to a run without it.
+* G3 — JSON log lines parse, and each carries the run key plus the rule and
+  engine where one applies.
+* G4 — The OpenTelemetry adapter is tested against a fake tracer and meter,
+  with no SDK export, and `dq.observability` imports with all extras blocked.
+* G5 — Each rule's duration is recorded and is non-negative.
+
+== Progress
+
+* [ ] G1 — not started
+* [ ] G2 — not started
+* [ ] G3 — not started
+* [ ] G4 — not started
+* [ ] G5 — not started
+
+Links: ADR-008; ADR-012; SPEC-012; SPEC-020.

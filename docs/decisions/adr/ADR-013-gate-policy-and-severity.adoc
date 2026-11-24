@@ -1,0 +1,64 @@
+# ADR-013: Gate policy — severity decides what fails a pipeline
+
+Status: Proposed (SPEC-012 is the buildable contract) +
+Date: 2026-11-24
+
+== Context
+
+Every engine reports a canonical `criticality` since ADR-012, but the
+severity has no effect: one failed check of any severity exits the
+pipeline with code 1 and marks the report `failed`. A `warn` check exists
+to be noticed without stopping data, which is what every comparable tool
+means by it, so the current behaviour contradicts the vocabulary the
+framework publishes.
+
+The evidence must not change meaning with the policy. `dq-report/v1` and
+`GateEvent.status` say whether any check failed; that is a fact about the
+data and a consumer may rely on it. Whether a pipeline should halt is a
+separate, operator-owned decision.
+
+== Decision
+
+* Separate the fact from the decision. `dq.gate.evaluate_gate(outcomes,
+  policy)` is the one place a gate decision is made; the CLI exit code, the
+  notifier, and any embedder read from it. The report keeps `status` as
+  "any check failed" and gains only the additive counts `summary.blocked`
+  and `summary.warned`.
+* Policy `dqframework.gate.fail_on`: `any` (a failed check of any severity
+  fails the gate), `error` (only `error` failures fail it), `warn` (a warn
+  failure fails it; an error-only failure does not — useful for canary
+  rules), `never`.
+* The default is `any`. It preserves today's exit behaviour exactly;
+  existing rule packs that use Warning-level checks keep gating as they do
+  now. Making warnings non-gating is an explicit opt-in.
+* An outcome with no `criticality` counts as `error`.
+* Exit codes: 0 the gate passed, 1 the gate failed, 2 the configuration is
+  invalid and that was detected before any data was read. Today every
+  failure returns 1, so a caller cannot tell a data problem from a typo.
+  Code 2 for configuration is a deliberate, documented change.
+
+== Consequences
+
+* Warn-level checks become useful without editing any engine.
+* A caller can branch on the exit code: 2 is fixed by a commit, 1 by looking
+  at the data.
+* Scripts that test specifically for exit code 1 on a configuration error
+  see 2 instead. This is called out in the changelog as a change.
+* The report's `status` does not follow the policy, so a consumer comparing
+  reports across environments with different policies is comparing like
+  with like.
+
+== Rejected alternatives
+
+* Changing the report's `status` to follow the policy: makes evidence
+  depend on who ran it, and breaks the "status means any failure" contract.
+* Defaulting to `error`: silently changes the gating of every existing
+  rule pack that uses Warning-level checks.
+* Per-rule policies inside the rule pack: engines already carry per-rule
+  severity; a second axis is redundant and confusing.
+
+== Acceptance gates
+
+* The policy matrix in SPEC-012 G1 holds for every policy and outcome mix.
+* Under the default policy the exit code and the report bytes are identical
+  to before for a pack without warn failures (SPEC-012 G2).

@@ -1,0 +1,67 @@
+= SPEC-021: Row outcomes — tagging and quarantine
+:toc:
+:sectlinks.
+
+Status: Accepted +
+Date: 2026-11-24 +
+Driven by: ADR-011 role D, ADR-015 +
+Milestone: M4 +
+Depends on: SPEC-012, SPEC-015 +
+
+== Purpose
+
+Let a pipeline act on the rows a check rejected. ADR-011 names the
+"quarantine complement" as a future role and the modernization plan lists
+row-level quarantine as planned. Today a run can say a check failed and how
+many rows failed, but nothing can route those rows.
+
+== In scope
+
+* A `row_outcomes` capability and a tagging hook on the engine contract, for
+  engines able to attach per-row failure columns. DQX is first; it already
+  returns a tagged frame.
+* A separate `DataFrameSink` port for the data plane. It is not the evidence
+  sink: one persists evidence, the other writes data.
+* Outputs per rule: the tagged frame, the valid rows, and the quarantined
+  rows, written through a data sink to a path or a table.
+* A configuration block naming which outputs a rule produces.
+* Evidence for the split: counts of valid and quarantined rows and a
+  reference to where the quarantined rows were written.
+
+== Out of scope
+
+* Raw failing rows in the evidence report (a modernization non-goal);
+* merging quarantined rows back;
+* row-level results for engines whose checks are aggregates, which have no
+  failing rows to tag.
+
+== Contracts
+
+* An engine without the `row_outcomes` capability that is asked for outputs
+  fails closed with a `ConfigurationError`; outputs are never silently
+  ignored.
+* Valid and quarantined rows partition the input: their counts sum to the
+  row count.
+* Tagging happens in the engine, at scale. No raw row reaches the driver.
+* Evidence carries counts and a location, never row contents.
+
+== Acceptance gates
+
+* G1 — For DQX, valid plus quarantined equals the input row count, and each
+  tagged row names the checks it failed.
+* G2 — Requesting outputs from an engine without the capability fails closed
+  before any data is read.
+* G3 — The data sink writes tagged, valid, and quarantined frames to the
+  configured destinations, and nothing is written when no output is
+  configured.
+* G4 — The evidence for a rule with outputs carries the valid and
+  quarantined counts and the destination, and no row contents.
+
+== Progress
+
+* [ ] G1 — not started
+* [ ] G2 — not started
+* [ ] G3 — not started
+* [ ] G4 — not started
+
+Links: ADR-011; ADR-015; ADR-012; SPEC-013.

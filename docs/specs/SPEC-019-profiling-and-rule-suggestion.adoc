@@ -1,0 +1,68 @@
+= SPEC-019: Profiling and rule suggestion
+:toc:
+:sectlinks.
+
+Status: Accepted +
+Date: 2026-11-24 +
+Driven by: ADR-007 (ports and packaging, never new engine vocabulary) +
+Milestone: M4 +
+Depends on: SPEC-015 +
+
+== Purpose
+
+Start from the data instead of a blank rule pack. Every widely used data
+quality tool can profile a dataset and propose checks; here the only
+profiling is a pydeequ constraint-suggestion notebook that is not callable
+from the package. This spec makes the profile a bounded artifact and turns
+it into draft rules.
+
+== In scope
+
+* A `Profile` value object: strict JSON, one bounded summary per column
+  (type, count, null count, distinct count with an exact-or-approximate
+  flag, minimum and maximum, string length bounds).
+* A `Profiler` port with two implementations: Spark (one aggregate pass) and
+  Arrow. The driver receives the profile and never a raw row.
+* Pure suggesters: `Profile` in, draft rules out, for the kernel's portable
+  subset and for a chosen engine's existing vocabulary (deequ, dqx, gx).
+  No suggester invents a check an engine does not already support.
+* `dq-profile`: writes a profile as JSON.
+* `dq-suggest`: turns a profile into a draft rule pack in HOCON or YAML.
+* Every suggested rule is emitted at `warn` criticality.
+
+== Out of scope
+
+* Statistics that need the raw rows (quantiles, histograms of values);
+* machine-learned rule generation;
+* applying suggestions automatically: a draft is a draft.
+
+== Contracts
+
+* A profile is bounded: its size depends on the column count, never on the
+  row count.
+* Suggesters are pure functions of the profile; the same profile always
+  yields the same draft.
+* A suggested rule that would gate a pipeline is never produced: everything
+  is `warn` until a human promotes it.
+
+== Acceptance gates
+
+* G1 — Spark and Arrow profilers return equal profiles over the same data
+  for a fixed fixture.
+* G2 — Profiling a wide table materializes no raw row at the driver (asserted
+  with a sentinel column).
+* G3 — Each suggester emits only checks its target engine supports, verified
+  against the registry and the engine's own validator.
+* G4 — Every emitted rule carries `criticality = "warn"`.
+* G5 — `dq-profile` and `dq-suggest` compose: the draft produced from a
+  profile validates with `dq-validate`.
+
+== Progress
+
+* [ ] G1 — not started
+* [ ] G2 — not started
+* [ ] G3 — not started
+* [ ] G4 — not started
+* [ ] G5 — not started
+
+Links: ADR-007; ADR-012; SPEC-010; SPEC-015.

@@ -1,0 +1,71 @@
+= SPEC-013: Evidence importers (harvesters)
+:toc:
+:sectlinks.
+
+Status: Accepted +
+Date: 2026-11-24 +
+Driven by: ADR-011 +
+Milestone: M2 +
+
+== Purpose
+
+Let quality results produced by other tools join the same evidence stream.
+ADR-011 federates rather than competes with platform-native checks: a
+signal's origin is metadata, not a silo. Today only one harvester exists
+(Lakeflow pipeline expectations) and it has no shared contract with anything
+else. dbt tests and Great Expectations runs produce results that never reach
+this framework's reports, sinks, or gate.
+
+== In scope
+
+* One `Harvester` contract: read an external result source and yield the
+  existing outcome dictionaries, or reject the source.
+* Provenance on every imported outcome: `details.origin` records the source
+  system and a reference to the input.
+* Importers, pure stdlib, no vendor dependency:
+** dbt `run_results.json`;
+** Great Expectations validation-result JSON;
+** a generic columnar file (CSV or JSON) with the columns `check`, `success`,
+   an optional `criticality`, and an optional `details` object, so any tool
+   can federate through a trivial format.
+* `dq-import`: writes a `dq-report/v1` document from an imported source, so
+  imported outcomes get the same report, gate, and sinks.
+
+== Out of scope
+
+* Live API clients for any vendor;
+* parsers for every vendor's export variants;
+* a scheduled or long-running ingestion process (ADR-001).
+
+== Contracts
+
+* A harvester imports no vendor package; it parses bytes.
+* An unknown or malformed status fails closed with a message naming the
+  offending record and its position.
+* Importing never widens the outcome contract: a record either normalizes
+  into it or is rejected (ADR-011).
+* Raw row-level data from the source is never copied into `details`; bounded
+  identifiers, counts, and measurements only.
+
+== Acceptance gates
+
+* G1 — dbt: `pass`, `warn`, `error`, `fail` and `skip` statuses map to the
+  specified outcomes and criticality; a malformed file fails closed naming
+  the record.
+* G2 — Great Expectations: each expectation result becomes one outcome with
+  the expectation type and the observed values.
+* G3 — Columnar: the minimal format is documented; a record without a
+  boolean `success` is rejected.
+* G4 — `dq-import` writes a valid `dq-report/v1` from each importer.
+* G5 — Every imported outcome carries provenance, and `dq.harvest` imports
+  with all extras blocked.
+
+== Progress
+
+* [ ] G1 — not started
+* [ ] G2 — not started
+* [ ] G3 — not started
+* [ ] G4 — not started
+* [ ] G5 — not started
+
+Links: ADR-011; ADR-012; SPEC-020.

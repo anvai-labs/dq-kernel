@@ -1,0 +1,71 @@
+= SPEC-020: History and trend policy pack
+:toc:
+:sectlinks.
+
+Status: Accepted +
+Date: 2026-11-24 +
+Driven by: ADR-007 (a policy pack consumes evidence; no ML in the kernel) +
+Milestone: M4 +
+Depends on: SPEC-007, SPEC-012 +
+
+== Purpose
+
+Answer the questions a single run cannot: is this data fresh, did the volume
+change, is this check failing for the first time? The modernization plan
+records "metric history and anomaly checks" as planned and never started.
+ADR-007 keeps machine learning out of the kernel because its exactness is
+the product; this spec adds history as a consumer of evidence, not as a
+kernel feature.
+
+== In scope
+
+* A `HistoryStore` read port: the previous outcome for a check, a series of
+  values for a check, and recent runs for a dataset. Implementations: the
+  SQLAlchemy sink (SPEC-007) and an in-memory store for tests.
+* A `Policy` port evaluated after a run, with the run's outcomes and the
+  history store, returning additional outcomes.
+* Built-in policies: freshness (time since the last successful run), volume
+  change (row count against the previous run, absolute or relative), and
+  new failure (a check failing for the first time in N runs).
+* Statistical detectors behind a `Detector` port — z-score, robust z-score,
+  rolling range — for numeric metric series.
+* Policy outcomes join the run's evidence stream with `details.origin`
+  naming the policy, and default to `warn`.
+
+== Out of scope
+
+* Machine-learned anomaly detection (an optional later pack, and never in
+  the kernel);
+* a metrics warehouse or a long-running collector;
+* retroactive rewriting of past evidence: history is read, never mutated.
+
+== Contracts
+
+* The kernel does not change. Policies read outcomes and produce outcomes.
+* A policy outcome is ordinary evidence: it is in the report, the sinks, and
+  the gate like any other check.
+* Every threshold is explicit configuration; nothing is inferred silently.
+* With no history available, trend policies report "no baseline" as a
+  skipped, non-failing outcome.
+
+== Acceptance gates
+
+* G1 — The three built-in policies return the specified outcomes for
+  prepared histories (fresh, stale, unchanged, changed volume, first
+  failure, repeated failure).
+* G2 — Policy outcomes carry `origin` and `warn` criticality, and appear in
+  the report and the sink of the same run.
+* G3 — Each detector flags a prepared series with a known outlier and does
+  not flag a flat one.
+* G4 — An empty history yields a skipped outcome and never a failure.
+* G5 — `dq.policy` and `dq.history` import with all extras blocked.
+
+== Progress
+
+* [ ] G1 — not started
+* [ ] G2 — not started
+* [ ] G3 — not started
+* [ ] G4 — not started
+* [ ] G5 — not started
+
+Links: ADR-007; SPEC-007; SPEC-012; SPEC-013.

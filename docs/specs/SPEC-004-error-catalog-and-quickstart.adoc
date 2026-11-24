@@ -2,9 +2,10 @@
 :toc:
 :sectlinks.
 
-Status: Draft for review +
+Status: Released — 0.2.0 +
 Date: 2026-09-21 +
-Driven by: TD-PROD-5, ADR-007 (UX commitments)
+Driven by: TD-PROD-5, ADR-007 (UX commitments) +
+Milestone: Shipped +
 
 == Purpose
 
@@ -25,13 +26,13 @@ as the code evolves.
 * Compatibility matrix: Python 3.12/3.13, Spark 3.5.9, PyDeequ 1.7,
   Deequ 2.0.21, drivers (injected, never bundled).
 * Enforcing contract test `dq/tests/test_error_catalog.py`:
-  - walks `dq/**/*.py` (excluding `tests`, `notebooks`) with `ast` and
-    collects every in-scope raise site (`ConfigurationError`,
-    `ValidationError`, `RepositoryError`, `IdentifierError`,
-    `ValueError`, `DataFrameNotFoundError`);
-  - asserts the catalog contains a section for every module with raise
-    sites, that each section names the exception types it covers, and that
-    the stated raise-site total matches the AST count.
+** walks `dq/**/*.py` (excluding `tests`, `notebooks`) with `ast` and
+   collects every in-scope raise site (`ConfigurationError`,
+   `ValidationError`, `RepositoryError`, `IdentifierError`,
+   `ValueError`, `DataFrameNotFoundError`);
+** asserts the catalog contains a section for every module with raise
+   sites, that each section names the exception types it covers, and that
+   the stated raise-site total matches the AST count.
 
 == Out of scope
 
@@ -40,10 +41,19 @@ as the code evolves.
 
 == Acceptance gates
 
-* `pytest dq/tests/test_error_catalog.py` passes and demonstrably fails
-  when a raise site is added without a catalog entry (verified once by
-  temporarily adding a raise).
-* Catalog entries exist for all ten message families identified in the
-  raise-site inventory (139 sites at spec time).
+* G1 — `pytest dq/tests/test_error_catalog.py` passes and demonstrably
+  fails when a raise site is added without a catalog entry.
+* G2 — The catalog has an entry for every message family found in the
+  raise-site inventory (139 sites at spec time), kept complete as modules
+  are added.
 
-Links: TD-PROD-5; ADR-007 (UX commitments).
+== Progress
+
+* [x] G1 — evidence: `dq/tests/test_error_catalog.py` (three contract
+  tests); the negative side was observed each time a module with raise
+  sites lacked a section, most recently on 2026-11-24 for the dqx, checkspec,
+  `dq_engine` and portable modules
+* [x] G2 — evidence: `docs/error-catalog.adoc` states the current total
+  and names every module the contract test finds
+
+Links: TD-PROD-5; ADR-007; SPEC-008.

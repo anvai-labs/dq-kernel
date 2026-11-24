@@ -2,10 +2,11 @@
 :toc:
 :sectlinks.
 
-Status: Draft for review +
+Status: Accepted — SBOM and provenance shipped; signature and verify pending +
 Date: 2026-09-21 +
 Driven by: TD-PROD-1, ADR-007 (MVP-1); satisfies AWS Marketplace security-
-review expectations (vuln-free artifacts, supply-chain attestations).
+  review expectations (vuln-free artifacts, supply-chain attestations) +
+Milestone: M5 +
 
 == Purpose
 
@@ -28,7 +29,7 @@ nobody tampered with it in transit.
 
 == Out of scope
 
-* Container image signing (follows when the container exists).
+* Container image signing (follows when the container exists, SPEC-024).
 * Private registries or mirrors.
 
 == Contracts
@@ -41,9 +42,16 @@ nobody tampered with it in transit.
 
 == Acceptance gates
 
-* A release run produces signed artifacts with attestations verifiable via
-  the documented commands.
-* A tampered artifact fails the verify step (negative test executed once
-  during rollout and recorded in the run log).
+* G1 — A release run produces signed artifacts with attestations verifiable
+  via the documented commands.
+* G2 — A tampered artifact fails the verify step (negative test executed
+  once during rollout and recorded in the run log).
 
-Links: TD-PROD-1; ADR-007 (MVP-1).
+== Progress
+
+* [ ] G1 — `.github/workflows/release.yml` already generates the CycloneDX
+  SBOM and the build-provenance attestation (shipped in 0.2.0); the sigstore
+  signature and the documented verification commands are missing
+* [ ] G2 — no verify step exists yet
+
+Links: TD-PROD-1; ADR-007; SPEC-024.

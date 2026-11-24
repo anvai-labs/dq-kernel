@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Spec lifecycle and progress tracker** (SPEC-008):
+  `docs/roadmap.adoc` is the one place that says what is planned, in
+  flight, and done. Spec format v2 adds a `Milestone`, optional
+  `Depends on` and `Gate` header fields, and a per-gate `Progress`
+  checklist; a status of `Verified` requires every gate checked with an
+  evidence citation. The tracker table is generated from the spec files
+  by `scripts/roadmap.py` and held to them by a contract test, which also
+  proves (by mutating a real spec) that it rejects each kind of drift
+- Seventeen new specs, SPEC-008 through SPEC-024, across five milestones
+  (CI gates, configuration, engine SDK, gate policy, SQLAlchemy sink,
+  evidence importers, observability, Arrow and SQL compute, the pandera
+  and Soda engines, profiling, history, row quarantine, streaming, and
+  platform/distribution work), each with testable acceptance gates
+- ADR-013 (gate policy and severity), ADR-014 (one run core, many
+  runners) and ADR-015 (row outcomes and the data-plane sink) as proposals
+  recording the decisions those specs depend on
+
+### Changed
+
+- SPEC-001 through SPEC-007 are reconciled against the code: 001, 004 and
+  006 are `Released — 0.2.0` with a test cited for every gate; SPEC-002 is
+  in progress (two gates remain, delivered by SPEC-012); SPEC-003 and
+  SPEC-007 are accepted and unbuilt in part or whole; SPEC-005 is deferred
+  because its control plane moved to a closed repository
+- The historical planning documents state that they are proposals and
+  point at the tracker; every proposal they make has a recorded disposition
+- `docs/index.adoc` links the tracker instead of a hand-maintained list of
+  specs, lists ADR-011 through ADR-015, and no longer links two review
+  files in a `docs/reviews/` directory that does not exist
+
 ## [0.3.0] - 2026-11-24
 
 ### Added

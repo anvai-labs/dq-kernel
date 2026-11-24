@@ -1,0 +1,68 @@
+= SPEC-017: pandera engine
+:toc:
+:sectlinks.
+
+Status: Accepted — gated on the live dependency and API check +
+Date: 2026-11-24 +
+Driven by: ADR-012, ADR-001 +
+Milestone: M3 +
+Depends on: SPEC-011 +
+Gate: before any build, install the pinned version in an isolated
+  environment together with the other extras, confirm they resolve, and
+  record the verified API calls here. No build starts on an unverified API. +
+
+== Purpose
+
+Wrap pandera, the most widely used schema and dataframe validation library
+in the pandas and Polars ecosystem, so its users get this framework's
+evidence, gate, and sinks without rewriting their checks. It is the first
+engine whose input is not a Spark DataFrame.
+
+== In scope
+
+* `dq/engine/pandera/`: an engine on the ADR-012 hooks.
+* Payload in pandera's own vocabulary: a schema in its serialized form, or
+  a list of column checks. No Python is loaded from configuration (ADR-001
+  non-goal), so a reference to a schema object in a module is out.
+* Backends: pandas, and Polars where pandera supports the serialized schema
+  there.
+* Results: one outcome per failing and passing check, carrying failure
+  counts and a bounded list of failing column and check names.
+* An optional `pandera` extra and live tests in the main test lane.
+
+== Out of scope
+
+* Custom check functions written in Python and referenced from a rule pack;
+* schema inference (that is profiling, SPEC-019);
+* backends beyond pandas and Polars.
+
+== Contracts
+
+* Capabilities are declared honestly: row-filter support, failed-row counts,
+  and persistence reflect what the engine can really do.
+* Vendor vocabulary passes through untouched; only identity and severity
+  cross the check seam.
+* The engine imports no pandera until it is used.
+
+== Acceptance gates
+
+* G1 — The live dependency and API check is recorded here: versions
+  installed, the calls verified against the real package, and the date.
+* G2 — The engine passes the conformance suite (SPEC-011).
+* G3 — Live round trips: a passing schema, a failing column check, and a
+  failing dataframe-level check each produce the specified outcomes.
+* G4 — An unknown construct or an unserializable schema fails closed with a
+  message naming the check.
+* G5 — A checked-in example rule pack validates and is covered by a test.
+
+== Progress
+
+* [ ] G1 — PyPI checked 2026-11-24: pandera 0.36.0, Python >=3.10, depends
+  on packaging, pydantic, typeguard, typing_extensions, typing_inspect. The
+  live check has not been run
+* [ ] G2 — not started
+* [ ] G3 — not started
+* [ ] G4 — not started
+* [ ] G5 — not started
+
+Links: ADR-012; ADR-001; SPEC-011; SPEC-015; docs/compute-engines.adoc.

@@ -1,0 +1,57 @@
+# ADR-014: One run core, many runners
+
+Status: Proposed (SPEC-015 is the buildable contract) +
+Date: 2026-11-24
+
+== Context
+
+`DQFramework.run()` is the only place a rule pack is executed, and it is
+bound to Spark: it takes a `SparkSession`, resolves datasets through the
+catalog, and stamps the Spark application id. ADR-010 calls for compute
+beyond Spark, and the kernel's plans have no Spark in them, but there is no
+way to *run a rule pack* without one.
+
+A second runner that copies the loop would create exactly the drift the
+layer redesign removed: outcome normalization, the run key, notifiers, the
+gate policy, and observers kept in two places.
+
+== Decision
+
+* Extract the run lifecycle into one run core (`dq/run.py`) that knows
+  nothing about Spark: iterate rules, load engines through the registry,
+  call `apply`, normalize outcomes through the outcome boundary, stamp the
+  run key, evaluate the gate policy, notify, and notify observers.
+* Runners bind compute: they resolve a dataset name to a frame and supply
+  run metadata. `DQFramework` remains the Spark facade and becomes a thin
+  runner over the core (ADR-001 keeps it as the compatibility surface; its
+  signature and return type do not change). A new `dq.runner` binds
+  Arrow-based compute and needs no Spark.
+* Engines are shared by both runners. An engine that only works on Spark
+  frames simply is not usable from the Spark-free runner, and says so.
+* Datasets are resolved by the runner and handed to the core; the core
+  never imports a catalog.
+
+== Consequences
+
+* Every capability added to the core — gate policy, notifiers, observers,
+  row outputs, history policies — reaches both runners once.
+* A non-Spark user gets the same evidence format, the same exit codes, and
+  the same notifiers as a Spark user.
+* The extraction is a refactor of `run()`, guarded by the existing framework
+  contract tests passing unmodified.
+* The Spark facade keeps a reason to exist: catalogs, Unity Catalog and Glue
+  resolution, and the application id are Spark concerns and stay there.
+
+== Rejected alternatives
+
+* A second, independent loop in the new runner: duplicates the lifecycle and
+  guarantees drift.
+* Making the core a long-running service: ADR-001's non-goal; the core is a
+  function call.
+* Waiting to remove Spark from `DQFramework` itself: it is the documented
+  compatibility surface and carries Spark-only behaviour.
+
+== Acceptance gates
+
+* The Spark facade's outcomes are unchanged by the extraction (SPEC-015 G6).
+* `dq.run` imports with every optional dependency blocked (SPEC-015 G5).

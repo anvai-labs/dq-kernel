@@ -1,0 +1,76 @@
+= SPEC-012: Gate policy and notifier conformance
+:toc:
+:sectlinks.
+
+Status: Accepted +
+Date: 2026-11-24 +
+Driven by: ADR-008, ADR-013, SPEC-002 +
+Milestone: M1 +
+
+== Purpose
+
+Give severity operational meaning, and bring the notifier up to the decision
+its ADR records. Since ADR-012 every engine reports a canonical
+`criticality`, yet a warn-only failure still exits the pipeline with code 1
+and marks the report failed. The webhook notifier makes one attempt where
+ADR-008 specifies three, and nothing can inject a recording notifier into a
+run.
+
+== In scope
+
+* `dq.gate`: `GatePolicy` (`any`, `error`, `warn`, `never`), `GateDecision`,
+  and the pure function `evaluate_gate(outcomes, policy)`. Configuration key:
+  `dqframework.gate.fail_on`.
+* Exit codes for `dq-kernel`: 0 when the gate passes, 1 when it fails, 2 when
+  the configuration is invalid and that is detected before any data is read.
+* `dq-report/v1`: additive `summary.blocked` and `summary.warned` counts.
+  `status` keeps its meaning — any failed check.
+* Notifier conformance with ADR-008 and SPEC-002: the `notifiers` key (it
+  supersedes `notify`), three webhook attempts with capped exponential
+  backoff and an injectable sleep, a `report` reference on `GateEvent`, an
+  `InMemoryNotifier`, and `slack` and `teams` adapters.
+
+== Out of scope
+
+* Per-rule or per-check routing;
+* a message templating language;
+* e-mail and SMS adapters;
+* delivery guarantees beyond at-most-once.
+
+== Contracts
+
+* The default policy is `any`, which preserves today's exit behaviour
+  exactly. `error` makes warn-only failures non-gating.
+* `evaluate_gate` is pure and is the one place the decision is made; the
+  CLI, the report, and the notifier all read from it.
+* An outcome with no `criticality` counts as `error`.
+* `dq-report/v1` gains keys only. Existing consumers reading known keys see
+  no change.
+
+== Acceptance gates
+
+* G1 — For every policy and outcome mix (error failure, warn failure, both,
+  none) the decision and the exit code are as specified.
+* G2 — Under the default policy the CLI exit code and the report bytes are
+  identical to before for rule packs without warn failures.
+* G3 — The webhook adapter makes three attempts with backoff on transport
+  failure and then gives up without raising; a success on a later attempt
+  stops the retries; tests inject the sleep and touch no network.
+* G4 — A recording notifier receives exactly one event per run, for passing
+  and failing runs, carrying the report reference when `--report-json` is
+  given.
+* G5 — The Slack and Teams adapters post their shaped payloads and are
+  fail-open.
+* G6 — The report with the additive summary fields still validates, and the
+  existing report tests are unchanged.
+
+== Progress
+
+* [ ] G1 — not started
+* [ ] G2 — not started
+* [ ] G3 — not started
+* [ ] G4 — not started
+* [ ] G5 — not started
+* [ ] G6 — not started
+
+Links: ADR-008; ADR-013; SPEC-002; SPEC-014.

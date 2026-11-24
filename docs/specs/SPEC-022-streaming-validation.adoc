@@ -1,0 +1,62 @@
+= SPEC-022: Streaming validation
+:toc:
+:sectlinks.
+
+Status: Accepted +
+Date: 2026-11-24 +
+Driven by: ADR-001, ADR-014 +
+Milestone: M4 +
+Depends on: SPEC-015, SPEC-012 +
+
+== Purpose
+
+Validate data as it arrives. Structured Streaming jobs have no way to run
+rule packs today: the framework is batch-only. A streaming job only needs
+the existing batch run applied to each micro-batch, with a run key per
+batch and a clear answer to what happens when a batch fails.
+
+== In scope
+
+* `dq.streaming`: a callback factory for `foreachBatch` that runs the shared
+  run core on each micro-batch.
+* A deterministic run key per batch, derived from the batch id, so a
+  batch's evidence is addressable.
+* Reuse of engines across batches where the engine caches its construction.
+* Append-only evidence: each batch appends to the configured sink.
+* An explicit per-batch failure policy: log and continue, or raise and stop
+  the stream.
+* Gate policy per batch (SPEC-012).
+
+== Out of scope
+
+* Stateful or windowed checks across batches;
+* exactly-once evidence delivery beyond what the sink's run scope provides;
+* managing or scheduling the streaming query itself.
+
+== Contracts
+
+* The callback is a function of configuration and the shared run core; it
+  duplicates none of the batch path.
+* Aggregate checks are evaluated per micro-batch and documented as such.
+* A raising policy stops the stream only after the batch's evidence is
+  persisted.
+
+== Acceptance gates
+
+* G1 — A rate-limited in-memory stream of three batches produces one run's
+  worth of evidence per batch, each under its own run key.
+* G2 — Under the log-and-continue policy a failing batch does not stop the
+  stream; under the raise policy it does, after its evidence is persisted.
+* G3 — An engine that caches its construction is constructed once across
+  batches (asserted with a counting factory).
+* G4 — No state accumulates on the driver across batches beyond the sink's
+  own buffering.
+
+== Progress
+
+* [ ] G1 — not started
+* [ ] G2 — not started
+* [ ] G3 — not started
+* [ ] G4 — not started
+
+Links: ADR-001; ADR-014; SPEC-012; SPEC-015.

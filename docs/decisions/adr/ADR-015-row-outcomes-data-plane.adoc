@@ -1,0 +1,58 @@
+# ADR-015: Row outcomes and the data-plane sink
+
+Status: Proposed (SPEC-021 is the buildable contract) +
+Date: 2026-11-24
+
+== Context
+
+ADR-011 names a "quarantine complement" as role D: generate drop and
+quarantine splits, and aggregate-check both streams. Today a run reports
+that a check failed and how many rows failed, but nothing can route those
+rows, so teams rebuild tagging and quarantine outside the framework where
+the evidence and the data diverge.
+
+Two boundaries are load-bearing here. The modernization plan forbids raw
+failing records in evidence reports. And ADR-008 separated the notifier
+from the sink for one reason each: a sink persists evidence. Quarantined
+rows are not evidence; they are data.
+
+== Decision
+
+* Row outcomes are a capability, not an assumption. An engine declares
+  `row_outcomes` when it can attach per-row failure columns, and implements
+  a tagging hook. Engines whose checks are aggregates cannot tag rows and do
+  not declare it.
+* A new port, `DataFrameSink`, writes frames to a path or a table. It is
+  separate from `OutcomeSink`: one writes data, the other persists evidence.
+  Neither implements the other.
+* Asking an engine without the capability for row outputs fails closed with
+  a `ConfigurationError`. Outputs are never silently ignored.
+* Evidence about a split is counts and a location: valid rows, quarantined
+  rows, and where the quarantined rows were written. Row contents never
+  enter the evidence stream.
+* Tagging happens inside the engine, at scale. No raw row is collected at
+  the driver to produce a split.
+
+== Consequences
+
+* Pipeline code can act on rejected rows without leaving the framework, and
+  the evidence and the data agree because both come from the same run.
+* DQX is the first engine to declare the capability because it already
+  returns a tagged frame. Others can follow without touching the core.
+* The evidence report stays bounded and publishable; a quarantined-rows
+  table is access-controlled like any other table.
+
+== Rejected alternatives
+
+* Writing quarantined rows through `OutcomeSink`: evidence sinks are
+  append-only and keyed, and consumers treat them as summaries; putting row
+  data there breaks both.
+* Putting failing rows in the report: a stated non-goal, and it makes
+  report size depend on data volume.
+* Implementing tagging in the orchestration layer from engine results: only
+  aggregates reach the driver, so the row set is already gone.
+
+== Acceptance gates
+
+* Valid plus quarantined equals the input row count (SPEC-021 G1).
+* Evidence for a rule with outputs carries no row contents (SPEC-021 G4).

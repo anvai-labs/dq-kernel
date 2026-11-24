@@ -9,7 +9,7 @@
 
 NOTE: This index links historical proposals. It is not a release plan, implementation-status
 dashboard, or statement of current security/performance behavior. See `index.adoc` for the current
-contract.
+contract and link:roadmap.adoc[the roadmap and spec tracker] for what is planned, in flight, or done.
 
 == Overview
 

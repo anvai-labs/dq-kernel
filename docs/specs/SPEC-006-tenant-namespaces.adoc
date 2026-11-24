@@ -2,10 +2,11 @@
 :toc:
 :sectlinks.
 
-Status: Draft for review +
+Status: Released — 0.2.0 +
 Date: 2026-09-21 +
 Driven by: TD-PROD-4a, ADR-009 (interface consumed by the closed control
-plane)
+  plane) +
+Milestone: Shipped +
 
 == Purpose
 
@@ -45,9 +46,15 @@ like `dataset` today.
 
 == Acceptance gates
 
-* Two namespaces writing the same run key do not collide (namespace is part
-  of the uniqueness surface).
-* Prune scoped to namespace A leaves namespace B's rows untouched.
-* Admission views return only the requested namespace's rows.
+* G1 — Two namespaces writing the same run key do not collide (namespace is
+  part of the uniqueness surface).
+* G2 — Prune scoped to namespace A leaves namespace B's rows untouched.
+* G3 — Admission views return only the requested namespace's rows.
 
-Links: TD-PROD-4a; ADR-009; ADR-006.
+== Progress
+
+* [x] G1 — evidence: `dq/tests/test_postgres_sink.py::test_ddl_statements_use_quoted_pg_identifiers_namespaces_and_views`, `::test_save_stamps_namespace_and_artifact_columns`
+* [x] G2 — evidence: `dq/tests/test_postgres_sink.py::test_prune_scoping_never_touches_other_namespaces`, `::test_prune_all_namespaces_drops_the_namespace_filter`
+* [x] G3 — evidence: `dq/tests/test_postgres_sink.py::test_ddl_statements_use_quoted_pg_identifiers_namespaces_and_views`, `::test_run_scope_stamps_namespace_and_commits`
+
+Links: TD-PROD-4a; ADR-009; ADR-006; SPEC-001; SPEC-005.

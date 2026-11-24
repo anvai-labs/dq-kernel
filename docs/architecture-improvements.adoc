@@ -9,6 +9,8 @@
 
 NOTE: This is a proposed architecture, not a description of code already implemented. Use
 `index.adoc`, the source tree, and executable tests for current behavior.
+Every proposal in this document has a disposition in
+link:roadmap.adoc[the roadmap and spec tracker].
 
 == Executive Summary
 

@@ -2,9 +2,11 @@
 :toc:
 :sectlinks.
 
-Status: Outline — spec completes after co-design review (ADR-007 MVP-2) +
+Status: Deferred — the control plane moved to the closed repo (ADR-009), archived 2026-09-23 +
 Date: 2026-09-21 +
-Driven by: TD-PROD-4
+Reconciled: 2026-11-24 +
+Driven by: TD-PROD-4, ADR-007 (MVP-2) +
+Milestone: None +
 
 == Purpose
 
@@ -12,7 +14,9 @@ Reserve the shape of the MVP-2 control plane so MVP-1's evidence plane does
 not preclude it: namespaces over the evidence store, API keys, retention
 per namespace, and RBAC on the query surface.
 
-== Outline (co-design commitments only)
+== In scope
+
+Co-design commitments only:
 
 * A namespace is a PostgreSQL schema prefix plus a credential scope; API
   keys resolve to (namespace, role) and never appear in configuration.
@@ -24,10 +28,29 @@ per namespace, and RBAC on the query surface.
 * Billing hooks attach to namespace usage (runs, artifacts), left to the
   marketplace metering adapter.
 
-== Explicitly deferred
+== Out of scope
 
-Table DDL, API surface, identity-provider integration, and the admission
-predicate — all require the co-design review with the consumer (ADR-007)
-before this outline becomes a buildable spec.
+Explicitly deferred, and owned by the closed control plane rather than this
+repository: table DDL for the control plane, its API surface,
+identity-provider integration, and the admission predicate. Each needs the
+co-design review with the consumer (ADR-007) before this outline becomes a
+buildable spec.
 
-Links: TD-PROD-4; ADR-007 (MVP-2); ADR-006.
+== Acceptance gates
+
+* G1 — API keys resolve to (namespace, role) and never appear in
+  configuration.
+* G2 — Negative tests prove a namespace cannot read or write another
+  namespace's evidence, and that retention cannot cross namespaces.
+* G3 — Billing hooks attach to namespace usage and are left to the
+  marketplace metering adapter.
+
+== Progress
+
+* [ ] G1 — not started; the control plane lives in the archived
+  `dq-control-plane` repository
+* [ ] G2 — the evidence-store half of this gate shipped in this repository
+  as SPEC-006; the credential half is not started
+* [ ] G3 — not started
+
+Links: TD-PROD-4; ADR-007; ADR-009; SPEC-006.

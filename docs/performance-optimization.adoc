@@ -10,6 +10,8 @@
 NOTE: Techniques and performance figures in this document are proposals or illustrative targets;
 they are not benchmark results or current guarantees. Use reproducible benchmarks before making
 capacity or latency commitments.
+Every proposal in this document has a disposition in
+link:roadmap.adoc[the roadmap and spec tracker].
 
 == Executive Summary
 

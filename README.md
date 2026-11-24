@@ -41,6 +41,7 @@ aggregate verdict.
 - [Quickstart](docs/quickstart.adoc)
 - [Error catalog](docs/error-catalog.adoc)
 - [ADRs](docs/decisions/adr/)
+- [Roadmap and spec tracker](docs/roadmap.adoc) — every spec with status and evidence
 - [SPECs](docs/specs/)
 - [Modernization plan](docs/modernization-plan.adoc)
 - [Compute engines beyond Spark](docs/compute-engines.adoc)
