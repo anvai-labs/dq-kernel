@@ -48,6 +48,9 @@ cron-schedule-triggers = {version = "^0.0.11", optional = true}
 databricks-sdk = {version = ">=0.123,<0.155", optional = true}
 great_expectations = {version = ">=1.24,<2", optional = true}
 delta-spark = {version = ">=3.3,<3.4", optional = true}
+# DQX 0.17.x requires Python <3.13 and pins databricks-sdk~=0.73, which
+# conflicts with the databricks extra -- never combine the two extras.
+databricks-labs-dqx = {version = ">=0.17.2,<0.18", optional = true, python = ">=3.12,<3.13"}
 
 [tool.poetry.extras]
 spark = ["pyspark"]
@@ -57,6 +60,7 @@ cron = ["cron-schedule-triggers"]
 databricks = ["databricks-sdk", "cron-schedule-triggers"]
 greatexpectations = ["great_expectations"]
 delta = ["delta-spark", "pyspark"]
+dqx = ["databricks-labs-dqx"]
 
 # Minimal development dependencies (only for CI)
 [tool.poetry.group.dev.dependencies]

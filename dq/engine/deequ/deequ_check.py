@@ -7,6 +7,7 @@ from pyhocon import ConfigTree
 from pydeequ.verification import VerificationSuite
 import json
 
+from dq.engine import checkspec
 from dq.engine.deequ.expression import parse_assertion
 
 
@@ -15,9 +16,13 @@ class DeequCheck:
 
     Supports both single-check mode (all constraints chained on one Check)
     and multi-check mode (one Check per constraint for granular reporting).
+
+    Per-rule severity crosses the shared check seam: ``level`` accepts the
+    Deequ spellings (``Error``/``Warning``) and the canonical kernel
+    spellings (``error``/``warn``) alike, normalized fail-closed.
     """
 
-    _check_level_map = {"Warning": CheckLevel.Warning, "Error": CheckLevel.Error}
+    _check_level_map = {"error": CheckLevel.Error, "warn": CheckLevel.Warning}
 
     def __init__(self, checks_config: ConfigTree, single_check_mode=False):
         self._checks_config = checks_config
@@ -44,9 +49,12 @@ class DeequCheck:
             kwargs = check_config.get("kwargs", None)
             alias = check_config.get("alias", None)
             if not (self._single_check_mode):
+                criticality = checkspec.normalize_criticality(
+                    check_config.get("level", None)
+                )
                 check = Check(
                     spark_session=spark_session,
-                    level=self._check_level_map.get(check_config.get("level", "Error")),
+                    level=self._check_level_map[criticality],
                     description=json.dumps(
                         {
                             "alias": check_config.get("alias", "*Unknown"),

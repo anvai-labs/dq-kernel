@@ -8,6 +8,7 @@ from pyhocon import ConfigTree
 from pyspark.sql import DataFrame
 from pydeequ.verification import VerificationSuite, VerificationResult
 
+from dq.engine import checkspec
 from dq.engine.dq_engine import DQEngine
 from dq.engine.deequ.deequ_check import DeequCheck
 from dq.utils import constants
@@ -28,6 +29,14 @@ class DeequEngine(DQEngine):
     and summary conversion.
     """
 
+    #: Deequ carries per-rule severity natively (CheckLevel) and exposes it
+    #: in check results; it has no per-constraint row scoping or row counts.
+    CAPABILITIES = {
+        "criticality": "native",
+        "row_filter": False,
+        "failed_rows": False,
+    }
+
     def __init__(self, config: ConfigTree, dqts: Optional[int] = None):
         self._sparkSession = None
         super().__init__(config, dqts)
@@ -40,7 +49,8 @@ class DeequEngine(DQEngine):
             repository: Optional repository config for persisting metrics.
 
         Returns:
-            List of metric dicts with ``check``, ``success``, ``details`` keys.
+            List of metric dicts with ``check``, ``success``, ``details``
+            keys; ``details`` carries the rule's ``criticality``.
         """
         self._log_processing_start()
         self._sparkSession = dataframe.sparkSession
@@ -49,12 +59,14 @@ class DeequEngine(DQEngine):
 
         summarymetrics = []
         for check in checkVerifications.collect():
+            details = check.asDict(recursive=True)
             summarymetrics.append(
-                {
-                    "check": check["check"],
-                    "success": check["check_status"] == "Success",
-                    "details": check.asDict(recursive=True),
-                }
+                checkspec.build_result(
+                    check["check"],
+                    check["check_status"] == "Success",
+                    details,
+                    criticality=details.get("check_level"),
+                )
             )
 
         return summarymetrics

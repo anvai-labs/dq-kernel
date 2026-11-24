@@ -5,12 +5,15 @@ import logging
 
 from pyhocon import ConfigTree
 
+from dq.engine import checkspec
 from dq.utils import config_utils
 
 logger = logging.getLogger(__name__)
 
 _TYPE_KEY = "type"
 _KWARGS_KEY = "kwargs"
+_NAME_KEY = "name"
+_CRITICALITY_KEY = "criticality"
 
 
 def expectation_class(gx, expectation_type: str):
@@ -40,12 +43,23 @@ class GreatexpectationsCheck:
     Each entry carries a snake-case ``type`` (resolved against
     ``gx.expectations`` — unknown types fail closed), optional top-level
     keyword arguments (``column`` among them; omit it for table-level
-    expectations), and an optional nested ``kwargs`` subtree for the
-    rest of the constructor arguments.
+    expectations), and an optional nested ``kwargs`` subtree for the rest
+    of the constructor arguments.
+
+    The common axes cross the shared check seam (``dq.engine.checkspec``):
+    an optional ``name`` labels the metric result (GX has no rule identity
+    of its own; without one, the expectation ``type`` labels the result as
+    before, or ``<type>_<column>`` under the opt-in ``derive_names`` flag),
+    and an optional ``criticality`` (Deequ-style spellings accepted,
+    defaulting to ``error``) surfaces in every result's ``details``. GX has
+    no native severity, so criticality is reporting metadata here, not
+    execution routing. Explicitly configured names must be unique.
     """
 
-    def __init__(self, config: ConfigTree):
+    def __init__(self, config: ConfigTree, derive_names: bool = False):
         self._expectations_config = config
+        self._derive_names = derive_names
+        self._labels = []
 
     def build_suite(self, gx, name: str):
         """Build the expectation suite for this configuration.
@@ -56,9 +70,15 @@ class GreatexpectationsCheck:
 
         Returns:
             A ``gx.ExpectationSuite`` with one expectation per entry.
+
+        Raises:
+            ValueError: On an unknown type, missing ``type``, invalid
+                criticality, or duplicate explicit names.
         """
         suite = gx.ExpectationSuite(name=name)
-        for entry in self._expectations_config:
+        self._labels = []
+        explicit_names = []
+        for index, entry in enumerate(self._expectations_config):
             expectation_type = entry.get(_TYPE_KEY, None)
             if not expectation_type:
                 raise ValueError(
@@ -67,11 +87,43 @@ class GreatexpectationsCheck:
             kwargs = {
                 key: config_utils.config_tree_to_python(value)
                 for key, value in entry.items()
-                if key not in (_TYPE_KEY, _KWARGS_KEY)
+                if key not in (_TYPE_KEY, _KWARGS_KEY, _NAME_KEY, _CRITICALITY_KEY)
             }
             kwargs.update(
                 config_utils.config_tree_to_python(entry.get(_KWARGS_KEY, {}))
             )
             klass = expectation_class(gx, expectation_type)
             suite.add_expectation(klass(**kwargs))
+            explicit = entry.get(_NAME_KEY, None)
+            if explicit:
+                explicit_names.append(explicit)
+            criticality = checkspec.normalize_criticality(
+                entry.get(_CRITICALITY_KEY, None)
+            )
+            self._labels.append(
+                (self._label(entry, index, expectation_type), criticality)
+            )
+        checkspec.require_unique_names(explicit_names)
         return suite
+
+    def labels(self):
+        """Return ``(result label, criticality)`` pairs in suite order.
+
+        Validation results come back in expectation order, so the engine
+        zips these with ``validation_output.results`` by index.
+
+        Returns:
+            List of ``(label, criticality)`` tuples, one per entry.
+        """
+        return list(self._labels)
+
+    def _label(self, entry, index: int, expectation_type: str) -> str:
+        """Resolve the result label for one expectation entry."""
+        explicit = entry.get(_NAME_KEY, None)
+        if explicit:
+            return explicit
+        if self._derive_names:
+            column = entry.get("column", None)
+            if column:
+                return f"{expectation_type}_{column}"
+        return expectation_type

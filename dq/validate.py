@@ -17,6 +17,7 @@ _BUILT_IN_PAYLOAD_KEYS = {
     "businessrules": "checks",
     "deequ": "checks",
     "dqdl": "ruleset",
+    "dqx": "checks",
     "greatexpectations": "expectations",
     "schemavalidation": "schema",
 }

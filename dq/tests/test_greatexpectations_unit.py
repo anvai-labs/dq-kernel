@@ -150,6 +150,7 @@ def _make_fake_gx(validation):
     fake = types.ModuleType("great_expectations")
     fake.expectations = SimpleNamespace(
         ExpectColumnValuesToNotBeNull=FakeExpectation,
+        ExpectColumnValuesToBeInSet=FakeExpectation,
         ExpectTableRowCountToBeBetween=FakeExpectation,
     )
     batch = SimpleNamespace(validate=lambda suite: validation)
@@ -226,12 +227,16 @@ def test_engine_coerces_results_through_the_sanitizer(monkeypatch):
     engine = _engine_with(
         fake,
         monkeypatch,
-        [{"type": "expect_column_values_to_not_be_null", "column": "id"}],
+        [
+            {"type": "expect_column_values_to_not_be_null", "column": "id"},
+            {"type": "expect_column_values_to_be_in_set", "column": "id"},
+        ],
     )
     metrics = engine.apply(_FakeFrame())
     assert metrics[0]["success"] is True
     assert metrics[1]["success"] is True  # coerced to bool("yes")
     assert metrics[1]["details"] == {
+        "criticality": "error",
         "partial_unexpected_list": [1, 2],
         "ratio": None,
     }
@@ -255,7 +260,10 @@ def test_engine_fails_closed_on_missing_type(monkeypatch):
 
 def test_engine_passes_column_only_when_present_and_merges_kwargs(monkeypatch):
     validation = _validation(
-        [("expect_table_row_count_to_be_between", True, {"observed_value": 3})]
+        [
+            ("expect_table_row_count_to_be_between", True, {"observed_value": 3}),
+            ("expect_column_values_to_not_be_null", True, {"unexpected_count": 0}),
+        ]
     )
     fake = _make_fake_gx(validation)
     engine = _engine_with(
@@ -312,3 +320,99 @@ def test_engine_caches_batch_definition_across_applies(monkeypatch):
     engine.apply(_FakeFrame())
     assert engine._gx_batch_definition is first
     assert engine._gx_suite is first_suite
+
+
+# ------------------------------------------------------------- check seam (name/criticality)
+
+
+def test_explicit_name_labels_the_result_and_surfaces_criticality(monkeypatch):
+    validation = _validation(
+        [("expect_column_values_to_not_be_null", False, {"unexpected_count": 1})]
+    )
+    fake = _make_fake_gx(validation)
+    engine = _engine_with(
+        fake,
+        monkeypatch,
+        [
+            {
+                "name": "ids_present",
+                "criticality": "warn",
+                "type": "expect_column_values_to_not_be_null",
+                "column": "id",
+            }
+        ],
+    )
+    metrics = engine.apply(_FakeFrame())
+    assert metrics[0]["check"] == "ids_present"
+    assert metrics[0]["details"]["criticality"] == "warn"
+
+
+def test_deequ_style_level_spellings_are_accepted(monkeypatch):
+    validation = _validation(
+        [("expect_column_values_to_not_be_null", True, {"unexpected_count": 0})]
+    )
+    fake = _make_fake_gx(validation)
+    engine = _engine_with(
+        fake,
+        monkeypatch,
+        [
+            {
+                "name": "a",
+                "criticality": "Warning",
+                "type": "expect_column_values_to_not_be_null",
+                "column": "id",
+            }
+        ],
+    )
+    metrics = engine.apply(_FakeFrame())
+    assert metrics[0]["details"]["criticality"] == "warn"
+
+
+def test_name_and_criticality_never_reach_gx_constructor(monkeypatch):
+    validation = _validation(
+        [("expect_column_values_to_not_be_null", True, {"unexpected_count": 0})]
+    )
+    fake = _make_fake_gx(validation)
+    engine = _engine_with(
+        fake,
+        monkeypatch,
+        [
+            {
+                "name": "a",
+                "criticality": "warn",
+                "type": "expect_column_values_to_not_be_null",
+                "column": "id",
+            }
+        ],
+    )
+    engine.apply(_FakeFrame())
+    assert fake._suite.added[0].kwargs == {"column": "id"}
+
+
+def test_duplicate_explicit_names_fail_closed(monkeypatch):
+    fake = _make_fake_gx(_validation([]))
+    engine = _engine_with(
+        fake,
+        monkeypatch,
+        [
+            {"name": "dup", "type": "expect_column_values_to_not_be_null"},
+            {"name": "dup", "type": "expect_column_values_to_not_be_null"},
+        ],
+    )
+    with pytest.raises(ValueError, match="Duplicate check name"):
+        engine.apply(_FakeFrame())
+
+
+def test_derive_names_flag_labels_by_column(monkeypatch):
+    validation = _validation(
+        [("expect_column_values_to_not_be_null", True, {"unexpected_count": 0})]
+    )
+    fake = _make_fake_gx(validation)
+    engine = _engine_with(
+        fake,
+        monkeypatch,
+        [{"type": "expect_column_values_to_not_be_null", "column": "id"}],
+        derive_names=True,
+    )
+    metrics = engine.apply(_FakeFrame())
+    assert metrics[0]["check"] == "expect_column_values_to_not_be_null_id"
