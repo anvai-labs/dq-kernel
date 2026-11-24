@@ -4,9 +4,9 @@
 """Live DQX round trips for the dqx engine.
 
 Skipped entirely when the optional extra is absent (unit-lane contract
-tests with a mocked dqx live in test_dqx_unit.py). Requires Python <3.13
-and DQX's databricks-sdk~=0.73 pin, so this lane cannot share an
-environment with the databricks extra.
+tests with a mocked dqx live in test_dqx_unit.py) and on Python 3.13,
+where the dqx extra is not installable. In CI they run inside the main
+test matrix (3.12 job) on the shared Spark session.
 """
 
 import pytest

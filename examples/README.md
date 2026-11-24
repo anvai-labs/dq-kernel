@@ -9,7 +9,7 @@ This directory contains example configurations and scripts demonstrating how to 
 - `schema_validation.conf` - Schema validation with datatype, nullable, and unique constraints
 - `businessrules_constraints.conf` - Businessrules engine constraints (distinctness, rate-of-change, negative values)
 - `greatexpectations_validation.conf` - GX Core expectations (snake-case `type` entries) through the greatexpectations engine
-- `dqx_validation.conf` - Databricks Labs DQX metadata checks through the dqx engine (needs the `dqx` extra; Python <3.13, incompatible with the `databricks` extra)
+- `dqx_validation.conf` - Databricks Labs DQX metadata checks through the dqx engine (needs the `dqx` extra; Python <3.13 only)
 - `multi_engine_pipeline.conf` - Multi-engine pipeline combining Deequ and schema validation
 - `unity_catalog.conf` - Configuration using Databricks Unity Catalog
 - `glue_catalog.conf` - Configuration using AWS Glue Data Catalog

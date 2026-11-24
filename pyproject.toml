@@ -48,8 +48,9 @@ cron-schedule-triggers = {version = "^0.0.11", optional = true}
 databricks-sdk = {version = ">=0.123,<0.155", optional = true}
 great_expectations = {version = ">=1.24,<2", optional = true}
 delta-spark = {version = ">=3.3,<3.4", optional = true}
-# DQX 0.17.x requires Python <3.13 and pins databricks-sdk~=0.73, which
-# conflicts with the databricks extra -- never combine the two extras.
+# DQX 0.17.x requires Python <3.13 (hence the python marker). Its
+# databricks-sdk requirement (>=0.73,<1) overlaps the databricks extra, so
+# the two extras are co-installable; Poetry skips this extra on Python 3.13.
 databricks-labs-dqx = {version = ">=0.17.2,<0.18", optional = true, python = ">=3.12,<3.13"}
 
 [tool.poetry.extras]
@@ -91,7 +92,9 @@ quiet = false                   # Name offending files on CI failures
 minversion = "7.0"
 faulthandler_timeout = 60
 testpaths = ["dq/tests"]
-addopts = "-v --tb=short --no-header --no-summary -q"
+# Never add --no-summary here: pytest >= 9 skips the whole terminal summary
+# under that flag, which hides every failure traceback (CI included).
+addopts = "--tb=short --no-header -ra"
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",
