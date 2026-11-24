@@ -272,7 +272,10 @@ def fresh_frame():
     return SimpleNamespace(sparkSession="fake-session")
 
 
-def test_import_error_carries_install_hint():
+def test_import_error_carries_install_hint(monkeypatch):
+    # Force the extra to be absent: in CI's main lane DQX is installed, and
+    # without this sentinel the engine would go on to real DQX validation.
+    monkeypatch.setitem(sys.modules, "databricks.labs.dqx.engine", None)
     engine = DqxEngine(check_config([{"check": {"function": "is_not_null"}}]))
     with pytest.raises(ImportError, match="databricks-labs-dqx"):
         engine.apply(fresh_frame())

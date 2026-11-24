@@ -4,6 +4,9 @@ from unittest.mock import Mock, patch
 import pytest
 
 pytest.importorskip("databricks.sdk")
+# The module under test also imports the cron package at import time; skip
+# on either being absent so a partial install cannot break collection.
+pytest.importorskip("cstriggers")
 from databricks.sdk.service.jobs import RunResultState, RunType
 
 from dq.engine.databricks.databricks_check import DatabricksCheck

@@ -64,6 +64,7 @@ def test_config_helpers_import_without_aws_extra():
 
 
 def test_s3_loader_resolves_optional_sdk_only_when_used(monkeypatch):
+    pytest.importorskip("boto3")  # provided by the aws extra
     from dq.utils.config_utils import load_from_s3
 
     resource = Mock()
