@@ -43,6 +43,7 @@ aggregate verdict.
 - [ADRs](docs/decisions/adr/)
 - [SPECs](docs/specs/)
 - [Modernization plan](docs/modernization-plan.adoc)
+- [Compute engines beyond Spark](docs/compute-engines.adoc)
 
 ## License
 

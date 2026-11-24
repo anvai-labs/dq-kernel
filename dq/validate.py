@@ -8,21 +8,12 @@ import sys
 import json
 import logging
 
+from dq.engine.registry import payload_key_for, payload_type_for, renamed_target
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-_BUILT_IN_PAYLOAD_KEYS = {
-    "businessrules": "checks",
-    "deequ": "checks",
-    "dqdl": "ruleset",
-    "dqx": "checks",
-    "greatexpectations": "expectations",
-    "schemavalidation": "schema",
-}
-
-_RENAMED_ENGINES = {"custom": "businessrules"}
 
 
 def is_local_config_reference(config_path: str) -> bool:
@@ -81,7 +72,7 @@ def validate_config(config_path: str) -> bool:
                 logger.error(f"Rule {i}: Missing required key 'engine'")
                 return False
             engine_key = str(engine).lower()
-            renamed = _RENAMED_ENGINES.get(engine_key)
+            renamed = renamed_target(engine_key)
             if renamed:
                 logger.error(
                     "Rule %s: Engine '%s' was renamed to '%s'; "
@@ -91,7 +82,7 @@ def validate_config(config_path: str) -> bool:
                     renamed,
                 )
                 return False
-            payload_key = _BUILT_IN_PAYLOAD_KEYS.get(engine_key)
+            payload_key = payload_key_for(engine_key)
             if payload_key and not rule.get(payload_key):
                 logger.error(
                     "Rule %s: Engine '%s' requires a non-empty '%s' payload",
@@ -100,10 +91,15 @@ def validate_config(config_path: str) -> bool:
                     payload_key,
                 )
                 return False
-            if payload_key == "ruleset":
+            if payload_key and payload_type_for(engine_key) == "string":
                 ruleset = rule.get(payload_key)
                 if not isinstance(ruleset, str) or not ruleset.strip():
-                    logger.error("Rule %s: DQDL ruleset must be a non-empty string", i)
+                    logger.error(
+                        "Rule %s: Engine '%s' payload '%s' must be a non-empty string",
+                        i,
+                        engine,
+                        payload_key,
+                    )
                     return False
 
         logger.info("Configuration is valid")

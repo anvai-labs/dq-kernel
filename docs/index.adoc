@@ -47,8 +47,10 @@ The implemented execution path is:
 . `CatalogFactory` selects the Spark, Hive, Unity/Delta, or Glue catalog provider.
 . Configured DataFrames are resolved before rule execution; an optional default DataFrame can be
   supplied directly.
-. `EngineLoader` accepts a lowercase alphanumeric/underscore engine name and imports
-  `dq.engine.<name>.<name>_engine`.
+. `EngineLoader` resolves the engine through the declarative registry
+  (`dq.engine.registry`: one `EngineSpec` per engine), then third-party engines
+  registered in the `dq_kernel.engines` entry-point group, then the historical
+  `dq.engine.<name>.<name>_engine` naming convention (fallback).
 . Each engine returns metric dictionaries. `DQFramework.run()` adds the execution timestamp and
   Spark application ID.
 . When a rule supplies repository configuration, supporting engines can append metric and
@@ -151,6 +153,11 @@ markers and otherwise selects `spark`. Catalog permissions and cloud credentials
 the runtime; the framework does not embed them.
 
 == Engines
+
+Non-Spark compute (pandas, Polars, Arrow/DataFusion, SQLAlchemy/DuckDB)
+rides the same plugin contract -- see
+xref:compute-engines.adoc[Compute engines beyond Spark] for the vendor
+support matrix and engine recipes.
 
 === Deequ
 

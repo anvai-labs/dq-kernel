@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 185 raise sites across the modules below; the contract
+The framework raises 187 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -297,3 +297,23 @@ seam all engines cross for the axes that are truly common.
   `require_unique_names`, or a `CheckSpec` is built with a severity outside
   the canonical set. Fix the rule payload's `criticality`/`name` fields;
   derived names are exempt from the uniqueness gate.
+
+== dq/engine/dq_engine.py
+
+The engine contract's template method: capability guard before any work.
+
+* `ConfigurationError` -- an engine declaring `persistence = False`
+  (e.g. dqdl) is handed a configured repository. Remove the
+  `dqframework.repository` block for that rule or pick a
+  persistence-capable engine; refusing is load-bearing so evidence
+  requests are never silently dropped.
+
+== dq/engine/portable/portable_engine.py
+
+Portable-kernel engine payload validation (the plugin path into the kernel).
+
+* `ConfigurationError` -- the rule lacks `dataset` or a caller-certified
+  `snapshot_sha256` (64 hex chars; the digest is never auto-derived), the
+  `plan` list is missing or empty, or a constraint is outside the
+  translatable subset (the translator's own fail-closed error names the
+  supported set). Keep untranslatable rules on their legacy engine path.

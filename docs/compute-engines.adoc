@@ -1,0 +1,186 @@
+= Compute engines beyond Spark
+:toc:
+:sectlinks.
+
+Status: current as of 0.3.0 +
+Scope: how to run dq-kernel validation over non-Spark compute (pandas,
+Polars, Arrow/DataFusion, DuckDB/SQLAlchemy) using the engine plugin
+contract (ADR-012), and what each vendor library actually supports.
+
+== Why the plugin contract is compute-agnostic
+
+The engine contract (`dq.engine.dq_engine.DQEngine`) never imports
+pyspark: the `dataframe` argument to `apply`/`_prepare`/`_execute` is
+the engine-native frame object, duck-typed at the boundary. A non-Spark
+engine subclasses `DQEngine`, implements the `_prepare`/`_execute`
+hooks, declares its capabilities, and is loaded by the same registry --
+with pyspark absent from the environment. The only Spark-coupled default
+is the standard persistence path (`_artifact_frames`); engines that
+persist differently override `_persist_outcomes` (the same hook deequ
+and businessrules already use to keep their native artifact schemas).
+
+Vendor support today (verified against the installed distributions):
+
+|===
+| Library | Spark | pandas | Polars | Arrow/DataFusion | SQL (SQLAlchemy) | DuckDB
+
+| pydeequ (deequ engine)
+| yes (JVM)
+| no
+| no
+| no
+| no
+| no
+
+| GX Core 1.x (greatexpectations engine)
+| yes
+| yes (GX `add_pandas`)
+| no
+| no
+| yes (`add_sql`)
+| via `add_sql` + duckdb-engine dialect
+
+| Databricks DQX (dqx engine)
+| yes (incl. databricks-connect)
+| no
+| no
+| no
+| no
+| no
+
+| portable kernel (`portable` engine)
+| yes (Spark adapter)
+| planned (ADR-010 Arrow engine)
+| planned
+| planned
+| no
+| no
+|===
+
+GX has no Polars or DataFusion datasource (zero references in its
+distribution); pandas and SQL are its two non-Spark execution engines.
+DuckDB is not a named GX datasource but works through the generic
+SQLAlchemy path.
+
+== Recipe: a pandas/Arrow engine on the plugin contract
+
+A minimal non-Spark engine -- drop-in under `dq/engine/<name>/` or an
+external distribution registering the `dq_kernel.engines` entry-point
+group:
+
+[source,python]
+----
+from dq.engine.checkspec import build_result
+from dq.engine.dq_engine import DQEngine
+
+
+class PandasEngine(DQEngine):
+    """Validate a pandas DataFrame; no Spark in the environment."""
+
+    CAPABILITIES = {
+        "criticality": "derived",   # kernel synthesizes severity
+        "row_filter": True,         # pandas .loc predicates
+        "failed_rows": True,        # cheap to count locally
+        "persistence": False,       # evidence goes to dq-report/v1 only
+    }
+
+    def _prepare(self, dataframe):
+        # once-per-engine plumbing: resolve the check payload to
+        # (name, predicate) pairs; fail closed on unknown predicates
+        return [
+            (c["name"], c["predicate"]) for c in self._config.get("checks", [])
+        ]
+
+    def _execute(self, dataframe, prepared):
+        metrics = []
+        for name, predicate in prepared:
+            failed = int((~dataframe.eval(predicate)).sum())
+            metrics.append(
+                build_result(
+                    name,
+                    failed == 0,
+                    {"failed_rows": failed},
+                    criticality=self._criticality_for(name),
+                )
+            )
+        return metrics
+----
+
+Registry entry (built-in) or entry point (external):
+
+[source,python]
+----
+EngineSpec("pandas", "dq.engine.pandas.pandas_engine", "PandasEngine", "checks")
+----
+
+[source,yaml]
+----
+# external distribution's packaging metadata
+[options.entry_points]
+dq_kernel.engines =
+    pandas = dq.engine.pandas.pandas_engine:PandasEngine
+----
+
+Everything else -- loading, the log preamble, capability-guarded
+persistence, `dq-report/v1` evidence, gate events with the severity
+split -- comes from the contract. The same skeleton carries an
+Arrow/DataFusion engine (ADR-010): replace the predicate evaluation
+with plan compilation; keep `CAPABILITIES` honest.
+
+== Recipe: SQLAlchemy / DuckDB through GX
+
+GX Core evaluates expectations against any SQLAlchemy engine. Inside a
+custom engine's `_prepare`, build the ephemeral SQL datasource instead
+of the Spark one:
+
+[source,python]
+----
+def _prepare(self, dataframe):
+    import great_expectations as gx  # or dq.utils.imports.require_extra
+
+    context = gx.get_context()
+    source = context.data_sources.add_sql(
+        name="dq_kernel_sql",
+        connection_string="duckdb:///warehouse.duckdb",  # any SQLAlchemy URL
+    )
+    self._batch_definition = (
+        source.add_table_asset(name="orders", table_name="orders")
+        .add_batch_definition_whole_table("whole")
+    )
+    return self._suite()  # GreatexpectationsCheck(...).build_suite(gx, rule)
+----
+
+[source,python]
+----
+def _execute(self, dataframe, prepared):
+    batch = self._batch_definition.get_batch()
+    validation = batch.validate(prepared)
+    return self._extract_metrics(validation)  # build_result + sanitizer
+----
+
+Postgres/SQLite/DuckDB/Snowflake all resolve through the SQLAlchemy
+URL; the duckdb-engine dialect package provides the DuckDB driver.
+
+== Recipe: pandas/Polars today without a new engine
+
+Until a native pandas engine lands, the same validation semantics are
+reachable two ways:
+
+* *Portable plans*: convert the frame to Spark for the run (or wait for
+  the ADR-010 Arrow adapter, which will consume the identical plan) --
+  plans are compute-agnostic by construction and carry
+  `counts/v1`-`ranges/v1` semantics with fingerprints.
+* *SQL pushdown*: materialize the frame into DuckDB/SQLite and run the
+  GX-SQL recipe above; the `greatexpectations` engine payload
+  (`expectations`) is datasource-neutral.
+
+== What deliberately does not exist
+
+* No universal check vocabulary across engines (ADR-012 keeps vendor
+  vocabularies native; only identity/severity cross the seam).
+* No automatic translation of vendor rules into portable plans
+  (ADR-002); the fail-closed translator accepts the documented subset.
+* No non-Spark persistence impls yet: `OutcomeSink` is
+  signature-polymorphic, but the built-in sinks are Spark-bound
+  (`RepositorySink.save` uses `withColumn`). An Arrow-native sink is
+  part of the ADR-010 gated follow-up behind differential fixtures.

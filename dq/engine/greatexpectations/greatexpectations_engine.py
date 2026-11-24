@@ -14,14 +14,13 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from pyhocon import ConfigTree
-from pyspark.sql import DataFrame
 
-from dq.engine.checkspec import build_result
 from dq.engine.dq_engine import DQEngine
 from dq.engine.greatexpectations.greatexpectations_check import (
     GreatexpectationsCheck,
 )
-from dq.utils import constants
+from dq.engine.checkspec import build_result
+from dq.utils import keys
 from dq.utils.imports import require_extra
 from dq.utils.sanitization import to_strict_json as _to_strict_json
 
@@ -38,6 +37,7 @@ class GreatexpectationsEngine(DQEngine):
         "criticality": "derived",
         "row_filter": True,
         "failed_rows": False,
+        "persistence": True,
     }
 
     def __init__(self, config: ConfigTree, dqts: Optional[int] = None):
@@ -47,22 +47,12 @@ class GreatexpectationsEngine(DQEngine):
         self._gx_batch_definition = None
         self._gx_suite = None
         self._gx_check = None
+        self._gx_module = None
 
-    def apply(self, dataframe: DataFrame, repository=None) -> List[Dict[str, Any]]:
-        """Apply the configured expectations to the DataFrame.
-
-        Args:
-            dataframe: Spark DataFrame to validate.
-            repository: Optional ``OutcomeSink``; both artifacts of the
-                run are persisted under one millisecond key when given.
-
-        Returns:
-            List of metric dicts with ``check``, ``success``, ``details``
-            keys; ``details`` carries the rule's ``criticality``.
-        """
+    def _prepare(self, dataframe) -> None:
+        """Build the ephemeral GX context, batch definition, and suite once."""
         gx = self._import_gx()
-        self._log_processing_start()
-
+        self._gx_module = gx
         if self._gx_batch_definition is None:
             context = gx.get_context()
             self._gx_batch_definition = (
@@ -70,24 +60,22 @@ class GreatexpectationsEngine(DQEngine):
                 .add_dataframe_asset(name="dq_kernel_frames")
                 .add_batch_definition_whole_dataframe("dq_kernel_whole_frame")
             )
-        batch = self._gx_batch_definition.get_batch(
-            batch_parameters={"dataframe": dataframe}
-        )
-
         if self._gx_suite is None:
-            rule_name = self._config.get(constants.DQ_RULE_NAME, "gx-rule")
+            rule_name = self._config.get(keys.DQ_RULE_NAME, "gx-rule")
             self._gx_check = GreatexpectationsCheck(
                 self._config.get("expectations", []),
                 derive_names=self._config.get("derive_names", False),
             )
             self._gx_suite = self._gx_check.build_suite(gx, rule_name)
-        validation = batch.validate(self._gx_suite)
+        return None
 
-        metrics = self._extract_metrics_from_validation_output(validation)
-        if repository:
-            metrics_df, verifications_df = self._artifact_frames(metrics, dataframe)
-            self._persist(repository, metrics_df, verifications_df)
-        return metrics
+    def _execute(self, dataframe, prepared) -> List[Dict[str, Any]]:
+        """Validate the frame against the suite and extract metric dicts."""
+        batch = self._gx_batch_definition.get_batch(
+            batch_parameters={"dataframe": dataframe}
+        )
+        validation = batch.validate(self._gx_suite)
+        return self._extract_metrics_from_validation_output(validation)
 
     @staticmethod
     def _import_gx():

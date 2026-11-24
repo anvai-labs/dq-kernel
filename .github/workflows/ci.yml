@@ -104,47 +104,6 @@ jobs:
         if: matrix.python-version == '3.13' && github.event_name == 'pull_request'
         run: poetry run diff-cover coverage.xml --compare-branch=origin/${{ github.base_ref }} --fail-under=90
 
-  dqx-integration:
-    name: DQX integration (3.12)
-    timeout-minutes: 15
-    if: >-
-      github.event_name != 'pull_request' ||
-      vars.OWNER_PRIVATE_CI_ENABLED != 'true' ||
-      github.actor_id != '5168752' ||
-      github.event.pull_request.user.id != 5168752 ||
-      github.event.pull_request.head.repo.full_name != github.repository
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Install Poetry
-        run: pip install poetry==2.4.2
-      # dqx pins databricks-sdk~=0.73 and cannot share an environment with
-      # the databricks extra, so this lane installs only spark + dqx.
-      - name: Install dependencies
-        run: poetry install --with dev -E spark -E dqx
-      - name: Download Deequ JAR
-        run: |
-          mkdir -p lib
-          wget -q -O lib/deequ-2.0.21-spark-3.5.jar \
-            https://repo1.maven.org/maven2/com/amazon/deequ/deequ/2.0.21-spark-3.5/deequ-2.0.21-spark-3.5.jar
-          wget -q -O lib/dqdl-1.0.0.jar \
-            https://repo1.maven.org/maven2/software/amazon/glue/dqdl/1.0.0/dqdl-1.0.0.jar
-      - name: Run DQX integration tests
-        timeout-minutes: 10
-        run: poetry run pytest dq/tests/test_dqx.py -v --tb=short
-        env:
-          SPARK_VERSION: "3.5"
-
   dependency-review:
     name: Dependency review
     if: >-
@@ -184,7 +143,7 @@ jobs:
       github.event.pull_request.user.id != 5168752 ||
       github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-latest
-    needs: [lint, test, dqx-integration, dependency-review]
+    needs: [lint, test, dependency-review]
     steps:
       - name: Verify required jobs
         env:

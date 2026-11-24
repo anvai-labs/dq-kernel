@@ -4,6 +4,7 @@
 import logging
 from typing import Optional, List, Dict, Any
 
+from dq.engine.checkspec import build_result
 from dq.engine.dq_engine import DQEngine
 from dq.engine.businessrules.strategies import (
     ColumnNamesInReferenceTableStrategy,
@@ -53,20 +54,26 @@ class BusinessrulesEngine(DQEngine):
 
     def __init__(self, config, dqts: Optional[int] = None):
         self._config = config
+        self._sparkSession = None
+        self._last_artifact_frames = None
         super().__init__(config, dqts)
 
-    def apply(self, dataframe, repository=None) -> List[Dict[str, Any]]:
-        """Apply business-rule constraint checks to the DataFrame.
+    def _prepare(self, dataframe) -> None:
+        """Bind the run's Spark session for native frame building."""
+        self._sparkSession = dataframe.sparkSession
+        return None
+
+    def _execute(self, dataframe, prepared) -> List[Dict[str, Any]]:
+        """Apply business-rule constraint strategies to the DataFrame.
 
         Args:
             dataframe: Spark DataFrame to validate.
-            repository: Optional repository config for persisting metrics.
+            prepared: Ignored (the strategy loop reads configuration).
 
         Returns:
             List of metric dicts with ``check``, ``success``, ``details`` keys.
         """
         rule_checks = self._config.get("checks", {})
-        self._sparkSession = dataframe.sparkSession
         _metrics_results = []
         _verification_results = []
         for check_config in rule_checks:
@@ -141,20 +148,31 @@ class BusinessrulesEngine(DQEngine):
                 "constraint_message",
             ],
         )
-
-        self._persist(repository, df_metrics_results, df_check_verification_results)
+        # Native verification frames stashed for _persist_outcomes: the
+        # businessrules artifact schema is frozen by ADR-003 and downstream
+        # consumers join on these exact columns.
+        self._last_artifact_frames = (
+            df_metrics_results,
+            df_check_verification_results,
+        )
         summarymetrics = [
-            {
-                "check": row[2],
-                "success": row[3] == 1,
-                "details": {
+            build_result(
+                row[2],
+                row[3] == 1,
+                {
                     "entity": row[0],
                     "instance": row[1],
                     "name": row[2],
                     "value": row[3],
                 },
-            }
+            )
             for row in _metrics_results
         ]
 
         return summarymetrics
+
+    def _persist_outcomes(self, repository, metrics, dataframe) -> None:
+        """Persist native businessrules artifact frames (ADR-003 schema)."""
+        if not repository or self._last_artifact_frames is None:
+            return
+        self._persist(repository, *self._last_artifact_frames)

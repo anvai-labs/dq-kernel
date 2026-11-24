@@ -5,51 +5,103 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-24
 
 ### Added
 
+- **Engine plugin contract** (ADR-012): template-method `apply` on the
+  `DQEngine` ABC (capability guard -> shared log preamble -> `_prepare` ->
+  abstract `_execute` -> `_persist_outcomes`) with `CAPABILITIES` v2
+  (`persistence` joins `criticality`/`row_filter`/`failed_rows`); all
+  built-in engines migrated to hooks -- artifact table schemas per engine
+  are preserved exactly (deequ-family raw vendor frames, businessrules
+  native frames) and pinned by shape-guard tests. `apply` overrides on
+  external engines keep working through MRO with a `DeprecationWarning`
+  (a trivial `_execute` stub is required to instantiate)
+- **Declarative engine registry** (`dq.engine.registry`): one `EngineSpec`
+  per engine (module, class, payload key/type, extra, renamed-from);
+  `EngineLoader` resolves registry -> `dq_kernel.engines` entry-point
+  group (third-party engines on PyPI) -> naming-convention fallback;
+  `dq-validate` reads payload rules from the registry (the hardcoded
+  table is gone); drift-guard test pins every engine directory to a
+  registry entry; `EngineNotFoundError(DQFrameworkError, ImportError)`
+  replaces raw ImportError/AttributeError leaks
+- **`portable` engine**: the kernel's portable plans run through
+  `DQFramework.run()` like any engine (`engine = "portable"`; payload
+  `plan` + `dataset` + caller-certified `snapshot_sha256` -- the digest
+  is required and never auto-derived). Fail-closed translation only
+  (ADR-002); first framework-run coverage of the kernel path
+- `dq.utils.keys` (vendor-free HOCON key constants),
+  `dq.utils.imports.require_extra` (the one lazy-import install-hint
+  pattern, adopted by gx/dqx), `checkspec.build_result` (the one result
+  constructor -- all six shaping sites converted),
+  `dq.engine.deequ.verification` (shared VerificationSuite scaffold for
+  deequ + schemavalidation, with named vendor status spellings)
+- Notifier wired into `DQFramework.run()` via `dqframework.notify`
+  (config-driven logging/webhook/composite): one `GateEvent` per run with
+  additive severity split (`blocked`/`warned` from `details.criticality`;
+  absent severity blocks conservatively); `status`/`failed` semantics
+  unchanged
+- Light-core import contract extended to the orchestrator and engine
+  contract: `import dq.dq_framework` and `from dq.engine.dq_engine import
+  DQEngine` succeed with pyspark/pydeequ/boto3/databricks blocked
+  (contract-tested)
+
+### Changed
+
+- One run key per run: `_persist` uses the framework-injected `dqts`
+  (falls back to epoch millis for directly-constructed engines) so
+  artifact writes, `run_scope`, metric `ts`, and `GateEvent.run_key`
+  share one key; `RepositorySink` joins no longer depend on clock skew
+- `dq.utils.constants` removed: import `dq.utils.keys` (HOCON key
+  constants) or `dq.engine.schemavalidation.datatypes` (pydeequ datatype
+  maps) -- the foundation layer imports no vendor libraries
+- schemavalidation subclasses `DQEngine` directly (composition through
+  the shared deequ scaffold replaces engine-to-engine inheritance)
 - Shared **check seam** (`dq.engine.checkspec`): the engine-neutral axes
   all wrapped engines express differently -- per-rule identity (`name`,
   derived `<function>_<index>` when absent; explicit names unique,
   fail-closed) and per-rule severity (`criticality`, normalized across
   DQX's `error`/`warn`, Deequ's `Error`/`Warning`, and common short
   forms). Engine check-function vocabularies deliberately stay
-  engine-native and pass through untouched. Engines declare a
+  engine-native and pass through untouched. Engines now declare a
   `CAPABILITIES` manifest (`criticality`: native/derived/absent,
   `row_filter`, `failed_rows`) so consumers branch on capability, not
-  engine name; shared strict-JSON sanitizer (`dq.utils.sanitization`),
-  shared optional-dependency import helper (`dq.utils.imports`),
-  shared result constructor (`checkspec.build_result`) and shared
-  run-artifact frames (hoisted to the `DQEngine` base class) remove the
-  per-engine duplications
-- `dqx` engine (Databricks Labs DQX): validates Spark DataFrames against
-  `databricks-labs-dqx` metadata checks (`checks = [{check = {function =
-  "is_not_null", arguments = {column = "id"}}}]`). Entries pass through to
-  DQX's native schema with kernel guarantees layered on top -- `criticality`
-  defaults to `error` (must be `error`/`warn`; Deequ-style spellings
-  accepted), explicit deterministic check names (`<function>_<index>` when
-  absent, duplicates fail closed) so results map 1:1 to configured checks,
-  and DQX structural validation runs before any data flows.
-  `for_each_column` passes through to DQX and reports one aggregated result
-  per entry. Two client modes: `client.mode = "stub"` (default) runs on
-  plain local Spark with no Databricks workspace; `client.mode =
-  "workspace"` builds a real `WorkspaceClient` (optional `client.profile`).
-  DQX results (`_errors`/`_warnings`) are aggregated into one metric per
-  configured check with `failed_rows` and capped sample messages. New `dqx`
-  extra: DQX 0.17.x requires Python <3.13 and pins `databricks-sdk~=0.73`
-  -- incompatible with the `databricks` extra, do not combine
+  engine name
+
+### Changed
+
 - `greatexpectations` engine: entries accept optional `name` (labels the
   metric result; default label stays the expectation `type` as before) and
   `criticality` (defaulting to `error`, surfaced in every result's
   `details`); opt-in `derive_names = true` labels results
   `<type>_<column>`; results are zipped with suite labels `strict=True`
+  so extraction fails closed if GX ever returns a mismatched result count
 - `deequ` engine: `level` accepts canonical spellings (`error`/`warn`)
   alongside `Error`/`Warning` (normalized fail-closed), and every result's
   `details` carries `criticality` derived from the check result level
-- CI: dedicated `dqx-integration` lane (Python 3.12, `-E spark -E dqx`)
-  runs the live DQX round trips that the main test job skips because the
-  dqx and databricks extras cannot share an environment
+- `dqx` engine: routing for name/criticality now goes through the shared
+  seam (behavior unchanged, Deequ-style `level` spellings now accepted)
+
+### Added
+
+- `dqx` engine (Databricks Labs DQX): validates Spark DataFrames against
+  `databricks-labs-dqx` metadata checks (`checks = [{check = {function =
+  "is_not_null", arguments = {column = "id"}}}]`). Entries pass through to
+  DQX's native schema with kernel guarantees layered on top -- `criticality`
+  defaults to `error` (must be `error`/`warn`), explicit deterministic check
+  names (`<function>_<index>` when absent, duplicates fail closed) so results
+  map 1:1 to configured checks, and DQX structural validation runs before any
+  data flows. `for_each_column` passes through to DQX and reports one
+  aggregated result per entry. Two client modes: `client.mode = "stub"`
+  (default) runs on plain local Spark with no Databricks workspace;
+  `client.mode = "workspace"` builds a real `WorkspaceClient` (optional
+  `client.profile`). DQX results (`_errors`/`_warnings`) are aggregated into
+  one metric per configured check with `failed_rows` and capped sample
+  messages. New `dqx` extra: DQX 0.17.x requires Python <3.13 and pins
+  `databricks-sdk~=0.73` -- incompatible with the `databricks` extra, do not
+  combine. Shared strict-JSON sanitizer moved to `dq.utils.sanitization`
+  and run-artifact frame building hoisted to the `DQEngine` base class
 
 ## [0.2.0] - 2026-10-23
 

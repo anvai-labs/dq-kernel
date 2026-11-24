@@ -128,3 +128,44 @@ def test_framework_bounds_cumulative_results_across_rules(monkeypatch, limit):
         loader.return_value.load_engine.return_value = engine
         with pytest.raises(ValidationError, match="summary limits"):
             framework.run()
+
+
+def test_run_emits_gate_event_with_severity_split(caplog):
+    import logging as logging_module
+
+    framework = framework_with_rules(
+        [{"engine": "deequ", "checks": [{"constraint": "isComplete"}]}]
+    )
+    engine = MagicMock()
+    engine.apply.return_value = [
+        {
+            "check": "warn_only",
+            "success": False,
+            "details": {"criticality": "warn"},
+        }
+    ]
+    with patch("dq.dq_framework.EngineLoader") as loader:
+        loader.return_value.load_engine.return_value = engine
+        with caplog.at_level(logging_module.INFO, logger="dq.gate_events"):
+            results = framework.run()
+    assert len(results) == 1 and results[0]["success"] is False
+    gate_records = [r for r in caplog.records if "gate_event" in r.getMessage()]
+    assert gate_records, "framework run must announce a gate event"
+    assert "warned=1" in gate_records[0].getMessage()
+    assert "blocked=0" in gate_records[0].getMessage()
+
+
+def test_run_gate_event_absent_criticality_blocks(caplog):
+    import logging as logging_module
+
+    framework = framework_with_rules(
+        [{"engine": "deequ", "checks": [{"constraint": "isComplete"}]}]
+    )
+    engine = MagicMock()
+    engine.apply.return_value = [{"check": "legacy_fail", "success": False}]
+    with patch("dq.dq_framework.EngineLoader") as loader:
+        loader.return_value.load_engine.return_value = engine
+        with caplog.at_level(logging_module.INFO, logger="dq.gate_events"):
+            framework.run()
+    gate_records = [r for r in caplog.records if "gate_event" in r.getMessage()]
+    assert gate_records and "blocked=1" in gate_records[0].getMessage()

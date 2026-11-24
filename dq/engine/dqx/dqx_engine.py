@@ -36,9 +36,9 @@ from pyhocon import ConfigTree
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
-from dq.engine.checkspec import build_result
 from dq.engine.dq_engine import DQEngine
 from dq.engine.dqx.dqx_check import DqxCheck
+from dq.engine.checkspec import build_result
 from dq.utils.imports import require_extra
 
 logger = logging.getLogger(__name__)
@@ -81,6 +81,7 @@ class DqxEngine(DQEngine):
         "criticality": "native",
         "row_filter": True,
         "failed_rows": True,
+        "persistence": True,
     }
 
     def __init__(self, config: ConfigTree, dqts: Optional[int] = None):
@@ -92,39 +93,25 @@ class DqxEngine(DQEngine):
         self._checks: Optional[List[Dict[str, Any]]] = None
         self._check_index: Dict[str, tuple] = {}
 
-    def apply(self, dataframe: DataFrame, repository=None) -> List[Dict[str, Any]]:
-        """Apply the configured DQX checks to the DataFrame.
-
-        Args:
-            dataframe: Spark DataFrame to validate.
-            repository: Optional ``OutcomeSink``; both artifacts of the
-                run are persisted under one millisecond key when given.
-
-        Returns:
-            List of metric dicts with ``check``, ``success``, ``details``
-            keys -- one per configured check, in configuration order.
-
-        Raises:
-            ImportError: If the optional databricks-labs-dqx package is
-                not installed.
-            ValueError: If checks fail kernel-side or DQX-side validation.
-        """
+    def _prepare(self, dataframe) -> None:
+        """Import DQX, build its engine, and build the checks -- once."""
         self._import_dqx()
-        self._log_processing_start()
-
         if self._dqx_engine is None:
             self._dqx_engine = self._build_dqx_engine(dataframe)
         if self._checks is None:
             self._build_checks()
+        return None
 
+    def _execute(self, dataframe, prepared) -> List[Dict[str, Any]]:
+        """Apply the configured DQX checks and aggregate per-check metrics.
+
+        Returns:
+            List of metric dicts with ``check``, ``success``, ``details``
+            keys -- one per configured check, in configuration order.
+        """
         result_df = self._dqx_engine.apply_checks_by_metadata(dataframe, self._checks)
         failure_rows = self._aggregate_failures(result_df)
-        metrics = self._metrics_from_failures(failure_rows)
-
-        if repository:
-            metrics_df, verifications_df = self._artifact_frames(metrics, dataframe)
-            self._persist(repository, metrics_df, verifications_df)
-        return metrics
+        return self._metrics_from_failures(failure_rows)
 
     def _import_dqx(self) -> None:
         """Import the optional DQX distribution lazily, once.

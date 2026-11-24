@@ -3,6 +3,8 @@
 
 """Outcome sink contracts: idempotency, eager validation, storage lane (U6)."""
 
+import time
+
 import pytest
 from pyhocon import ConfigFactory
 import uuid
@@ -226,3 +228,90 @@ def test_framework_persists_through_the_sink_to_files(spark, tmp_path):
     assert written.filter(written["dataset"] == "bars").count() == 1
     verifications = spark.read.parquet(str(tmp_path / "verifications"))
     assert verifications.count() >= 1
+
+
+def test_engine_persists_under_the_injected_run_key(spark):
+    """One run key per run: dqts flows from the framework through _persist."""
+    from dq.engine.deequ.deequ_engine import DeequEngine
+
+    config = ConfigFactory.parse_string("""
+        {
+            name = "run_key_test"
+            checks = [ { constraint = "isComplete", column = "id", level = "Error" } ]
+        }
+        """)
+    frame = spark.createDataFrame([("a",), ("b",)], ["id"])
+    sink = InMemorySink()
+    run_key = 1700000000000
+    results = DeequEngine(config, dqts=run_key).apply(frame, sink)
+    assert_sink_received_both_artifacts(results, sink)
+    assert {key for _, key in sink.writes()} == {run_key}
+
+
+def test_engine_without_dqts_falls_back_to_epoch_key(spark):
+    from dq.engine.deequ.deequ_engine import DeequEngine
+
+    config = ConfigFactory.parse_string("""
+        {
+            name = "fallback_key_test"
+            checks = [ { constraint = "isComplete", column = "id", level = "Error" } ]
+        }
+        """)
+    frame = spark.createDataFrame([("a",), ("b",)], ["id"])
+    sink = InMemorySink()
+    before = int(time.time() * 1000)
+    DeequEngine(config).apply(frame, sink)
+    keys = {key for _, key in sink.writes()}
+    assert len(keys) == 1
+    assert keys.pop() >= before
+
+
+def test_deequ_sink_artifacts_keep_the_vendor_schema(spark):
+    """Shape guard: deequ-family persistence stays raw pydeequ frames."""
+    from dq.engine.deequ.deequ_engine import DeequEngine
+
+    config = ConfigFactory.parse_string("""
+        {
+            name = "shape_guard"
+            checks = [ { constraint = "isComplete", column = "id", level = "Error" } ]
+        }
+        """)
+    frame = spark.createDataFrame([("a",), ("b",)], ["id"])
+    sink = InMemorySink()
+    DeequEngine(config).apply(frame, sink)
+    vkey = [k for k2, k in sink.writes() if k2 == "verifications"][0]
+    verifications = sink.rows("verifications", vkey)
+    columns = set(verifications[0].keys())
+    assert "check_status" in columns, "deequ verifications must keep vendor columns"
+    assert "check_level" in columns
+
+
+def test_businessrules_sink_artifacts_keep_the_native_schema(spark):
+    """Shape guard: businessrules keeps its ADR-003 artifact columns."""
+    frame = spark.createDataFrame(
+        [("east", "a"), ("east", "b"), ("west", "a")], ["region", "id"]
+    )
+    config = ConfigFactory.parse_string("""
+        sync { checks = [ {
+            constraint = "DistinctnessByGroup"
+            columns = ["id"]
+            group_by = ["region"]
+            min = 2
+            level = "Error"
+        } ] }
+        """).get("sync", {})
+    sink = InMemorySink()
+    BusinessrulesEngine(config).apply(frame, sink)
+    vkey = [k for k2, k in sink.writes() if k2 == "verifications"][0]
+    mkey = [k for k2, k in sink.writes() if k2 == "metrics"][0]
+    columns = set(sink.rows("verifications", vkey)[0].keys())
+    assert columns == {
+        "check",
+        "check_level",
+        "check_status",
+        "constraint",
+        "constraint_status",
+        "constraint_message",
+    }
+    metrics_columns = set(sink.rows("metrics", mkey)[0].keys())
+    assert metrics_columns == {"entity", "instance", "name", "value"}
