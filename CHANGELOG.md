@@ -129,6 +129,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stores a decimal `NaN` as null and rounds `1.234` in a `decimal(10,2)`
   column to `1.23` without a word, so a case could pass validation and then
   run on data other than the one it documents
+- **The coverage floors can fail again.** They had been 55% combined, 57%
+  line and 46% branch since v0.1.0 while CI measured 93%; they are now 90%,
+  90% and 88% — a few points under the measured value, so a real drop fails
+  the build. The owner's private CI lane now installs the `dqx` extra like
+  the public lane, so the DQX engine is tested on the owner's own pull
+  requests, where that lane runs instead of the public one
 - **`dq-kernel` exit codes**: 0 when the quality gate passed, 1 when it
   failed or the run errored, and 2 when the configuration is invalid or a
   dependency is missing. Every failure used to return 1, so a caller could
