@@ -71,10 +71,12 @@ one key; direct engine construction without `dqts` falls back to epoch
 millis.
 
 **6. Notifier wired by orchestration.** `run()` builds the notifier from
-`dqframework.notify` and emits one `GateEvent` per run with the additive
+`dqframework.notifiers` and emits one `GateEvent` per run with the additive
 severity split (`blocked`/`warned` from `details.criticality`); `status`
 and `failed` semantics are unchanged (evidence compat), and delivery
-failures stay fail-open.
+failures stay fail-open. The event is emitted after the run scope has
+exited, as ADR-008 requires (SPEC-012 corrected the first wiring, which
+emitted it inside the scope).
 
 **7. Portable engine.** The kernel's portable plans execute through the
 same plugin path (`engine = "portable"`, payload: `plan` + `dataset` +

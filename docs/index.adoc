@@ -326,11 +326,41 @@ dq-kernel file:///absolute/path/config.conf --spark-master 'local[*]'
 dq-validate file:///absolute/path/config.conf --format json
 ----
 
-`dq-kernel` creates a Spark session, runs the configured checks, prints a summary, and returns
-nonzero when checks fail. `dq-validate` validates required local configuration structure without
-running Spark checks. Built-in engines use engine-specific payloads: Deequ/businessrules use `checks`,
-schema validation uses `schema`, Great Expectations uses `expectations`, and DQDL uses `ruleset`.
+`dq-kernel` creates a Spark session, runs the configured checks, prints a summary, and exits
+with 0 when the quality gate passed, 1 when it failed (or the run errored), or 2 when the
+configuration is invalid or a dependency is missing. `dq-validate` validates required local
+configuration structure without running Spark checks. Built-in engines use engine-specific
+payloads: Deequ/businessrules use `checks`, schema validation uses `schema`, Great Expectations
+uses `expectations`, DQDL uses `ruleset`, DQX uses `checks`, and the portable engine uses `plan`.
 Every checked-in `.conf` example is validated in CI.
+
+=== Gate policy
+
+Since every engine reports a canonical `criticality`, you decide which failed checks stop a
+pipeline (ADR-013):
+
+[source,hocon]
+----
+dqframework {
+  gate { fail_on = "error" }   // "any" (default) | "error" | "never"
+  notifiers = [
+    { type = "logging" }
+    { type = "webhook", url_env = "DQ_GATE_URL" }
+    { type = "slack",  url_env = "SLACK_WEBHOOK_URL" }
+    { type = "teams",  url_env = "TEAMS_WEBHOOK_URL" }
+  ]
+}
+----
+
+With the default `any`, behaviour is unchanged: any failed check fails the gate. With `error`, a
+check whose `criticality` is `warn` is reported but does not block. The report's `status` never
+follows the policy: it states whether any check failed. `summary.blocked` and `summary.warned`
+carry the split.
+
+One gate event is announced per run after the run scope has committed (ADR-008). HTTP notifiers
+make three attempts with capped exponential backoff and are fail-open: a delivery failure is
+logged and never alters the run. Notification is at-most-once; consumers that need more read the
+durable evidence store.
 
 == Security boundaries
 

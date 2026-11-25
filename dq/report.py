@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from dq.exceptions import ConfigurationError, ValidationError
+from dq.gate import severity_split
 from dq.outcomes import CheckOutcome, normalize_outcomes
 
 REPORT_SCHEMA_VERSION = "dq-report/v1"
@@ -81,6 +82,9 @@ def build_report(
     passed = sum(1 for result in normalized_results if result["success"])
     total = len(normalized_results)
     failed = total - passed
+    # Severity is a fact about the data, reported independently of any gate
+    # policy (ADR-013): these two counts sum to `failed`.
+    blocked, warned = severity_split(normalized_results)
     timestamp = generated_at or datetime.now(timezone.utc)
     if timestamp.tzinfo is None:
         raise ValidationError("generated_at must include a timezone")
@@ -105,7 +109,13 @@ def build_report(
             "spark": spark_version,
             "application_id": application_id,
         },
-        "summary": {"total": total, "passed": passed, "failed": failed},
+        "summary": {
+            "total": total,
+            "passed": passed,
+            "failed": failed,
+            "blocked": len(blocked),
+            "warned": len(warned),
+        },
         "checks": normalized_results,
     }
 

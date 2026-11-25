@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 187 raise sites across the modules below; the contract
+The framework raises 190 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -19,13 +19,15 @@ the evidence store refused an unsafe write.
 
 == dq/notifier.py
 
-*Content:* 3 `ConfigurationError` sites.
+*Content:* 4 `ConfigurationError` sites.
 
-* Cause: webhook notifier missing a `url_env` key naming the environment
-  variable that holds the webhook URL, or the environment variable is
-  absent at construction time.
+* Cause: an HTTP notifier (`webhook`, `slack`, `teams`) is missing a
+  `url_env` key naming the environment variable that holds its URL, that
+  environment variable is absent at construction time, an HTTP notifier is
+  configured with fewer than one attempt, or the notifier `type` is not one
+  of `logging`, `memory`, `webhook`, `slack` or `teams`.
 * Fix: set the environment variable and ensure the configuration names
-  it via `url_env`.
+  it via `url_env`; use a supported notifier type.
 
 == dq/plan.py
 
@@ -317,3 +319,12 @@ Portable-kernel engine payload validation (the plugin path into the kernel).
   `plan` list is missing or empty, or a constraint is outside the
   translatable subset (the translator's own fail-closed error names the
   supported set). Keep untranslatable rules on their legacy engine path.
+
+== dq/gate.py
+
+Gate policy resolution: which failed checks block a pipeline (ADR-013).
+
+* `ConfigurationError` -- `dqframework.gate.fail_on` is not one of `any`,
+  `error` or `never`, or is not a string. Fix the policy in the rule pack;
+  omit the key to use the default, `any`, under which every failed check
+  blocks.
