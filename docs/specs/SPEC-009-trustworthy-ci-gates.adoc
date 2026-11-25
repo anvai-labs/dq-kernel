@@ -105,7 +105,9 @@ failing test or collection error printed a traceback.
   `::test_each_floor_is_enforced_on_its_own`. Observed: CI run 45604665907
   on PR #60 measured, against floors of 57 and 46, line coverage of 93.49%
   and branch coverage of 91.74% on the 3.13 lane and 93.03% combined (93.28%
-  on the 3.12 lane). The floors are 90, 88 and 90 since
+  on the 3.12 lane). With the floors at 90, 88 and 90, CI run 45606651492
+  on PR #60 passed on both lanes; and the gate script, given that run's
+  figures with either floor one point higher, refuses the report
 
 [NOTE]
 ====
