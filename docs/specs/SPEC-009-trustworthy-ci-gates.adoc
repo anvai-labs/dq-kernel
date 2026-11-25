@@ -83,10 +83,12 @@ failing test or collection error printed a traceback.
 * [x] G5 — observed: CI run 45510652808 on PR #54 installed
   `databricks-labs-dqx 0.17.2` in the 3.12 job and all four `test_dqx.py`
   tests passed (624 passed)
-* [x] G6 — observed: the unit lane passed in a CI-like environment with DQX
-  and pydeequ installed (429 passed) and in the default one without them;
-  the guards are the `importorskip` calls in `test_dqx_unit.py`,
-  `test_databricks_check.py` and `test_package_contract.py`
+* [x] G6 — evidence: `dq/tests/test_lane_contract.py::test_every_test_using_the_spark_fixture_is_marked_spark`;
+  also observed: the unit lane passed in a CI-like environment with DQX and
+  pydeequ installed and in the default one without them. Eight tests in
+  `test_framework_config_sources.py` and two in `test_dqdl.py` used the Spark
+  session without the `spark` marker, so they started a JVM inside the
+  "JVM-free" unit lane; they are marked now and the contract keeps it so
 * [x] G7 — evidence: `dq/tests/test_ci_workflow_contract.py::test_every_action_is_pinned_to_a_commit_sha`, `::test_lint_lane_validates_workflow_syntax`; the lint lane ran `poetry check --lock` and actionlint green in run 45510652808
 * [x] G8 — observed: CI runs 45510652808 (#54) and 45510661749 (#55)
   completed `success`

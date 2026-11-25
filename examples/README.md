@@ -5,6 +5,7 @@ This directory contains example configurations and scripts demonstrating how to 
 ## Configuration Examples
 
 - `basic_deequ_validation.conf` - Basic data quality checks using the Deequ engine
+- `basic_deequ_validation.yaml`, `basic_deequ_validation.json` - The same rule pack in YAML and JSON: every format loads, validates and runs identically
 - `dqdl_validation.conf` - Vendor-specific DQDL compatibility rules through PyDeequ
 - `schema_validation.conf` - Schema validation with datatype, nullable, and unique constraints
 - `businessrules_constraints.conf` - Businessrules engine constraints (distinctness, rate-of-change, negative values)
@@ -12,6 +13,7 @@ This directory contains example configurations and scripts demonstrating how to 
 - `dqx_validation.conf` - Databricks Labs DQX metadata checks through the dqx engine (needs the `dqx` extra; Python <3.13 only)
 - `multi_engine_pipeline.conf` - Multi-engine pipeline combining Deequ and schema validation
 - `gate_policy.conf` - Gate policy (`fail_on`), notifiers, and severity-aware outcomes (ADR-013)
+- `overlays/` - Per-environment overlays: `prod.conf` includes `base.conf` and overrides keys; environment values arrive through `${?VAR}`
 - `unity_catalog.conf` - Configuration using Databricks Unity Catalog
 - `glue_catalog.conf` - Configuration using AWS Glue Data Catalog
 

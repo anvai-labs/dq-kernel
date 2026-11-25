@@ -201,6 +201,19 @@ jobs:
         run: pip install poetry==2.4.2
       - name: Build package
         run: poetry build
+      - name: Verify the published rule-pack schema ships in the wheel
+        run: |
+          python - <<'PY'
+          import glob
+          import zipfile
+
+          wheel = sorted(glob.glob("dist/dq_kernel-*.whl"))[-1]
+          required = "dq/schemas/rule-pack.schema.json"
+          with zipfile.ZipFile(wheel) as archive:
+              names = archive.namelist()
+          assert required in names, f"{required} is missing from {wheel}"
+          print(f"{wheel} carries {required}")
+          PY
       - name: Upload artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

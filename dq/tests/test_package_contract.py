@@ -82,6 +82,51 @@ def test_engine_contract_imports_without_spark_or_vendor_libraries():
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "import dq.config",
+        "import dq.schema",
+        "from dq.utils.config_utils import load_config, parse_config_text",
+        "from dq.validate import validate_config_document",
+    ],
+    ids=["dq.config", "dq.schema", "loader", "dq-validate"],
+)
+def test_rule_pack_plumbing_imports_without_any_optional_dependency(statement):
+    """SPEC-010 G6: YAML is the only format dependency, and it is core."""
+    result = _run_with_blocked_imports(
+        "boto3",
+        "databricks",
+        "pydeequ",
+        "pyspark",
+        "great_expectations",
+        statement=statement,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_a_yaml_rule_pack_validates_with_every_optional_dependency_blocked(tmp_path):
+    pack = tmp_path / "rules.yaml"
+    pack.write_text(
+        "dqframework:\n  dqrules:\n    - { name: ok, engine: deequ, checks: [1] }\n",
+        encoding="utf-8",
+    )
+    script = (
+        "import logging; logging.disable(logging.CRITICAL);"
+        "from dq.validate import validate_config;"
+        f"import sys; sys.exit(0 if validate_config({str(pack)!r}) else 3)"
+    )
+    result = _run_with_blocked_imports(
+        "boto3",
+        "databricks",
+        "pydeequ",
+        "pyspark",
+        "great_expectations",
+        statement=script,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
 def test_config_helpers_import_without_aws_extra():
     result = _run_with_blocked_imports(
         "boto3", statement="from dq.utils import config_utils"

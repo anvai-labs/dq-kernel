@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: In Progress — all gates met by SPEC-012; awaiting CI on its pull request +
+Status: Verified — delivered by SPEC-012; CI run 45515048406 green on PR #58 +
 Date: 2026-09-21 +
 Reconciled: 2026-11-24 +
 Driven by: TD-PROD-2, ADR-008 +
@@ -59,12 +59,10 @@ run's outcome.
 
 == Progress
 
-* [x] G1 — evidence: `dq/tests/test_notifier.py::test_gate_event_from_outcomes_collects_failures`,
-  `::test_gate_event_passing_run_has_empty_failures`
+* [x] G1 — evidence: `dq/tests/test_notifier.py::test_gate_event_from_outcomes_collects_failures`, `::test_gate_event_passing_run_has_empty_failures`
 * [x] G2 — evidence: `dq/tests/test_framework_contract.py::test_recording_notifier_receives_exactly_one_event_per_run`
 * [x] G3 — evidence: `dq/tests/test_notifier.py::test_webhook_retries_three_times_with_backoff_then_gives_up`
-* [x] G4 — evidence: `dq/tests/test_notifier.py::test_notifier_from_config_rejects_unknown_types`,
-  `::test_logging_notifier_produces_structured_output`
+* [x] G4 — evidence: `dq/tests/test_notifier.py::test_notifier_from_config_rejects_unknown_types`, `::test_logging_notifier_produces_structured_output`
 
 [NOTE]
 ====

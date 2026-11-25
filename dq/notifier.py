@@ -23,6 +23,7 @@ import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 
 from dq.exceptions import ConfigurationError
 from dq.gate import severity_split
@@ -34,6 +35,9 @@ DEFAULT_ATTEMPTS = 3
 DEFAULT_BACKOFF_SECONDS = 1.0
 MAX_BACKOFF_SECONDS = 30.0
 DEFAULT_TIMEOUT_SECONDS = 10
+
+#: Schemes an HTTP adapter will post to.
+_ALLOWED_URL_SCHEMES = ("http", "https")
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +204,15 @@ class _HttpNotifier(GateNotifier):
         if attempts < 1:
             raise ConfigurationError(
                 f"{self.type_name} notifier requires at least one attempt, got {attempts}"
+            )
+        scheme = urlparse(url).scheme
+        if scheme not in _ALLOWED_URL_SCHEMES:
+            # The URL arrives through the environment; an allow-list keeps a
+            # mis-set variable from pointing the HTTP adapter at a local file
+            # or an unexpected scheme.
+            raise ConfigurationError(
+                f"{self.type_name} notifier URL must use http or https, "
+                f"got {scheme or 'no scheme'!r}"
             )
         self._url = url
         self._attempts = attempts

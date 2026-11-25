@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Tuple
 
 from dq.exceptions import ConfigurationError
+from dq.utils.config_utils import config_get
 
 #: Accepted values of ``dqframework.gate.fail_on``.
 POLICIES = ("any", "error", "never")
@@ -136,27 +137,6 @@ def evaluate_gate(
         blocking=tuple(blocking),
         advisory=tuple(advisory),
     )
-
-
-def config_get(config: Any, dotted_key: str, default: Any = None) -> Any:
-    """Read a dotted key from a ConfigTree or a plain mapping.
-
-    The framework is handed pyhocon trees in production and plain
-    dictionaries in tests and embedders. Trees resolve dotted keys
-    themselves; a plain dictionary may store the dotted key as-is or nest
-    it, so both spellings are tried.
-    """
-    if not hasattr(config, "get"):
-        return default
-    value = config.get(dotted_key, default)
-    if value is not default:
-        return value
-    current = config
-    for part in dotted_key.split("."):
-        if not hasattr(current, "get") or part not in current:
-            return default
-        current = current[part]
-    return current
 
 
 def policy_from_config(config: Any) -> str:

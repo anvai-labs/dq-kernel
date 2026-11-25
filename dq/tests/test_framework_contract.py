@@ -327,3 +327,36 @@ def test_unknown_gate_policy_fails_closed_before_any_engine_runs():
         with pytest.raises(ConfigurationError, match="dqframework.gate.fail_on"):
             framework.run()
     loader.return_value.load_engine.assert_not_called()
+
+
+def test_the_whole_rule_pack_is_validated_before_any_engine_runs():
+    """Rule 2 is broken; rule 1's engine must never be loaded (ADR-001)."""
+    framework = framework_with_rules(
+        [
+            {"engine": "deequ", "checks": [{"constraint": "isComplete"}]},
+            {"name": "broken"},
+        ]
+    )
+    with patch("dq.dq_framework.EngineLoader") as loader:
+        with pytest.raises(
+            ConfigurationError, match="Rule 1 is missing required key 'engine'"
+        ):
+            framework.run()
+    loader.return_value.load_engine.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("rule", "message"),
+    [
+        (
+            {"engine": "deequ", "dataframes": []},
+            "Rule 0: key 'dataframes' must name at least one dataframe",
+        ),
+        ({"engine": "  "}, "Rule 0: key 'engine' must be a non-empty engine name"),
+        ("not-a-mapping", "Rule 0 must be a mapping with at least an 'engine' key"),
+    ],
+)
+def test_a_malformed_rule_fails_closed_with_its_index_and_key(rule, message):
+    framework = framework_with_rules([rule])
+    with pytest.raises(ConfigurationError, match=message):
+        framework.run()

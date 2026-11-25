@@ -1,0 +1,12 @@
+# Basic Deequ validation example -- the same rule pack as
+# basic_deequ_validation.conf and basic_deequ_validation.json, in YAML.
+dqframework:
+  dqrules:
+    - name: basic_checks
+      engine: deequ
+      dataframes: [default]
+      checks:
+        - { constraint_name: id_complete, constraint: isComplete, column: id, level: Error }
+        - { constraint_name: id_unique, constraint: isUnique, column: id, level: Error }
+        - { constraint_name: name_complete, constraint: isComplete, column: name, level: Warning }
+        - { constraint_name: age_non_negative, constraint: isNonNegative, column: age, level: Warning }

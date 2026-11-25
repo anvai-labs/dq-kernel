@@ -4,6 +4,8 @@
 """Config-source resolution contracts: every URI branch loads or fails closed."""
 
 import pytest
+
+pytestmark = pytest.mark.spark
 from pyhocon import ConfigFactory
 
 from dq.dq_framework import DQFramework

@@ -1,11 +1,19 @@
 # Copyright 2024 Data Quality Framework Contributors
 # SPDX-License-Identifier: Apache-2.0
 
+import json
+import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from dq.validate import is_local_config_reference, validate_config
+from dq.validate import (
+    is_local_config_reference,
+    validate_config,
+    validate_config_document,
+)
+from dq.validate import main as validate_main
 
 
 def write_config(tmp_path, body):
@@ -133,11 +141,146 @@ def test_validate_config_defers_extension_payload_to_extension(tmp_path):
     assert validate_config(path) is True
 
 
+RULE_PACKS = sorted(
+    path
+    for path in Path("examples").rglob("*")
+    if path.is_file() and path.suffix in (".conf", ".hocon", ".yaml", ".yml", ".json")
+)
+
+
 @pytest.mark.parametrize(
-    "config_path", sorted(Path("examples").glob("*.conf")), ids=lambda path: path.name
+    "config_path", RULE_PACKS, ids=lambda path: path.relative_to("examples").as_posix()
 )
 def test_checked_in_example_is_a_valid_configuration(config_path):
     assert validate_config(str(config_path)) is True
+
+
+def test_every_example_format_is_represented():
+    suffixes = {path.suffix for path in RULE_PACKS}
+    assert {".conf", ".yaml", ".json"} <= suffixes
+
+
+@pytest.mark.parametrize("suffix", [".yaml", ".yml", ".json"])
+def test_validate_reads_every_format(tmp_path, suffix):
+    path = tmp_path / f"rules{suffix}"
+    if suffix == ".json":
+        path.write_text(
+            '{"dqframework": {"dqrules": [{"engine": "deequ", "checks": [1]}]}}'
+        )
+    else:
+        path.write_text(
+            "dqframework:\n  dqrules:\n    - engine: deequ\n      checks: [1]\n"
+        )
+    assert validate_config(str(path)) is True
+    assert validate_config_document(str(path)).format.lstrip(".") in ("yaml", "json")
+
+
+def test_validate_reports_every_problem_of_the_first_failing_stage(tmp_path):
+    """Stages: a schema problem hides later stages, so nothing is reported twice."""
+    path = tmp_path / "rules.conf"
+    path.write_text(
+        "dqframework {\n"
+        '  catalog_type = "nope"\n'
+        '  gate { fail_on = "sometimes" }\n'
+        "  dqrules = [{ name = 3, engine = deequ, checks = 1 }]\n"
+        "}\n"
+    )
+    result = validate_config_document(str(path))
+    assert result.valid is False
+    assert [error for error in result.errors if error.startswith("Schema: ")] == [
+        "Schema: $.dqframework.catalog_type: 'nope' is not one of 'spark', 'unity', 'glue', 'hive'",
+        "Schema: $.dqframework.gate.fail_on: 'sometimes' is not one of 'any', 'error', 'never'",
+        "Schema: $.dqframework.dqrules[0].name: expected string, got integer",
+    ]
+    assert len(result.errors) == 3
+
+
+def test_validate_reports_a_rule_shape_problem_for_every_broken_rule(tmp_path):
+    """The rule-shape stage is exhaustive, not first-error-only.
+
+    The snapshot is also stricter than the schema here: a whitespace-only
+    name has the length the schema asks for and still names nothing.
+    """
+    path = tmp_path / "rules.conf"
+    path.write_text(
+        "dqframework { dqrules = [\n"
+        '  { engine = "deequ", dataframes = ["  "], checks = [1] }\n'
+        '  { engine = "greatexpectations", name = "  ", checks = [1] }\n'
+        '  { engine = "deequ", checks = [1] }\n'
+        "] }\n"
+    )
+    result = validate_config_document(str(path))
+    assert result.errors == (
+        "Rule 0: key 'dataframes' must name at least one dataframe, each with a "
+        "non-empty name",
+        "Rule 1: key 'name' must be a non-empty string when given",
+    )
+
+
+def test_payload_problems_wait_until_every_rule_is_well_formed(tmp_path):
+    path = tmp_path / "rules.conf"
+    path.write_text(
+        "dqframework { dqrules = [\n"
+        '  { engine = "greatexpectations", checks = [1] }\n'
+        '  { engine = "  " }\n'
+        "] }\n"
+    )
+    assert validate_config_document(str(path)).errors == (
+        "Rule 1: key 'engine' must be a non-empty engine name",
+    )
+
+
+def test_validate_reports_a_missing_engine_payload_after_the_snapshot(tmp_path):
+    path = tmp_path / "rules.conf"
+    path.write_text(
+        'dqframework { dqrules = [{ engine = "greatexpectations", checks = [1] }] }\n'
+    )
+    result = validate_config_document(str(path))
+    assert result.errors == (
+        "Rule 0: Engine 'greatexpectations' requires a non-empty 'expectations' payload",
+    )
+
+
+def test_validate_accepts_inline_hocon_text():
+    assert (
+        validate_config(
+            'dqframework { dqrules = [{ engine = "deequ", checks = [1] }] }'
+        )
+        is True
+    )
+
+
+def test_validate_names_a_broken_file_rather_than_a_parser_dump(tmp_path):
+    path = tmp_path / "rules.conf"
+    path.write_text("dqframework { dqrules = [\n")
+    result = validate_config_document(str(path))
+    assert result.valid is False
+    (error,) = result.errors
+    assert "rules.conf" in error and len(error) < 300
+
+
+def test_validate_json_output_lists_every_error(tmp_path, capsys):
+    path = tmp_path / "rules.yaml"
+    path.write_text("dqframework:\n  dqrules: []\n")
+    with patch.object(sys, "argv", ["dq-validate", "--format", "json", str(path)]):
+        exit_code = validate_main()
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert payload["config"] == str(path)
+    assert payload["format"] == "yaml"
+    assert payload["valid"] is False
+    assert payload["errors"] == [
+        "Schema: $.dqframework.dqrules: expected at least 1 item(s)"
+    ]
+
+
+def test_validate_cli_entry_point_is_registered():
+    import tomllib
+
+    scripts = tomllib.loads(Path("pyproject.toml").read_text())["tool"]["poetry"][
+        "scripts"
+    ]
+    assert scripts["dq-validate"] == "dq.validate:main"
 
 
 def test_validate_config_rejects_missing_dqframework_block(tmp_path):
