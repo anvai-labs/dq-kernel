@@ -11,9 +11,9 @@ import pytest
 
 from dq.engine import checkspec
 from dq.engine.checkspec import (
-    CheckSpec,
     build_result,
     derive_name,
+    labels_for_checks,
     normalize_criticality,
 )
 
@@ -56,43 +56,6 @@ def test_derive_name_is_positional_and_stable():
     assert derive_name("is_unique", 12) == "is_unique_12"
 
 
-def test_require_unique_names_passes_distinct_names():
-    checkspec.require_unique_names(["a", "b"])  # must not raise
-
-
-def test_require_unique_names_fails_closed_on_duplicate():
-    with pytest.raises(ValueError, match="Duplicate check name 'dup'"):
-        checkspec.require_unique_names(["dup", "dup"])
-
-
-# --------------------------------------------------------------- CheckSpec
-
-
-def test_checkspec_freezes_rule_payload():
-    spec = CheckSpec(
-        name="a",
-        criticality="error",
-        function="is_not_null",
-        native={"column": "id"},
-    )
-    with pytest.raises(Exception):
-        spec.name = "b"
-    with pytest.raises(TypeError):
-        spec.native["column"] = "other"
-
-
-def test_checkspec_validates_criticality_at_construction():
-    with pytest.raises(ValueError, match="normalize_criticality"):
-        CheckSpec(name="a", criticality="fatal", function="f")
-
-
-def test_checkspec_detail_carries_severity_and_columns():
-    plain = CheckSpec(name="a", criticality="warn", function="f")
-    scoped = CheckSpec(name="b", criticality="warn", function="f", columns=("id",))
-    assert plain.as_detail() == {"criticality": "warn"}
-    assert scoped.as_detail() == {"criticality": "warn", "columns": ["id"]}
-
-
 # -------------------------------------------------------------- build_result
 
 
@@ -120,3 +83,53 @@ def test_build_result_criticality_none_keeps_details_identity():
     details = {"x": 1}
     result = build_result("a", True, details)
     assert result["details"] is details  # no copy when nothing to merge
+
+
+# ---------------------------------------------------------- the labelling rule
+
+
+def test_labels_prefer_the_configured_name_then_kind_and_columns():
+    checks = [
+        {"constraint": "isComplete", "column": "id"},
+        {"constraint": "isComplete", "column": "id", "constraint_name": "ids"},
+        {"constraint": "isUnique", "columns": ["a", "b"]},
+        {"constraint": "hasSize"},
+    ]
+    assert labels_for_checks(
+        checks, ("constraint_name",), "constraint", ("column", "columns")
+    ) == [
+        "isComplete_id",
+        "ids",
+        "isUnique_a_b",
+        "hasSize",
+    ]
+
+
+def test_the_first_configured_name_key_wins():
+    checks = [{"constraint": "c", "alias": "second", "description": "third"}]
+    assert labels_for_checks(checks, ("alias", "description"), "constraint", ()) == [
+        "second"
+    ]
+
+
+def test_a_second_check_of_the_same_kind_without_columns_takes_its_position():
+    checks = [
+        {"constraint": "hasSize"},
+        {"constraint": "hasSize"},
+        {"constraint": "hasSize"},
+    ]
+    assert labels_for_checks(checks, (), "constraint", ("column", "columns")) == [
+        "hasSize",
+        "hasSize_1",
+        "hasSize_2",
+    ]
+
+
+def test_labels_for_checks_does_not_change_the_configuration():
+    from pyhocon import ConfigFactory
+
+    checks = ConfigFactory.from_dict(
+        {"checks": [{"constraint": "isComplete", "column": "id"}]}
+    ).get("checks")
+    labels_for_checks(checks, ("name",), "constraint", ("column", "columns"))
+    assert list(checks[0].keys()) == ["constraint", "column"]

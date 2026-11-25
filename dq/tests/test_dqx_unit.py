@@ -108,7 +108,7 @@ def test_build_checks_rejects_invalid_criticality():
 
 
 def test_build_checks_rejects_duplicate_names():
-    with pytest.raises(ValueError, match="Duplicate check name"):
+    with pytest.raises(ValueError, match="Duplicate check label .dup.: checks 0 and 1"):
         DqxCheck(
             check_config(
                 [
@@ -372,3 +372,16 @@ def test_dqx_validation_pass_builds_index(fake_dqx):
     engine._dqx_engine = _ValidatingFake()
     engine._build_checks()
     assert engine._check_index == {"a": ("f_a", "warn")}
+
+
+def test_an_explicit_name_equal_to_a_derived_label_is_refused():
+    """`is_not_null_1` is what the second check would derive; naming the
+    first one that would make the two indistinguishable."""
+    config = check_config(
+        [
+            {"name": "is_not_null_1", "check": {"function": "is_not_null"}},
+            {"check": {"function": "is_not_null"}},
+        ]
+    )
+    with pytest.raises(ValueError, match="Duplicate check label 'is_not_null_1'"):
+        DqxCheck(config).build_checks()

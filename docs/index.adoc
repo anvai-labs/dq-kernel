@@ -220,6 +220,23 @@ or bound upstream dataset collection. Portable rule planning has landed for
 counts/v1 and groups/v1; durable post-validation persistence remains proposed
 under ADR-002.
 
+Each result carries three keys:
+
+* `check` -- the check's label. Evidence is attributed by it, so labels are
+  unique within a rule: a check is named by its configured name, else by its
+  kind and columns (`isComplete_id`), and a rule whose two checks would report
+  the same label is refused. Every engine follows this rule; before 0.3.0 the
+  Deequ, Great Expectations, businessrules and schema-validation engines
+  reported several checks under one name.
+* `success` -- that check's own verdict. Where several constraints share one
+  Deequ Check (the `single_check_mode` flag, and schema validation's default),
+  a passing constraint is reported as passed even when a sibling fails.
+* `details` -- engine diagnostics in strict JSON, with `criticality`
+  (`error` or `warn`) whenever the engine reports severity.
+
+See xref:writing-an-engine.adoc[Writing an engine] for the engine side of
+this contract.
+
 === Portable count plans
 
 The opt-in `dq.plan` API owns immutable `DatasetRef`, `ColumnRef`, `Predicate`,
@@ -362,6 +379,7 @@ deployment responsibilities.
 ----
 dq-kernel file:///absolute/path/config.conf --spark-master 'local[*]'
 dq-validate file:///absolute/path/config.conf --format json
+dq-engines --format json
 ----
 
 `dq-kernel` creates a Spark session, runs the configured checks, prints a summary, and exits
@@ -370,7 +388,11 @@ configuration is invalid or a dependency is missing. `dq-validate` validates req
 configuration structure without running Spark checks. Built-in engines use engine-specific
 payloads: Deequ/businessrules use `checks`, schema validation uses `schema`, Great Expectations
 uses `expectations`, DQDL uses `ruleset`, DQX uses `checks`, and the portable engine uses `plan`.
-Every checked-in `.conf` example is validated in CI.
+Every checked-in example is validated in CI.
+
+`dq-engines` lists the engines this installation can resolve, built-in and
+entry-point, with each engine's capability manifest and, for an engine whose
+optional dependency is missing, how to install it.
 
 === Gate policy
 
@@ -443,7 +465,7 @@ install the `delta` extra for the Delta data source.
 
 CI runs the Spark-backed test suite on Python 3.12 and 3.13 with Java 17. It rejects missing tests,
 enforces 55% combined coverage, independent 57% line and 46% branch floors, and 90% changed-code
-coverage, runs Black,
+coverage (a report holding any path outside the checkout is refused), runs Black,
 Flake8, Bandit, and pip-audit, builds the package, reviews dependency changes, and checks
 documentation links. A fail-closed aggregate job is the required branch-protection context.
 
@@ -455,6 +477,8 @@ self-hosted capacity. Other pull requests stay on GitHub-hosted runners.
 * link:../examples/README.md[Runnable configuration examples]
 * link:roadmap.adoc[Roadmap and spec tracker] -- what is planned, in flight, and
   done; every spec is indexed there with its status and per-gate evidence
+* link:writing-an-engine.adoc[Writing an engine] -- the engine contract, the
+  conformance suite, and a complete example that is executed as a test
 * link:modernization-plan.adoc[Architecture modernization plan (U1-U7, complete)]
 * link:decisions/adr/ADR-001-incremental-typed-execution-kernel.adoc[ADR-001: typed execution kernel]
 * link:decisions/adr/ADR-002-engine-neutral-rule-kernel.adoc[ADR-002: engine-neutral rule kernel]

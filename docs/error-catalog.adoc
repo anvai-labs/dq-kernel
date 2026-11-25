@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 199 raise sites across the modules below; the contract
+The framework raises 205 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -210,11 +210,14 @@ Fail-closed harvesting of Lakeflow pipeline expectation metrics.
 
 == dq/engine/engine_loader.py
 
-*Content:* 1 `ValueError` site.
+Engine resolution: the name guard, and the manifest of the engine it loads.
 
-* Cause: engine names must be lowercase alphanumeric with optional
-  underscores.
-* Fix: rename the engine or its module to match the loader convention.
+* `ValueError` - the engine name is not lowercase alphanumeric with
+  optional underscores. Fix the rule's `engine` key.
+* `ConfigurationError` - the engine declares an invalid `CAPABILITIES`
+  manifest: an unknown capability, a `criticality` that is not `native`,
+  `derived` or `absent`, or a flag that is not a boolean. The engine author
+  fixes the engine's `CAPABILITIES`.
 
 == dq/envelope.py
 
@@ -364,3 +367,26 @@ The bundled JSON Schema validator for the rule-pack envelope (SPEC-010).
 * `ValueError` - the bundled schema uses a type or a reference the validator
   does not support. This is a development error, not a configuration one: a
   contract test checks the schema against the validator's keyword set.
+
+== dq/engine/deequ/verification.py
+
+Matching pydeequ result rows to the labels of the checks that produced them
+(the deequ engine and schema validation).
+
+* `ConfigurationError` - a result row cannot be matched to a labelled
+  constraint of its Check, or a labelled constraint produced no result row.
+  Evidence is never attributed to a label by guesswork. This points at an
+  engine defect: a constraint was added without going through the labelling
+  path (`DeequCheck` or `SchemavalidationCheck._new_check`).
+
+== dq/sdk/fixtures.py
+
+The shared semantic corpus that every compute adapter is checked against.
+
+* `ValueError` - the corpus document is malformed: a case with an id that is
+  not lowercase words, a rule that does not belong to its case's semantic
+  version, a cell that does not fit its column type (a decimal must be a
+  string), expectations that do not decide exactly every rule, or metrics
+  that are not exactly the ones the plan requires. This is a defect in the
+  checked-in corpus, not in user configuration: fix the case, or add the
+  documented metric.

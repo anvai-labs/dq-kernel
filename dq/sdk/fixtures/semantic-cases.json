@@ -1,0 +1,1498 @@
+{
+  "version": 1,
+  "title": "Portable kernel semantic fixtures",
+  "notes": [
+    "One corpus, every compute adapter. Each case states the data, the rules, the metrics an adapter must compute, and the decision each rule must produce.",
+    "The decisions follow from the metrics through the kernel's own evaluation (dq.plan); a pure unit test checks that arithmetic, so a wrong expectation here cannot hide behind an adapter.",
+    "The metrics are derived by hand from the documented semantics and verified against Spark, and against Deequ wherever the two semantics coincide.",
+    "Cell encoding: a decimal is a string; in a double column the strings NaN, Infinity and -Infinity name those values; null is null.",
+    "A cell must be storable in its column as written: a decimal is finite and fits the column's precision and scale, and a long fits 64 bits. An engine is not bound to refuse one that does not (Spark stores a decimal NaN as null, and 1.234 in a decimal(10,2) column as 1.23), so the validator refuses it here."
+  ],
+  "cases": [
+    {
+      "id": "counts-mixed-null-nan-infinity-decimal",
+      "semantics": "counts/v1",
+      "why": "Present means not null; for floating-point columns it also means not NaN. Infinity is present. Decimals are checked for null only.",
+      "columns": [
+        [
+          "id",
+          "string"
+        ],
+        [
+          "score",
+          "double"
+        ],
+        [
+          "amount",
+          "decimal(10,2)"
+        ]
+      ],
+      "rows": [
+        [
+          "a",
+          1.5,
+          "1.25"
+        ],
+        [
+          "",
+          "NaN",
+          null
+        ],
+        [
+          "b",
+          "Infinity",
+          "3.50"
+        ],
+        [
+          null,
+          "-Infinity",
+          "0.00"
+        ],
+        [
+          "c",
+          null,
+          "2.00"
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "size_at_least_one",
+          "kind": "size",
+          "operator": "ge",
+          "threshold": "1"
+        },
+        {
+          "rule_id": "size_under_five",
+          "kind": "size",
+          "operator": "lt",
+          "threshold": "5"
+        },
+        {
+          "rule_id": "size_exactly_five",
+          "kind": "size",
+          "operator": "eq",
+          "threshold": "5"
+        },
+        {
+          "rule_id": "id_half_present",
+          "kind": "completeness",
+          "operator": "ge",
+          "threshold": "0.5",
+          "column": "id"
+        },
+        {
+          "rule_id": "id_complete",
+          "kind": "completeness",
+          "operator": "eq",
+          "threshold": "1",
+          "column": "id"
+        },
+        {
+          "rule_id": "score_seventy_present",
+          "kind": "completeness",
+          "operator": "ge",
+          "threshold": "0.7",
+          "column": "score"
+        },
+        {
+          "rule_id": "score_sixty_present",
+          "kind": "completeness",
+          "operator": "ge",
+          "threshold": "0.6",
+          "column": "score"
+        },
+        {
+          "rule_id": "score_exactly_three_fifths",
+          "kind": "completeness",
+          "operator": "eq",
+          "threshold": "0.6",
+          "column": "score"
+        },
+        {
+          "rule_id": "amount_eighty_present",
+          "kind": "completeness",
+          "operator": "ge",
+          "threshold": "0.8",
+          "column": "amount"
+        },
+        {
+          "rule_id": "amount_above_eighty",
+          "kind": "completeness",
+          "operator": "gt",
+          "threshold": "0.8",
+          "column": "amount"
+        },
+        {
+          "rule_id": "amount_complete",
+          "kind": "completeness",
+          "operator": "eq",
+          "threshold": "1",
+          "column": "amount"
+        }
+      ],
+      "metrics": {
+        "row_count": 5,
+        "present_count:id": 4,
+        "present_count:score": 3,
+        "present_count:amount": 4
+      },
+      "expected": {
+        "size_at_least_one": true,
+        "size_under_five": false,
+        "size_exactly_five": true,
+        "id_half_present": true,
+        "id_complete": false,
+        "score_seventy_present": false,
+        "score_sixty_present": true,
+        "score_exactly_three_fifths": true,
+        "amount_eighty_present": true,
+        "amount_above_eighty": false,
+        "amount_complete": false
+      }
+    },
+    {
+      "id": "counts-empty-input",
+      "semantics": "counts/v1",
+      "why": "Completeness fails on empty input whatever its threshold: there is nothing to be complete. Size is simply zero, so a size rule is evaluated against zero, and Deequ agrees on both.",
+      "columns": [
+        [
+          "id",
+          "string"
+        ],
+        [
+          "score",
+          "double"
+        ]
+      ],
+      "rows": [],
+      "rules": [
+        {
+          "rule_id": "size_at_least_one",
+          "kind": "size",
+          "operator": "ge",
+          "threshold": "1"
+        },
+        {
+          "rule_id": "size_under_five",
+          "kind": "size",
+          "operator": "lt",
+          "threshold": "5"
+        },
+        {
+          "rule_id": "id_complete",
+          "kind": "completeness",
+          "operator": "eq",
+          "threshold": "1",
+          "column": "id"
+        },
+        {
+          "rule_id": "id_any_present",
+          "kind": "completeness",
+          "operator": "ge",
+          "threshold": "0",
+          "column": "id"
+        },
+        {
+          "rule_id": "score_complete",
+          "kind": "completeness",
+          "operator": "eq",
+          "threshold": "1",
+          "column": "score"
+        }
+      ],
+      "metrics": {
+        "row_count": 0,
+        "present_count:id": 0,
+        "present_count:score": 0
+      },
+      "expected": {
+        "size_at_least_one": false,
+        "size_under_five": true,
+        "id_complete": false,
+        "id_any_present": false,
+        "score_complete": false
+      }
+    },
+    {
+      "id": "counts-exact-two-thirds-boundary",
+      "semantics": "counts/v1",
+      "why": "Two of three rows are present: exactly 2/3, which no finite decimal equals. The kernel compares exactly; an engine comparing doubles finds 0.6666666666666666 equal to 2/3.",
+      "columns": [
+        [
+          "id",
+          "string"
+        ],
+        [
+          "filler",
+          "long"
+        ]
+      ],
+      "rows": [
+        [
+          "a",
+          1
+        ],
+        [
+          "b",
+          2
+        ],
+        [
+          null,
+          3
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "two_thirds_at_least",
+          "kind": "completeness",
+          "operator": "ge",
+          "threshold": "0.6666666666666666",
+          "column": "id"
+        },
+        {
+          "rule_id": "two_thirds_above",
+          "kind": "completeness",
+          "operator": "gt",
+          "threshold": "0.6666666666666666",
+          "column": "id"
+        },
+        {
+          "rule_id": "two_thirds_at_most",
+          "kind": "completeness",
+          "operator": "le",
+          "threshold": "0.6666666666666666",
+          "column": "id"
+        },
+        {
+          "rule_id": "two_thirds_exactly_the_double",
+          "kind": "completeness",
+          "operator": "eq",
+          "threshold": "0.6666666666666666",
+          "column": "id"
+        },
+        {
+          "rule_id": "two_thirds_exactly_rounded_up",
+          "kind": "completeness",
+          "operator": "eq",
+          "threshold": "0.66666666666666666666666666666667",
+          "column": "id"
+        }
+      ],
+      "metrics": {
+        "row_count": 3,
+        "present_count:id": 2
+      },
+      "expected": {
+        "two_thirds_at_least": true,
+        "two_thirds_above": true,
+        "two_thirds_at_most": false,
+        "two_thirds_exactly_the_double": false,
+        "two_thirds_exactly_rounded_up": false
+      },
+      "deequ_diverges": {
+        "two_thirds_at_most": "Deequ compares doubles and finds 2/3 at most 0.6666666666666666; exactly, it is greater.",
+        "two_thirds_above": "Deequ compares doubles and finds 2/3 equal to, not above, 0.6666666666666666.",
+        "two_thirds_exactly_the_double": "Deequ compares doubles and finds 2/3 equal to 0.6666666666666666.",
+        "two_thirds_exactly_rounded_up": "Deequ compares doubles, and 0.66666666666666666666666666666667 is the same double as 0.6666666666666666, so it finds 2/3 equal to it; exactly, 2/3 is less."
+      }
+    },
+    {
+      "id": "counts-strings-are-present-even-when-they-read-nan",
+      "semantics": "counts/v1",
+      "why": "Only floating-point NaN is excluded. A string that reads NaN and an empty string are present values; a boolean is present when it is not null.",
+      "columns": [
+        [
+          "s",
+          "string"
+        ],
+        [
+          "flag",
+          "boolean"
+        ]
+      ],
+      "rows": [
+        [
+          "NaN",
+          true
+        ],
+        [
+          "",
+          false
+        ],
+        [
+          null,
+          null
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "text_two_thirds",
+          "kind": "completeness",
+          "operator": "ge",
+          "threshold": "0.6",
+          "column": "s"
+        },
+        {
+          "rule_id": "text_above_two_thirds",
+          "kind": "completeness",
+          "operator": "ge",
+          "threshold": "0.6667",
+          "column": "s"
+        },
+        {
+          "rule_id": "text_below_complete",
+          "kind": "completeness",
+          "operator": "lt",
+          "threshold": "1",
+          "column": "s"
+        },
+        {
+          "rule_id": "flag_two_thirds",
+          "kind": "completeness",
+          "operator": "ge",
+          "threshold": "0.6666666666666666",
+          "column": "flag"
+        }
+      ],
+      "metrics": {
+        "row_count": 3,
+        "present_count:s": 2,
+        "present_count:flag": 2
+      },
+      "expected": {
+        "text_two_thirds": true,
+        "text_above_two_thirds": false,
+        "text_below_complete": true,
+        "flag_two_thirds": true
+      }
+    },
+    {
+      "id": "counts-null-only-column-passes-a-zero-threshold",
+      "semantics": "counts/v1",
+      "why": "A non-empty dataset whose column is entirely null is zero percent complete: at least zero passes, above zero fails. This differs from an empty dataset, where every completeness rule fails.",
+      "columns": [
+        [
+          "n",
+          "long"
+        ],
+        [
+          "label",
+          "string"
+        ]
+      ],
+      "rows": [
+        [
+          null,
+          "x"
+        ],
+        [
+          null,
+          "y"
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "nothing_present_at_least_zero",
+          "kind": "completeness",
+          "operator": "ge",
+          "threshold": "0",
+          "column": "n"
+        },
+        {
+          "rule_id": "nothing_present_above_zero",
+          "kind": "completeness",
+          "operator": "gt",
+          "threshold": "0",
+          "column": "n"
+        },
+        {
+          "rule_id": "label_complete",
+          "kind": "completeness",
+          "operator": "eq",
+          "threshold": "1",
+          "column": "label"
+        }
+      ],
+      "metrics": {
+        "row_count": 2,
+        "present_count:n": 0,
+        "present_count:label": 2
+      },
+      "expected": {
+        "nothing_present_at_least_zero": true,
+        "nothing_present_above_zero": false,
+        "label_complete": true
+      }
+    },
+    {
+      "id": "counts-nan-only-and-infinity-only-columns",
+      "semantics": "counts/v1",
+      "why": "A column of NaN with a null is entirely absent; a column of infinities is entirely present.",
+      "columns": [
+        [
+          "a",
+          "double"
+        ],
+        [
+          "b",
+          "double"
+        ]
+      ],
+      "rows": [
+        [
+          "NaN",
+          "Infinity"
+        ],
+        [
+          "NaN",
+          "-Infinity"
+        ],
+        [
+          null,
+          1.0
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "all_nan_is_absent",
+          "kind": "completeness",
+          "operator": "eq",
+          "threshold": "0",
+          "column": "a"
+        },
+        {
+          "rule_id": "all_nan_at_least_one",
+          "kind": "completeness",
+          "operator": "ge",
+          "threshold": "1",
+          "column": "a"
+        },
+        {
+          "rule_id": "infinity_is_present",
+          "kind": "completeness",
+          "operator": "eq",
+          "threshold": "1",
+          "column": "b"
+        }
+      ],
+      "metrics": {
+        "row_count": 3,
+        "present_count:a": 0,
+        "present_count:b": 3
+      },
+      "expected": {
+        "all_nan_is_absent": true,
+        "all_nan_at_least_one": false,
+        "infinity_is_present": true
+      }
+    },
+    {
+      "id": "groups-distinct-bounds-across-three-regions",
+      "semantics": "groups/v1",
+      "why": "East has three distinct ids, west repeats one and adds another, north repeats a single id. Distinct counts measure values, not rows.",
+      "columns": [
+        [
+          "region",
+          "string"
+        ],
+        [
+          "id",
+          "string"
+        ],
+        [
+          "amount",
+          "double"
+        ]
+      ],
+      "rows": [
+        [
+          "east",
+          "a",
+          1.0
+        ],
+        [
+          "east",
+          "b",
+          2.0
+        ],
+        [
+          "east",
+          "c",
+          3.0
+        ],
+        [
+          "west",
+          "a",
+          9.0
+        ],
+        [
+          "west",
+          "a",
+          9.0
+        ],
+        [
+          "west",
+          "b",
+          5.0
+        ],
+        [
+          "north",
+          "a",
+          7.0
+        ],
+        [
+          "north",
+          "a",
+          7.0
+        ],
+        [
+          "north",
+          "a",
+          8.0
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "every_region_has_two_ids",
+          "kind": "grouped_distinct",
+          "operator": "ge",
+          "threshold": "2",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_min_distinct"
+        },
+        {
+          "rule_id": "every_region_has_one_id",
+          "kind": "grouped_distinct",
+          "operator": "ge",
+          "threshold": "1",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_min_distinct"
+        },
+        {
+          "rule_id": "every_region_has_more_than_one",
+          "kind": "grouped_distinct",
+          "operator": "gt",
+          "threshold": "1",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_min_distinct"
+        },
+        {
+          "rule_id": "minimum_exactly_one",
+          "kind": "grouped_distinct",
+          "operator": "eq",
+          "threshold": "1",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_min_distinct"
+        },
+        {
+          "rule_id": "some_region_has_three_ids",
+          "kind": "grouped_distinct",
+          "operator": "ge",
+          "threshold": "3",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_max_distinct"
+        },
+        {
+          "rule_id": "some_region_has_more_than_three",
+          "kind": "grouped_distinct",
+          "operator": "gt",
+          "threshold": "3",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_max_distinct"
+        },
+        {
+          "rule_id": "all_regions_at_most_two",
+          "kind": "grouped_distinct",
+          "operator": "le",
+          "threshold": "2",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_max_distinct"
+        },
+        {
+          "rule_id": "maximum_exactly_three",
+          "kind": "grouped_distinct",
+          "operator": "eq",
+          "threshold": "3",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_max_distinct"
+        }
+      ],
+      "metrics": {
+        "group_count:region": 3,
+        "group_min_distinct:id:region": 1,
+        "group_max_distinct:id:region": 3
+      },
+      "expected": {
+        "every_region_has_two_ids": false,
+        "every_region_has_one_id": true,
+        "every_region_has_more_than_one": false,
+        "minimum_exactly_one": true,
+        "some_region_has_three_ids": true,
+        "some_region_has_more_than_three": false,
+        "all_regions_at_most_two": false,
+        "maximum_exactly_three": true
+      }
+    },
+    {
+      "id": "groups-empty-input-passes-vacuously",
+      "semantics": "groups/v1",
+      "why": "With no groups there is no group to violate a bound: every grouped rule passes vacuously, whatever its threshold.",
+      "columns": [
+        [
+          "region",
+          "string"
+        ],
+        [
+          "id",
+          "string"
+        ]
+      ],
+      "rows": [],
+      "rules": [
+        {
+          "rule_id": "minimum_at_least_a_hundred",
+          "kind": "grouped_distinct",
+          "operator": "ge",
+          "threshold": "100",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_min_distinct"
+        },
+        {
+          "rule_id": "maximum_below_one",
+          "kind": "grouped_distinct",
+          "operator": "lt",
+          "threshold": "1",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_max_distinct"
+        }
+      ],
+      "metrics": {
+        "group_count:region": 0,
+        "group_min_distinct:id:region": 0,
+        "group_max_distinct:id:region": 0
+      },
+      "expected": {
+        "minimum_at_least_a_hundred": true,
+        "maximum_below_one": true
+      }
+    },
+    {
+      "id": "groups-null-keys-and-null-values",
+      "semantics": "groups/v1",
+      "why": "A null grouping key forms its own group. Distinct counts ignore null values, so a group of null values has zero distinct values.",
+      "columns": [
+        [
+          "region",
+          "string"
+        ],
+        [
+          "id",
+          "string"
+        ]
+      ],
+      "rows": [
+        [
+          "east",
+          "a"
+        ],
+        [
+          "east",
+          null
+        ],
+        [
+          "east",
+          "a"
+        ],
+        [
+          "west",
+          null
+        ],
+        [
+          "west",
+          null
+        ],
+        [
+          null,
+          "a"
+        ],
+        [
+          null,
+          "b"
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "every_group_has_a_value",
+          "kind": "grouped_distinct",
+          "operator": "ge",
+          "threshold": "1",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_min_distinct"
+        },
+        {
+          "rule_id": "smallest_group_is_empty",
+          "kind": "grouped_distinct",
+          "operator": "eq",
+          "threshold": "0",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_min_distinct"
+        },
+        {
+          "rule_id": "largest_group_has_two",
+          "kind": "grouped_distinct",
+          "operator": "ge",
+          "threshold": "2",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_max_distinct"
+        },
+        {
+          "rule_id": "largest_group_has_more_than_two",
+          "kind": "grouped_distinct",
+          "operator": "gt",
+          "threshold": "2",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_max_distinct"
+        },
+        {
+          "rule_id": "largest_group_has_at_most_one",
+          "kind": "grouped_distinct",
+          "operator": "le",
+          "threshold": "1",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_max_distinct"
+        }
+      ],
+      "metrics": {
+        "group_count:region": 3,
+        "group_min_distinct:id:region": 0,
+        "group_max_distinct:id:region": 2
+      },
+      "expected": {
+        "every_group_has_a_value": false,
+        "smallest_group_is_empty": true,
+        "largest_group_has_two": true,
+        "largest_group_has_more_than_two": false,
+        "largest_group_has_at_most_one": false
+      }
+    },
+    {
+      "id": "groups-two-column-key",
+      "semantics": "groups/v1",
+      "why": "A group is a distinct combination of the grouping columns.",
+      "columns": [
+        [
+          "region",
+          "string"
+        ],
+        [
+          "day",
+          "string"
+        ],
+        [
+          "id",
+          "string"
+        ]
+      ],
+      "rows": [
+        [
+          "east",
+          "d1",
+          "a"
+        ],
+        [
+          "east",
+          "d1",
+          "b"
+        ],
+        [
+          "east",
+          "d2",
+          "a"
+        ],
+        [
+          "west",
+          "d1",
+          "a"
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "every_region_day_has_a_value",
+          "kind": "grouped_distinct",
+          "operator": "ge",
+          "threshold": "1",
+          "column": "id",
+          "group_by": [
+            "region",
+            "day"
+          ],
+          "target": "group_min_distinct"
+        },
+        {
+          "rule_id": "every_region_day_has_two",
+          "kind": "grouped_distinct",
+          "operator": "ge",
+          "threshold": "2",
+          "column": "id",
+          "group_by": [
+            "region",
+            "day"
+          ],
+          "target": "group_min_distinct"
+        },
+        {
+          "rule_id": "largest_region_day_exactly_two",
+          "kind": "grouped_distinct",
+          "operator": "eq",
+          "threshold": "2",
+          "column": "id",
+          "group_by": [
+            "region",
+            "day"
+          ],
+          "target": "group_max_distinct"
+        },
+        {
+          "rule_id": "largest_region_day_above_two",
+          "kind": "grouped_distinct",
+          "operator": "gt",
+          "threshold": "2",
+          "column": "id",
+          "group_by": [
+            "region",
+            "day"
+          ],
+          "target": "group_max_distinct"
+        }
+      ],
+      "metrics": {
+        "group_count:region+day": 3,
+        "group_min_distinct:id:region+day": 1,
+        "group_max_distinct:id:region+day": 2
+      },
+      "expected": {
+        "every_region_day_has_a_value": true,
+        "every_region_day_has_two": false,
+        "largest_region_day_exactly_two": true,
+        "largest_region_day_above_two": false
+      }
+    },
+    {
+      "id": "groups-single-group",
+      "semantics": "groups/v1",
+      "why": "With one group the minimum and the maximum are the same number.",
+      "columns": [
+        [
+          "region",
+          "string"
+        ],
+        [
+          "id",
+          "string"
+        ]
+      ],
+      "rows": [
+        [
+          "east",
+          "a"
+        ],
+        [
+          "east",
+          "a"
+        ],
+        [
+          "east",
+          "b"
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "minimum_exactly_two",
+          "kind": "grouped_distinct",
+          "operator": "eq",
+          "threshold": "2",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_min_distinct"
+        },
+        {
+          "rule_id": "maximum_exactly_two",
+          "kind": "grouped_distinct",
+          "operator": "eq",
+          "threshold": "2",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_max_distinct"
+        },
+        {
+          "rule_id": "minimum_at_least_three",
+          "kind": "grouped_distinct",
+          "operator": "ge",
+          "threshold": "3",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_min_distinct"
+        }
+      ],
+      "metrics": {
+        "group_count:region": 1,
+        "group_min_distinct:id:region": 2,
+        "group_max_distinct:id:region": 2
+      },
+      "expected": {
+        "minimum_exactly_two": true,
+        "maximum_exactly_two": true,
+        "minimum_at_least_three": false
+      }
+    },
+    {
+      "id": "groups-duplicates-do-not-count",
+      "semantics": "groups/v1",
+      "why": "Four copies of one value are one distinct value.",
+      "columns": [
+        [
+          "region",
+          "string"
+        ],
+        [
+          "id",
+          "string"
+        ]
+      ],
+      "rows": [
+        [
+          "east",
+          "a"
+        ],
+        [
+          "east",
+          "a"
+        ],
+        [
+          "east",
+          "a"
+        ],
+        [
+          "east",
+          "a"
+        ],
+        [
+          "west",
+          "a"
+        ],
+        [
+          "west",
+          "b"
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "smallest_exactly_one",
+          "kind": "grouped_distinct",
+          "operator": "eq",
+          "threshold": "1",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_min_distinct"
+        },
+        {
+          "rule_id": "largest_exactly_two",
+          "kind": "grouped_distinct",
+          "operator": "eq",
+          "threshold": "2",
+          "column": "id",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_max_distinct"
+        }
+      ],
+      "metrics": {
+        "group_count:region": 2,
+        "group_min_distinct:id:region": 1,
+        "group_max_distinct:id:region": 2
+      },
+      "expected": {
+        "smallest_exactly_one": true,
+        "largest_exactly_two": true
+      }
+    },
+    {
+      "id": "ranges-integer-bounds",
+      "semantics": "ranges/v1",
+      "why": "Nulls are excluded from the count and from both bounds.",
+      "columns": [
+        [
+          "amount",
+          "long"
+        ]
+      ],
+      "rows": [
+        [
+          5
+        ],
+        [
+          -3
+        ],
+        [
+          9
+        ],
+        [
+          null
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "min_at_least_minus_three",
+          "kind": "value_range",
+          "operator": "ge",
+          "threshold": "-3",
+          "column": "amount",
+          "target": "column_min"
+        },
+        {
+          "rule_id": "min_above_minus_three",
+          "kind": "value_range",
+          "operator": "gt",
+          "threshold": "-3",
+          "column": "amount",
+          "target": "column_min"
+        },
+        {
+          "rule_id": "min_at_most_minus_four",
+          "kind": "value_range",
+          "operator": "le",
+          "threshold": "-4",
+          "column": "amount",
+          "target": "column_min"
+        },
+        {
+          "rule_id": "max_at_most_nine",
+          "kind": "value_range",
+          "operator": "le",
+          "threshold": "9",
+          "column": "amount",
+          "target": "column_max"
+        },
+        {
+          "rule_id": "max_under_ten",
+          "kind": "value_range",
+          "operator": "lt",
+          "threshold": "10",
+          "column": "amount",
+          "target": "column_max"
+        },
+        {
+          "rule_id": "max_exactly_nine",
+          "kind": "value_range",
+          "operator": "eq",
+          "threshold": "9",
+          "column": "amount",
+          "target": "column_max"
+        }
+      ],
+      "metrics": {
+        "column_count:amount": 3,
+        "column_min:amount": "-3",
+        "column_max:amount": "9"
+      },
+      "expected": {
+        "min_at_least_minus_three": true,
+        "min_above_minus_three": false,
+        "min_at_most_minus_four": false,
+        "max_at_most_nine": true,
+        "max_under_ten": true,
+        "max_exactly_nine": true
+      }
+    },
+    {
+      "id": "ranges-decimal-bounds-are-exact",
+      "semantics": "ranges/v1",
+      "why": "Two values that a double cannot tell apart: one tenth, and one tenth plus 1e-20. The bounds are exact.",
+      "columns": [
+        [
+          "amount",
+          "decimal(30,20)"
+        ]
+      ],
+      "rows": [
+        [
+          "0.10000000000000000001"
+        ],
+        [
+          "0.1"
+        ],
+        [
+          null
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "min_exactly_one_tenth",
+          "kind": "value_range",
+          "operator": "eq",
+          "threshold": "0.1",
+          "column": "amount",
+          "target": "column_min"
+        },
+        {
+          "rule_id": "max_exactly_one_tenth",
+          "kind": "value_range",
+          "operator": "eq",
+          "threshold": "0.1",
+          "column": "amount",
+          "target": "column_max"
+        },
+        {
+          "rule_id": "max_above_one_tenth",
+          "kind": "value_range",
+          "operator": "gt",
+          "threshold": "0.1",
+          "column": "amount",
+          "target": "column_max"
+        },
+        {
+          "rule_id": "max_at_most_one_tenth",
+          "kind": "value_range",
+          "operator": "le",
+          "threshold": "0.1",
+          "column": "amount",
+          "target": "column_max"
+        }
+      ],
+      "metrics": {
+        "column_count:amount": 2,
+        "column_min:amount": "0.1",
+        "column_max:amount": "0.10000000000000000001"
+      },
+      "expected": {
+        "min_exactly_one_tenth": true,
+        "max_exactly_one_tenth": false,
+        "max_above_one_tenth": true,
+        "max_at_most_one_tenth": false
+      }
+    },
+    {
+      "id": "ranges-double-bounds-render-through-shortest-decimal",
+      "semantics": "ranges/v1",
+      "why": "A floating-point bound is the shortest decimal that round-trips to it: 0.3, not 0.299999999999999988897769753748... So it is exactly three tenths, and it is below the next double above.",
+      "columns": [
+        [
+          "v",
+          "double"
+        ]
+      ],
+      "rows": [
+        [
+          0.1
+        ],
+        [
+          0.2
+        ],
+        [
+          0.3
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "max_exactly_zero_point_three",
+          "kind": "value_range",
+          "operator": "eq",
+          "threshold": "0.3",
+          "column": "v",
+          "target": "column_max"
+        },
+        {
+          "rule_id": "max_at_most_zero_point_three",
+          "kind": "value_range",
+          "operator": "le",
+          "threshold": "0.3",
+          "column": "v",
+          "target": "column_max"
+        },
+        {
+          "rule_id": "max_below_the_next_double",
+          "kind": "value_range",
+          "operator": "lt",
+          "threshold": "0.30000000000000004",
+          "column": "v",
+          "target": "column_max"
+        },
+        {
+          "rule_id": "min_exactly_zero_point_one",
+          "kind": "value_range",
+          "operator": "eq",
+          "threshold": "0.1",
+          "column": "v",
+          "target": "column_min"
+        },
+        {
+          "rule_id": "min_above_the_double_below",
+          "kind": "value_range",
+          "operator": "gt",
+          "threshold": "0.09999999999999999",
+          "column": "v",
+          "target": "column_min"
+        }
+      ],
+      "metrics": {
+        "column_count:v": 3,
+        "column_min:v": "0.1",
+        "column_max:v": "0.3"
+      },
+      "expected": {
+        "max_exactly_zero_point_three": true,
+        "max_at_most_zero_point_three": true,
+        "max_below_the_next_double": true,
+        "min_exactly_zero_point_one": true,
+        "min_above_the_double_below": true
+      }
+    },
+    {
+      "id": "ranges-double-excludes-nan-and-null",
+      "semantics": "ranges/v1",
+      "why": "NaN is not a value. Spark ranks NaN above every number, so an adapter must filter it explicitly or the maximum would be NaN.",
+      "columns": [
+        [
+          "v",
+          "double"
+        ]
+      ],
+      "rows": [
+        [
+          1.5
+        ],
+        [
+          "NaN"
+        ],
+        [
+          null
+        ],
+        [
+          -2.5
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "max_exactly_one_point_five",
+          "kind": "value_range",
+          "operator": "eq",
+          "threshold": "1.5",
+          "column": "v",
+          "target": "column_max"
+        },
+        {
+          "rule_id": "min_exactly_minus_two_point_five",
+          "kind": "value_range",
+          "operator": "eq",
+          "threshold": "-2.5",
+          "column": "v",
+          "target": "column_min"
+        },
+        {
+          "rule_id": "max_at_most_one",
+          "kind": "value_range",
+          "operator": "le",
+          "threshold": "1",
+          "column": "v",
+          "target": "column_max"
+        }
+      ],
+      "metrics": {
+        "column_count:v": 2,
+        "column_min:v": "-2.5",
+        "column_max:v": "1.5"
+      },
+      "expected": {
+        "max_exactly_one_point_five": true,
+        "min_exactly_minus_two_point_five": true,
+        "max_at_most_one": false
+      }
+    },
+    {
+      "id": "ranges-no-values-passes-vacuously",
+      "semantics": "ranges/v1",
+      "why": "With no values there is no bound to violate: every range rule passes vacuously, and the adapter reports zero for the missing bounds.",
+      "columns": [
+        [
+          "v",
+          "double"
+        ],
+        [
+          "d",
+          "decimal(10,2)"
+        ]
+      ],
+      "rows": [
+        [
+          "NaN",
+          null
+        ],
+        [
+          null,
+          null
+        ],
+        [
+          "NaN",
+          null
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "v_min_at_least_a_thousand",
+          "kind": "value_range",
+          "operator": "ge",
+          "threshold": "1000",
+          "column": "v",
+          "target": "column_min"
+        },
+        {
+          "rule_id": "v_max_below_minus_five",
+          "kind": "value_range",
+          "operator": "lt",
+          "threshold": "-5",
+          "column": "v",
+          "target": "column_max"
+        },
+        {
+          "rule_id": "d_min_at_least_zero",
+          "kind": "value_range",
+          "operator": "ge",
+          "threshold": "0",
+          "column": "d",
+          "target": "column_min"
+        }
+      ],
+      "metrics": {
+        "column_count:v": 0,
+        "column_min:v": "0",
+        "column_max:v": "0",
+        "column_count:d": 0,
+        "column_min:d": "0"
+      },
+      "expected": {
+        "v_min_at_least_a_thousand": true,
+        "v_max_below_minus_five": true,
+        "d_min_at_least_zero": true
+      }
+    },
+    {
+      "id": "ranges-infinite-bound-fails-closed",
+      "semantics": "ranges/v1",
+      "why": "An infinite value would make a bound infinite. There is no exact fraction for it, so the adapter refuses instead of guessing.",
+      "columns": [
+        [
+          "v",
+          "double"
+        ]
+      ],
+      "rows": [
+        [
+          1.0
+        ],
+        [
+          "Infinity"
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "max_at_most_two",
+          "kind": "value_range",
+          "operator": "le",
+          "threshold": "2",
+          "column": "v",
+          "target": "column_max"
+        }
+      ],
+      "expect_error": "infinite bound",
+      "expected": {}
+    },
+    {
+      "id": "ranges-text-bounds-fail-closed",
+      "semantics": "ranges/v1",
+      "why": "ranges/v1 bounds are numeric. A text column has no exact fraction, so the adapter refuses rather than comparing strings.",
+      "columns": [
+        [
+          "s",
+          "string"
+        ]
+      ],
+      "rows": [
+        [
+          "apple"
+        ],
+        [
+          "banana"
+        ],
+        [
+          null
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "min_at_least_zero",
+          "kind": "value_range",
+          "operator": "ge",
+          "threshold": "0",
+          "column": "s",
+          "target": "column_min"
+        }
+      ],
+      "expect_error": "unsupported type",
+      "expected": {}
+    }
+  ]
+}

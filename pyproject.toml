@@ -72,10 +72,12 @@ flake8 = ">=6,<8"               # Linting only
 bandit = "^1.7.5"               # Security scanning only
 pip-audit = "^2.10.1"             # Audit lane runs on 3.13
 diff-cover = "10.6.0"
+hypothesis = ">=6.100,<7"      # Property-based tests for the pure kernel
 
 [tool.poetry.scripts]
 dq-kernel = "dq.cli:main"
 dq-validate = "dq.validate:main"
+dq-engines = "dq.engines:main"
 
 [build-system]
 requires = ["poetry-core"]

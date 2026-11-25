@@ -23,7 +23,6 @@ from dq.engine.registry import payload_key_for, payload_type_for, renamed_target
 from dq.exceptions import ConfigurationError
 from dq.schema import rule_pack_schema_errors
 from dq.utils.config_utils import config_format, load_config
-from dq.utils.config_utils import config_format, load_config
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"

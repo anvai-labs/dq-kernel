@@ -6,11 +6,9 @@ from typing import Any, Optional, List, Dict
 
 from pyhocon import ConfigTree
 
-from dq.engine import checkspec
 from dq.engine.dq_engine import DQEngine
 from dq.engine.deequ.deequ_check import DeequCheck
 from dq.engine.deequ.verification import (
-    PYDEEQU_CHECK_STATUS_SUCCESS,
     metrics_from_check_results,
     run_verification,
 )
@@ -61,7 +59,9 @@ class DeequEngine(DQEngine):
         # artifact schema (metrics/verifications vendor columns) is
         # downstream-consumed and is deliberately not reshaped here.
         self._last_verification_artifacts = (successMetrics, checkVerifications)
-        return metrics_from_check_results(checkVerifications.collect())
+        return metrics_from_check_results(
+            checkVerifications.collect(), prepared.labels_by_check()
+        )
 
     def _run_verification(self, dataframe, prepared: DeequCheck):
         """Build and run the Deequ ``VerificationSuite`` for configured checks.

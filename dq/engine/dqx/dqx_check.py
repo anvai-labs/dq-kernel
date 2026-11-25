@@ -69,7 +69,6 @@ class DqxCheck:
                 '"is_not_null", arguments = {column = "id"}}}]'
             )
         checks: List[Dict[str, Any]] = []
-        explicit_names = []
         for index, entry in enumerate(self._checks_config):
             check_dict = config_utils.config_tree_to_python(entry)
             if not isinstance(check_dict, dict) or not isinstance(
@@ -91,11 +90,10 @@ class DqxCheck:
             )
             check_dict[_CRITICALITY_KEY] = criticality
             name = check_dict.get(_NAME_KEY, None)
-            if name:
-                explicit_names.append(name)
-            else:
-                name = checkspec.derive_name(function, index)
-                check_dict[_NAME_KEY] = name
+            if not name:
+                check_dict[_NAME_KEY] = checkspec.derive_name(function, index)
             checks.append(check_dict)
-        checkspec.require_unique_names(explicit_names)
+        # Evidence is attributed by label: an explicit name that equals a
+        # derived one would make two checks indistinguishable.
+        checkspec.require_unique_labels([check[_NAME_KEY] for check in checks])
         return checks

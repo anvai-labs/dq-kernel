@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: Accepted +
+Status: In Progress — all gates met; awaiting CI on the carrying pull request +
 Date: 2026-11-24 +
 Driven by: ADR-012, ADR-002 +
 Milestone: M1 +
@@ -71,11 +71,71 @@ corpus.
 
 == Progress
 
-* [ ] G1 — not started
-* [ ] G2 — not started
-* [ ] G3 — not started
-* [ ] G4 — not started
-* [ ] G5 — not started
-* [ ] G6 — not started
+* [x] G1 — evidence: `dq/tests/test_conformance_builtin.py::test_every_built_in_engine_conforms`.
+  Verified with every vendor library installed (pyspark 3.5.9, pydeequ 1.7.0,
+  Great Expectations 1.25.0, DQX 0.17.2): 7 of 7 engines pass, none skipped
+* [x] G2 — evidence: `dq/tests/test_conformance_unit.py::test_a_wrong_result_shape_is_rejected`,
+  `::test_a_missing_criticality_is_rejected_when_the_engine_claims_one`,
+  `::test_an_engine_that_ignores_its_declared_persistence_capability_is_rejected`,
+  `::test_an_engine_that_ignores_the_injected_run_key_is_rejected`
+* [x] G3 — evidence: `dq/tests/test_corpus_spark.py::test_spark_decides_every_case_as_the_corpus_documents`,
+  `::test_deequ_agrees_with_the_corpus_where_the_semantics_coincide`
+* [x] G4 — evidence: `dq/tests/test_scaffold.py::test_the_generated_engine_is_green_as_generated`
+  (formatter, the engine's own unit tests, and the registry, error-catalog
+  and example-validation guards, in a scratch copy of the repository)
+* [x] G5 — evidence: `dq/tests/test_engines_cli.py::test_json_output_is_stable_and_complete`,
+  `::test_third_party_engines_registered_by_entry_point_are_listed`
+* [x] G6 — evidence: `dq/tests/test_property_kernel.py` (20 property tests, in the unit lane)
+
+[NOTE]
+====
+Amended 2026-11-24, during implementation.
+
+* The suite, run against the built-in engines for the first time, found two
+  evidence defects that no existing test covered, and fixing them became part
+  of this spec because G1 cannot be true without it. Four engines (Deequ,
+  Great Expectations, businessrules, schema validation) reported several
+  checks under one name, so evidence could not be attributed to a rule. And
+  wherever several constraints shared one Deequ Check, a passing constraint
+  was reported as failed as soon as a sibling failed. The labelling rule now
+  lives in the check seam (`labels_for_checks`, `require_unique_labels`), and
+  a constraint's verdict is its own.
+* "The registry drift guard" in G4 is read as all the guards a new engine
+  must satisfy: the drift guard, the registry snapshot, the error catalog,
+  and example validation. The scaffold updates each.
+* A capability manifest is now inherited from the parent class. Merging over
+  the base defaults instead silently reset whatever a parent had declared,
+  which the suite's own deliberately broken engines exposed.
+* The corpus carries its expectations in two layers -- the metrics an adapter
+  must compute, and the decisions that follow from them through the kernel.
+  The pure check caught a wrong expectation in the first draft (a size
+  rule) that no adapter had yet been run against, and a probe corrected a
+  claim about Deequ on empty input that had been written from memory.
+* One configuration is pinned as a known upstream defect rather than made to
+  pass: schema validation in multi-check mode with both not-null and unique
+  constraints crashes inside pydeequ, with the old Check names as well as the
+  new ones.
+* The scaffold test measured itself into the parent's coverage report.
+  pytest-cov arms every child process, so the pytest runs inside the scratch
+  copies were merged into the report as two more `dq` trees -- 148 files that
+  are not in this repository, all untested. With pytest-cov 6 that took line
+  coverage from 92.8% to 37%; with the locked pytest-cov 7 it did not happen
+  at all, so CI would have stayed green while a developer's local run failed
+  the floor. The children are no longer armed (`test_scaffold.py`), and the
+  coverage gate now refuses a report that holds a path outside the checkout
+  instead of averaging it in (`dq/tests/test_coverage_gate.py`).
+* The corpus validator accepted cells no engine can store as written, and
+  Spark does not refuse them either: a decimal `NaN` is stored as null, and
+  `1.234` in a `decimal(10,2)` column as `1.23`. A case carrying such a cell
+  would pass validation and run on data other than the one it documents. A
+  cell must now fit its column exactly (finite, within scale and precision,
+  within 64 bits for a long), and a cell the validator cannot judge is
+  reported rather than raised on.
+* Three ways an engine can fail were reported by the conformance suite but
+  had no test: failing on its second run, failing when handed a repository,
+  and failing on the keyed run. They have one each
+  (`test_conformance_unit.py`), as do the Deequ matcher's refusals
+  (`test_deequ_attribution_unit.py`).
+====
 
 Links: ADR-012; ADR-002; SPEC-015; SPEC-016; SPEC-017; SPEC-018.

@@ -303,7 +303,8 @@ def test_engine_persists_both_artifacts_under_one_key(monkeypatch):
     engine.apply(_FakeFrame(), repository=FakeSink())
     assert [kind for kind, _, _ in saved] == ["metrics", "verifications"]
     assert len({key for _, key, _ in saved}) == 1
-    assert saved[0][2].rows == [("expect_column_values_to_not_be_null", True)]
+    # The artifact carries the check's label: its type and column.
+    assert saved[0][2].rows == [("expect_column_values_to_not_be_null_id", True)]
 
 
 def test_engine_caches_batch_definition_across_applies(monkeypatch):
@@ -399,11 +400,12 @@ def test_duplicate_explicit_names_fail_closed(monkeypatch):
             {"name": "dup", "type": "expect_column_values_to_not_be_null"},
         ],
     )
-    with pytest.raises(ValueError, match="Duplicate check name"):
+    with pytest.raises(ValueError, match="Duplicate check label"):
         engine.apply(_FakeFrame())
 
 
-def test_derive_names_flag_labels_by_column(monkeypatch):
+def test_a_column_expectation_is_labelled_by_its_type_and_column(monkeypatch):
+    """The default label: a bare type would collide across columns."""
     validation = _validation(
         [("expect_column_values_to_not_be_null", True, {"unexpected_count": 0})]
     )
@@ -412,7 +414,6 @@ def test_derive_names_flag_labels_by_column(monkeypatch):
         fake,
         monkeypatch,
         [{"type": "expect_column_values_to_not_be_null", "column": "id"}],
-        derive_names=True,
     )
     metrics = engine.apply(_FakeFrame())
     assert metrics[0]["check"] == "expect_column_values_to_not_be_null_id"

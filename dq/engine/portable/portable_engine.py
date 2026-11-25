@@ -19,10 +19,9 @@ the digest is a required configuration key and is never auto-derived.
 """
 
 import logging
-from typing import Any, List, Dict, Optional
+from typing import Any, Dict, List
 
-from pyhocon import ConfigTree
-
+from dq.engine.checkspec import build_result, normalize_criticality
 from dq.engine.dq_engine import DQEngine
 from dq.exceptions import ConfigurationError
 
@@ -74,14 +73,31 @@ class PortableEngine(DQEngine):
         return translate_plan(checks, DatasetRef(dataset, sha))
 
     def _execute(self, dataframe, prepared) -> List[Dict[str, Any]]:
-        """Execute the plan on the Spark adapter and flatten to legacy dicts."""
+        """Execute the plan on the Spark adapter and flatten to legacy dicts.
+
+        The kernel reports its own ``severity`` on every outcome. It is
+        normalized to the canonical ``criticality`` here, because the gate
+        policy reads that key: without it a Warning-level rule would block
+        under ``fail_on = "error"``.
+        """
         from dq.spark_adapter import execute_plan
 
         outcomes = execute_plan(prepared, {self._dataset_name: dataframe})
-        legacy = [outcome.to_legacy() for outcome in outcomes]
+        results = []
+        for outcome in outcomes:
+            legacy = outcome.to_legacy()
+            details = legacy["details"]
+            results.append(
+                build_result(
+                    legacy["check"],
+                    legacy["success"],
+                    {
+                        **details,
+                        "criticality": normalize_criticality(details.get("severity")),
+                    },
+                )
+            )
         logger.info(
-            "portable plan %s produced %d outcomes",
-            getattr(prepared, "plan_sha256", "unknown"),
-            len(legacy),
+            "portable plan %s produced %d outcomes", prepared.fingerprint, len(results)
         )
-        return legacy
+        return results

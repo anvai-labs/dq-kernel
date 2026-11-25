@@ -3,7 +3,6 @@
 
 """End-to-end rule-pack formats: HOCON, YAML and JSON run identically (SPEC-010)."""
 
-import json
 from pathlib import Path
 
 import pytest
@@ -38,16 +37,25 @@ def run(reference, frame):
 def test_each_format_runs_through_the_framework(reference, frame):
     results = run(str(reference), frame)
     # (1, "ann", 30), (2, "bob", 45), (2, None, -1): the id is never null,
-    # it repeats, one name is null, and one age is negative. The deequ
-    # engine labels each result with its description, which carries the
-    # configured constraint name.
-    configured = [json.loads(result["check"])["constraint"] for result in results]
-    assert list(zip(configured, (r["success"] for r in results))) == [
-        ("isComplete", True),
-        ("isUnique", False),
-        ("isComplete", False),
-        ("isNonNegative", False),
+    # it repeats, one name is null, and one age is negative. A result is
+    # labelled with the constraint name the rule pack configures.
+    assert [(result["check"], result["success"]) for result in results] == [
+        ("id_complete", True),
+        ("id_unique", False),
+        ("name_complete", False),
+        ("age_non_negative", False),
     ]
+    # The rule pack's constraint kind is what ran, on the column it names.
+    ran = [result["details"]["constraint"] for result in results]
+    assert [constraint.split("(", 1)[0] for constraint in ran] == [
+        "CompletenessConstraint",
+        "UniquenessConstraint",
+        "CompletenessConstraint",
+        "ComplianceConstraint",
+    ]
+    assert ran[0].startswith("CompletenessConstraint(Completeness(id")
+    assert ran[1].startswith("UniquenessConstraint(Uniqueness(List(id)")
+    assert ran[2].startswith("CompletenessConstraint(Completeness(name")
     # Severity is reported on every result, from the rule pack's own spelling.
     assert [result["details"]["criticality"] for result in results] == [
         "error",

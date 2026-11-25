@@ -1,0 +1,193 @@
+= Writing an engine
+:toc:
+:sectlinks.
+
+Status: current as of 0.3.0. Decision record: ADR-012. Checks that hold this page to the code: `dq/tests/test_engine_contract.py`, `dq/tests/test_conformance_builtin.py`.
+
+An engine validates a frame and reports one result per check. The framework owns everything around that -- loading the engine, the run lifecycle, persistence, the gate policy, evidence -- so an engine is two methods and one declaration. This page is the contract; the last section shows how to prove an engine meets it.
+
+== Start from the scaffold
+
+[source,shell]
+----
+python scripts/new_engine.py soda
+----
+
+This creates the engine on the contract's hooks with a valid capability manifest, a check builder that labels checks, unit tests that run without Spark, and an example rule pack -- and updates the registry, its snapshot test and the error catalog, so the tree is green before any line is changed. Two markers are left as `TODO`: the vendor call, and the optional dependency.
+
+== The contract
+
+=== Two hooks, no `apply`
+
+`DQEngine.apply` is a template method. Do not override it; implement these:
+
+[cols="2,5",options="header"]
+|===
+| Hook | What it is for
+
+| `_prepare(self, dataframe)`
+| Runs once per engine, before the first execution. Build whatever is expensive or needs the vendor library: import it, construct the client, compile the checks. Return it; `_execute` receives it.
+
+| `_execute(self, dataframe, prepared)`
+| Runs for every frame. Evaluate the checks and return a list of results.
+|===
+
+The template, in order: refuse a repository if the engine declares it cannot persist; log the shared preamble; `_prepare`; `_execute`; persist. An engine that overrides `apply` takes the lifecycle into its own hands and will not pass the conformance suite.
+
+Persistence needs no code in the common case: the framework turns the results into the standard artifact pair (a metrics frame and a verifications frame) and writes both under the run key. An engine that has its own artifact shapes -- raw frames from the vendor library -- overrides `_persist_outcomes` to write those instead; artifact schemas are consumed downstream, so the framework never reshapes them.
+
+=== Results
+
+One dictionary per check, built with `dq.engine.checkspec.build_result`:
+
+[source,python]
+----
+build_result("orders_id_complete", False, {"failed_rows": 12}, criticality="error")
+----
+
+* `check` is the check's label (next section).
+* `success` is a boolean.
+* `details` is a JSON-native mapping. It crosses a strict boundary: no tuples, dates or NaN; use `dq.utils.sanitization.to_strict_json` on anything a vendor library returned. Keep it bounded -- a few kilobytes, never rows of data.
+* `criticality` is `"error"` or `"warn"`. Normalize whatever the engine reports with `checkspec.normalize_criticality`.
+
+=== Every check has its own name
+
+Evidence is attributed by a result's `check`. Two results with one name cannot be told apart -- in a report, in a sink, or in a gate event that lists failing checks -- so labels are unique within a rule. `checkspec.labels_for_checks` applies one rule for every engine:
+
+. the check's configured name, when it has one;
+. else its kind and the columns it targets: `isComplete_id`;
+. else its kind alone, or its kind and position when the rule has an earlier check of that kind.
+
+A rule whose two checks would report the same label is refused (`require_unique_labels`). An engine that reports a severity must put a canonical `criticality` on every result; the gate policy reads it.
+
+=== Declare what the engine can do
+
+`CAPABILITIES` is a manifest, checked when the engine class is defined and again when it is loaded:
+
+[cols="2,5",options="header"]
+|===
+| Key | Meaning
+
+| `criticality`
+| `native` (the engine has per-rule severity), `derived` (the kernel maps an engine field onto it), or `absent`.
+
+| `row_filter`
+| The engine can scope a check to rows matching a predicate.
+
+| `failed_rows`
+| Results can carry how many rows failed.
+
+| `persistence`
+| The engine can hand metric and verification artifacts to a repository. Declare `False` while it cannot; the framework then refuses a configured repository before any work, instead of dropping evidence silently.
+|===
+
+A subclass states only what differs from its parent. An invalid manifest -- an unknown key, a misspelled level, a non-boolean flag -- fails at the definition, not at first use.
+
+=== Register it
+
+Built-in engines are declared once, in `dq/engine/registry.py`:
+
+[source,python]
+----
+EngineSpec(
+    "soda",
+    "dq.engine.soda.soda_engine",
+    "SodaEngine",
+    "checks",
+    extra="soda",
+    vendor_imports=("soda",),
+),
+----
+
+That single entry is what `dq-validate` reads for the required payload key and what the loader reads for the import target. A contract test refuses an engine directory with no registry entry, so the two cannot drift.
+
+=== An optional dependency stays optional
+
+Never import a vendor library at the top of an engine module: the engine ABC, the loader and the validator import with no extras installed. Import in `_prepare`:
+
+[source,python]
+----
+from dq.utils.imports import require_extra
+
+gx = require_extra("great_expectations", "great_expectations", "greatexpectations", pin="great_expectations>=1.24,<2")
+----
+
+The result names the extra, the package and the version range when the library is missing. Check first that the extra can share an environment with the others: the lock resolves one version per package for the union of all extras.
+
+== Prove it
+
+The conformance suite is the contract as a test. Run it in the engine's own test suite:
+
+[source,python]
+----
+from dq.sdk.conformance import assert_engine_conforms
+from dq.sinks import InMemorySink
+
+
+def test_my_engine_conforms(spark):
+    frame = spark.createDataFrame([(1, "ann"), (2, None)], ["id long, name string"])
+    assert_engine_conforms(
+        lambda dqts=None: SodaEngine(make_config(), dqts=dqts), frame, InMemorySink
+    )
+----
+
+It checks that the manifest is valid, the template is used, results cross the outcome boundary, labels are unique, severity is canonical, a second run reports the same outcomes, persistence matches the declaration, and artifacts land under the run key the framework injects. A violation names the check that found it. The suite imports no engine and no vendor library, so it runs in any environment.
+
+Every built-in engine passes it (`dq/tests/test_conformance_builtin.py`). `dq-engines` lists what is installed and what each engine declares.
+
+== A complete engine
+
+A small engine with no vendor library, showing every part of the contract:
+
+[source,python]
+----
+from dq.engine.checkspec import build_result, labels_for_checks, require_unique_labels
+from dq.engine.dq_engine import DQEngine
+
+
+class NonEmptyEngine(DQEngine):
+    """Checks that named columns hold no empty strings."""
+
+    CAPABILITIES = {
+        "criticality": "derived",  # the rule's own `level` is the severity
+        "failed_rows": True,
+    }
+
+    def _prepare(self, dataframe):
+        checks = self._config.get("checks", None) or []
+        labels = labels_for_checks(checks, ("name",), "column", ())
+        require_unique_labels(labels)
+        return list(zip(labels, checks))
+
+    def _execute(self, dataframe, prepared):
+        from pyspark.sql import functions as F
+
+        results = []
+        for label, check in prepared:
+            empty = dataframe.where(F.col(check["column"]) == "").count()
+            level = check.get("level", "Error")
+            results.append(
+                build_result(
+                    label, empty == 0, {"failed_rows": empty}, criticality=level
+                )
+            )
+        return results
+----
+
+`criticality=level` accepts the `Error` and `Warning` an author writes, and a rule with no `level` counts as `error`. This example is executed as a test (`dq/tests/test_writing_an_engine_example.py`): with an `EngineSpec` entry it loads, validates, runs, and passes the conformance suite like any built-in.
+
+== Engines that are not DataFrame validations
+
+Some quality signals come from a platform that owns the execution: a pipeline's own expectations, a scheduler's job history. Those are not engines. They are standalone components that normalize their results into the same outcome dictionaries, so the evidence joins one stream (ADR-011). `dq/engine/databricks/pipeline_expectations.py` is the example to follow.
+
+== Distributing an engine outside this repository
+
+Register an entry point in the `dq_kernel.engines` group; the loader consults it after the built-in registry:
+
+[source,toml]
+----
+[project.entry-points."dq_kernel.engines"]
+soda = "soda_dq.kernel:SodaEngine"
+----
+
+The class must subclass `DQEngine`. A built-in and an entry point that share a name resolve to the built-in. `dq.validate` does not check an entry-point engine's payload: the engine validates its own configuration when it runs.

@@ -5,7 +5,6 @@ from pyspark.sql import SparkSession
 from pydeequ.checks import Check, CheckLevel, ConstrainableDataTypes
 from pyhocon import ConfigTree
 from pydeequ.verification import VerificationSuite
-import json
 
 from dq.engine import checkspec
 from dq.engine.deequ.expression import parse_assertion
@@ -20,13 +19,37 @@ class DeequCheck:
     Per-rule severity crosses the shared check seam: ``level`` accepts the
     Deequ spellings (``Error``/``Warning``) and the canonical kernel
     spellings (``error``/``warn``) alike, normalized fail-closed.
+
+    Each check's label is its configured name -- ``constraint_name``,
+    ``alias`` or ``description`` -- or else its constraint and columns, as
+    :func:`dq.engine.checkspec.labels_for_checks` decides. Two checks that
+    would report the same label are refused: their evidence could not be
+    told apart.
     """
 
     _check_level_map = {"error": CheckLevel.Error, "warn": CheckLevel.Warning}
+    _name_keys = ("constraint_name", "alias", "description")
+    single_check_description = "Deequ constraints"
 
     def __init__(self, checks_config: ConfigTree, single_check_mode=False):
         self._checks_config = checks_config
         self._single_check_mode = single_check_mode
+        self._labels = {}
+        self._order = []
+
+    def labels(self) -> list:
+        """Return every check's label in configuration order, repeats included."""
+        return list(self._order)
+
+    def labels_by_check(self) -> dict:
+        """Return ``{Check description: [label, ...]}`` in constraint order.
+
+        Result rows are matched to these by their Check's description and
+        their position among that Check's rows.
+        """
+        return {
+            description: list(labels) for description, labels in self._labels.items()
+        }
 
     def apply_checks(
         self, verification_run_builder: VerificationSuite, spark_session: SparkSession
@@ -35,34 +58,46 @@ class DeequCheck:
             check = Check(
                 spark_session=spark_session,
                 level=CheckLevel.Error,
-                description="Deeque Single Check mode",
+                description=self.single_check_description,
             )
+            self._labels = {self.single_check_description: []}
         else:
             check_list = []
+            self._labels = {}
+        self._order = []
 
-        for check_config in self._checks_config:
+        # One labelling rule for the whole rule: a check with no columns is
+        # named by its constraint alone unless an earlier check shares it.
+        labels = checkspec.labels_for_checks(
+            self._checks_config, self._name_keys, "constraint", ("column", "columns")
+        )
+        for index, check_config in enumerate(self._checks_config):
             columns = check_config.get("columns", None)
             column = check_config.get("column", None)
             constraint = check_config.get("constraint", None)
             assertion = check_config.get("assertion", None)
             hint = check_config.get("hint", None)
             kwargs = check_config.get("kwargs", None)
-            alias = check_config.get("alias", None)
-            if not (self._single_check_mode):
+            label = labels[index]
+            if self._single_check_mode:
+                # Constraints share a Check here; the single Check's level
+                # is Error and each constraint's own severity is reported
+                # from its result row.
+                self._labels[self.single_check_description].append(label)
+                self._order.append(label)
+            else:
                 criticality = checkspec.normalize_criticality(
                     check_config.get("level", None)
                 )
                 check = Check(
                     spark_session=spark_session,
                     level=self._check_level_map[criticality],
-                    description=json.dumps(
-                        {
-                            "alias": check_config.get("alias", "*Unknown"),
-                            "description": check_config.get("description", "*Unknown"),
-                            "constraint": constraint,
-                        }
-                    ),
+                    description=label,
                 )
+                # Kept in a list keyed by description: two checks may share
+                # a label until the uniqueness check below refuses them.
+                self._labels.setdefault(label, []).append(label)
+                self._order.append(label)
             # Apply constraint dynamically
             # Refer following githb link for complete list of supported python-deequ checks.
             # https://github.com/awslabs/python-deequ/blob/master/docs/checks.md
@@ -127,6 +162,11 @@ class DeequCheck:
                     check_list.append(constrainedCheck)
             else:
                 raise AttributeError(f"Deequ method '{constraint}' not found.")
+
+        # Evidence is attributed by label, so two checks may not share one.
+        checkspec.require_unique_labels(self.labels())
+        if not self._order:
+            raise ValueError("A deequ rule needs at least one check")
 
         # Process All daisy chained constraints via single or multi check approach in verification run builder
         if self._single_check_mode:

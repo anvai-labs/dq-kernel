@@ -64,7 +64,6 @@ class GreatexpectationsEngine(DQEngine):
             rule_name = self._config.get(keys.DQ_RULE_NAME, "gx-rule")
             self._gx_check = GreatexpectationsCheck(
                 self._config.get("expectations", []),
-                derive_names=self._config.get("derive_names", False),
             )
             self._gx_suite = self._gx_check.build_suite(gx, rule_name)
         return None

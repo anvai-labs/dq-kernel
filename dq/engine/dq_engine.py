@@ -6,6 +6,7 @@ import logging
 import time
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from pyhocon import ConfigTree
 
@@ -14,6 +15,48 @@ from dq.utils import keys
 
 if TYPE_CHECKING:  # light-core: the engine contract imports with no extras installed
     from pyspark.sql import DataFrame
+
+#: How an engine can report per-rule severity.
+CRITICALITY_LEVELS = ("native", "derived", "absent")
+
+#: Boolean capability flags.
+FLAG_CAPABILITIES = ("row_filter", "failed_rows", "persistence")
+
+#: Every key a capability manifest may carry.
+CAPABILITY_KEYS = ("criticality",) + FLAG_CAPABILITIES
+
+
+def capability_problems(capabilities) -> list:
+    """Return what is wrong with a capability manifest (empty when valid).
+
+    One definition of a valid manifest, shared by the loader (which refuses
+    an engine whose manifest is invalid) and the conformance suite.
+
+    Args:
+        capabilities: The engine's ``CAPABILITIES`` attribute.
+
+    Returns:
+        Messages naming the offending key and value.
+    """
+    if not isinstance(capabilities, Mapping):
+        return [
+            "CAPABILITIES must be a mapping with the keys "
+            f"{CAPABILITY_KEYS}, got {type(capabilities).__name__}"
+        ]
+    problems = []
+    for key in sorted(capabilities):
+        if key not in CAPABILITY_KEYS:
+            problems.append(f"unknown capability {key!r}")
+    criticality = capabilities.get("criticality", None)
+    if criticality not in CRITICALITY_LEVELS:
+        problems.append(
+            f"criticality must be one of {CRITICALITY_LEVELS}, got {criticality!r}"
+        )
+    for key in FLAG_CAPABILITIES:
+        value = capabilities.get(key, None)
+        if type(value) is not bool:
+            problems.append(f"{key} must be a boolean, got {value!r}")
+    return problems
 
 
 class DQEngine(ABC):
@@ -31,15 +74,18 @@ class DQEngine(ABC):
     subclass it and receive their own frame type).
     """
 
-    #: Capability manifest (v2): what this engine natively supports. The
+    #: Capability manifest: what this engine natively supports. The
     #: template and consumers branch on capabilities, never on engine
-    #: names, so new engines plug in by declaring what they can do.
-    #: * ``criticality`` -- ``native`` (engine has per-rule severity that
-    #:   affects behavior/results), ``derived`` (kernel normalizes an
-    #:   engine-native axis onto it), or ``absent`` (no per-rule severity).
+    #: names, so new engines plug in by declaring what they can do. A
+    #: manifest is checked by :func:`capability_problems` when the engine
+    #: is loaded; see the "Writing an engine" guide.
+    #: * ``criticality`` -- ``native`` (the engine has per-rule severity),
+    #:   ``derived`` (the kernel derives it), or ``absent``. An engine that
+    #:   is not ``absent`` reports a canonical ``details.criticality`` on
+    #:   every result.
     #: * ``row_filter`` / ``failed_rows`` -- boolean support flags.
-    #: * ``persistence`` -- whether the engine can persist evidence to a
-    #:   repository (``False`` engines reject a configured repository).
+    #: * ``persistence`` -- whether the engine persists evidence to a
+    #:   repository (``False`` engines refuse one).
     CAPABILITIES = {
         "criticality": "absent",
         "row_filter": False,
@@ -49,6 +95,22 @@ class DQEngine(ABC):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
+        # A subclass states only what differs; the rest is inherited from
+        # its parent, so a capability added here later reaches every engine.
+        # Merging over the parent (not the defaults) keeps a second-level
+        # subclass from silently resetting what its parent declared.
+        declared = cls.__dict__.get("CAPABILITIES", {})
+        if isinstance(declared, Mapping):
+            parent = cls.__mro__[1].CAPABILITIES
+            cls.CAPABILITIES = {**parent, **declared}
+        # Fail at the definition, not at first use: a manifest nobody
+        # validated would make every capability-based decision a guess.
+        problems = capability_problems(cls.CAPABILITIES)
+        if problems:
+            raise ConfigurationError(
+                f"{cls.__name__} declares an invalid CAPABILITIES manifest: "
+                + "; ".join(problems)
+            )
         if "apply" in cls.__dict__:
             warnings.warn(
                 f"{cls.__name__} overrides DQEngine.apply; engines implement "

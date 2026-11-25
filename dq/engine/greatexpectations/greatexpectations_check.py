@@ -46,19 +46,21 @@ class GreatexpectationsCheck:
     expectations), and an optional nested ``kwargs`` subtree for the rest
     of the constructor arguments.
 
-    The common axes cross the shared check seam (``dq.engine.checkspec``):
-    an optional ``name`` labels the metric result (GX has no rule identity
-    of its own; without one, the expectation ``type`` labels the result as
-    before, or ``<type>_<column>`` under the opt-in ``derive_names`` flag),
-    and an optional ``criticality`` (Deequ-style spellings accepted,
-    defaulting to ``error``) surfaces in every result's ``details``. GX has
-    no native severity, so criticality is reporting metadata here, not
-    execution routing. Explicitly configured names must be unique.
+    The common axes cross the shared check seam (``dq.engine.checkspec``).
+    An optional ``name`` labels the metric result; without one the label
+    is the expectation ``type`` and its column (``<type>_<column>``), or
+    the ``type`` alone for a table-level expectation. GX has no rule
+    identity of its own, and a bare type gives two expectations of one
+    type on different columns the same name. An optional ``criticality``
+    (Deequ-style spellings accepted, defaulting to ``error``) surfaces in
+    every result's ``details``. GX has no native severity, so criticality
+    is reporting metadata here, not execution routing. Labels must be
+    unique: a rule whose two expectations would report the same name is
+    refused.
     """
 
-    def __init__(self, config: ConfigTree, derive_names: bool = False):
+    def __init__(self, config: ConfigTree):
         self._expectations_config = config
-        self._derive_names = derive_names
         self._labels = []
 
     def build_suite(self, gx, name: str):
@@ -73,11 +75,12 @@ class GreatexpectationsCheck:
 
         Raises:
             ValueError: On an unknown type, missing ``type``, invalid
-                criticality, or duplicate explicit names.
+                criticality, or two expectations that would report the
+                same label.
         """
         suite = gx.ExpectationSuite(name=name)
+        labels = self.rule_labels()
         self._labels = []
-        explicit_names = []
         for index, entry in enumerate(self._expectations_config):
             expectation_type = entry.get(_TYPE_KEY, None)
             if not expectation_type:
@@ -94,17 +97,19 @@ class GreatexpectationsCheck:
             )
             klass = expectation_class(gx, expectation_type)
             suite.add_expectation(klass(**kwargs))
-            explicit = entry.get(_NAME_KEY, None)
-            if explicit:
-                explicit_names.append(explicit)
             criticality = checkspec.normalize_criticality(
                 entry.get(_CRITICALITY_KEY, None)
             )
-            self._labels.append(
-                (self._label(entry, index, expectation_type), criticality)
-            )
-        checkspec.require_unique_names(explicit_names)
+            self._labels.append((labels[index], criticality))
+        # Evidence is attributed by label: two expectations may not share one.
+        checkspec.require_unique_labels(label for label, _ in self._labels)
         return suite
+
+    def rule_labels(self) -> list:
+        """Return the label of every expectation, in configuration order."""
+        return checkspec.labels_for_checks(
+            self._expectations_config, (_NAME_KEY,), _TYPE_KEY, ("column", "columns")
+        )
 
     def labels(self):
         """Return ``(result label, criticality)`` pairs in suite order.
@@ -116,14 +121,3 @@ class GreatexpectationsCheck:
             List of ``(label, criticality)`` tuples, one per entry.
         """
         return list(self._labels)
-
-    def _label(self, entry, index: int, expectation_type: str) -> str:
-        """Resolve the result label for one expectation entry."""
-        explicit = entry.get(_NAME_KEY, None)
-        if explicit:
-            return explicit
-        if self._derive_names:
-            column = entry.get("column", None)
-            if column:
-                return f"{expectation_type}_{column}"
-        return expectation_type

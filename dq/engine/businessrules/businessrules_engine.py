@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import re
 from typing import Optional, List, Dict, Any
 
+from dq.engine import checkspec
 from dq.engine.checkspec import build_result
 from dq.engine.dq_engine import DQEngine
 from dq.engine.businessrules.strategies import (
@@ -14,6 +16,19 @@ from dq.engine.businessrules.strategies import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _outcome_label(constraint: str, instance) -> str:
+    """Name one outcome of a constraint that reports one row per instance.
+
+    An instance that already names its constraint (``NoNegativeValues for
+    amount``) is the label. A bare one (a column) becomes
+    ``GroupedDistinctBounds[id]``. The legacy instance strings end in the
+    engine's own ``None`` placeholder when no source was configured; that
+    stays in the evidence's details and is dropped from the label.
+    """
+    text = re.sub(r"\s+None$", "", str(instance).strip())
+    return text if text.startswith(constraint) else f"{constraint}[{text}]"
 
 
 class BusinessrulesEngine(DQEngine):
@@ -75,6 +90,7 @@ class BusinessrulesEngine(DQEngine):
         """
         rule_checks = self._config.get("checks", {})
         _metrics_results = []
+        _labels = []
         _verification_results = []
         for check_config in rule_checks:
             constraint = check_config.get("constraint", None)
@@ -133,6 +149,14 @@ class BusinessrulesEngine(DQEngine):
             _results, _check_verification = strategy.apply(dataframe, **params)
             _metrics_results += _results
             _verification_results += _check_verification
+            # Evidence is attributed by label. Each outcome is named for its
+            # constraint, and for the instance it measured when the
+            # constraint reports several (one per column).
+            base = str(check_config.get("constraint_name", None) or constraint)
+            for row in _results:
+                _labels.append(
+                    _outcome_label(base, row[1]) if len(_results) > 1 else base
+                )
 
         df_metrics_results = self._sparkSession.createDataFrame(
             _metrics_results, ["entity", "instance", "name", "value"]
@@ -155,9 +179,10 @@ class BusinessrulesEngine(DQEngine):
             df_metrics_results,
             df_check_verification_results,
         )
+        checkspec.require_unique_labels(_labels)
         summarymetrics = [
             build_result(
-                row[2],
+                label,
                 row[3] == 1,
                 {
                     "entity": row[0],
@@ -166,7 +191,7 @@ class BusinessrulesEngine(DQEngine):
                     "value": row[3],
                 },
             )
-            for row in _metrics_results
+            for label, row in zip(_labels, _metrics_results)
         ]
 
         return summarymetrics

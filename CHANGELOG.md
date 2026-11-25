@@ -56,9 +56,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Its `--format json` output gains `format` and `errors`
 - `examples/basic_deequ_validation.yaml` and `.json` (twins of the HOCON
   example) and `examples/overlays/` (per-environment overlays)
+- **Engine SDK** (SPEC-011): `dq.sdk.conformance` runs an engine through
+  the engine contract -- manifest, template, outcome boundary, unique
+  labels, canonical severity, determinism, persistence honesty, run key --
+  and reports each violation by the check that found it; every built-in
+  engine passes. `dq.sdk.fixtures` is one semantic corpus for all compute
+  adapters: 19 cases across counts/v1, groups/v1 and ranges/v1, each stating
+  the metrics an adapter must compute and the decisions that follow. The
+  decisions are checked against the kernel with no engine, and the metrics
+  against Spark, with a Deequ cross-check on every counts/v1 rule where the
+  two semantics coincide
+- `dq-engines`: lists the engines this installation can resolve, built-in
+  and entry-point, with each engine's capability manifest and how to
+  install a missing optional dependency
+- `scripts/new_engine.py NAME`: scaffolds an engine that passes the
+  formatter, its own unit tests and the repository's guards as generated
+- `docs/writing-an-engine.adoc`: the engine contract with a complete example
+  that is executed as a test
+- Property-based tests (Hypothesis) for the pure kernel: the sanitizer
+  always produces strict JSON, gate decisions partition the failures, exact
+  thresholds stay exact where doubles would not, labels stay unique
 
 ### Changed
 
+- **Every check has its own name, and its own verdict.** The engine
+  conformance suite found that the Deequ, Great Expectations, businessrules
+  and schema-validation engines reported several checks under one name
+  (`Schema Validation`, `Compliance`, an expectation type), so their evidence
+  could not be attributed to a rule. Every engine now labels a check by its
+  configured name -- `constraint_name`, `alias` or `description` for Deequ;
+  `name` for Great Expectations and DQX; `constraint_name` or the constraint
+  for businessrules -- else by its kind and columns (`isComplete_id`,
+  `expect_column_values_to_not_be_null_id`). A rule whose two checks would
+  report the same label is refused. Labels therefore change for existing
+  rule packs that relied on the old defaults; set an explicit name to keep
+  a particular label. The Great Expectations `derive_names` flag is
+  withdrawn: naming by type and column is the default
+- **A constraint's verdict is its own.** Where several constraints share
+  one Deequ Check -- the `single_check_mode` flag, and schema validation's
+  default -- a passing constraint was reported as failed as soon as a
+  sibling failed. Each is now reported by its own status
+- An engine's capability manifest is inherited: a subclass states only what
+  differs. An invalid manifest, and an engine that cannot persist handed a
+  repository, are refused when the engine loads, before any work
+- The portable engine reports a canonical `criticality` from the kernel's
+  severity. Without it a Warning-level portable rule blocked under the
+  `error` gate policy
 - **Fixed: `dq-kernel rules.conf` failed on a bare file path.** The
   framework parsed any string without a URI scheme as inline HOCON text, so
   the most natural invocation died with a parser dump, while
@@ -76,6 +119,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ten tests that used the Spark session without the `spark` marker are
   marked now; they had been starting a JVM inside the unit lane, which is
   documented to run without one
+- **The coverage gate refuses a report that is not this repository's.** A
+  test that runs pytest in a scratch copy of the tree had that copy measured
+  and merged into the parent's report, as a second, untested `dq` package:
+  with pytest-cov 6 it took line coverage from 92.8% to 37% with no code
+  changed. The children are no longer armed, and `scripts/check_coverage.py`
+  stops on any reported path outside the checkout before it reads a floor
+- The semantic corpus refuses a cell no engine can store as written. Spark
+  stores a decimal `NaN` as null and rounds `1.234` in a `decimal(10,2)`
+  column to `1.23` without a word, so a case could pass validation and then
+  run on data other than the one it documents
 - **`dq-kernel` exit codes**: 0 when the quality gate passed, 1 when it
   failed or the run errored, and 2 when the configuration is invalid or a
   dependency is missing. Every failure used to return 1, so a caller could
