@@ -53,8 +53,20 @@ like `dataset` today.
 
 == Progress
 
-* [x] G1 — evidence: `dq/tests/test_postgres_sink.py::test_ddl_statements_use_quoted_pg_identifiers_namespaces_and_views`, `::test_save_stamps_namespace_and_artifact_columns`
-* [x] G2 — evidence: `dq/tests/test_postgres_sink.py::test_prune_scoping_never_touches_other_namespaces`, `::test_prune_all_namespaces_drops_the_namespace_filter`
-* [x] G3 — evidence: `dq/tests/test_postgres_sink.py::test_ddl_statements_use_quoted_pg_identifiers_namespaces_and_views`, `::test_run_scope_stamps_namespace_and_commits`
+* [x] G1 — evidence: `dq/tests/test_sqlalchemy_sink.py::test_ddl_holds_the_certified_postgresql_shape`,
+  `::test_identifiers_are_quoted_only_where_the_dialect_requires_it`,
+  `::test_a_save_stamps_every_column_and_holds_the_row_as_json`
+* [x] G2 — evidence: `dq/tests/test_sqlalchemy_sink.py::test_prune_deletes_a_namespace_s_old_artifacts_then_its_runs_and_nothing_else`,
+  `::test_prune_across_namespaces_needs_only_the_cutoff`
+* [x] G3 — evidence: `dq/tests/test_sqlalchemy_sink.py::test_ddl_holds_the_certified_postgresql_shape`,
+  `::test_a_run_is_one_transaction_and_the_scope_s_key_is_authoritative`
+
+[NOTE]
+====
+Amended 2026-11-25. The durable sink's tests moved with SPEC-007, when the
+sink became `SqlAlchemyOutcomeSink`. The evidence above cites the tests that
+hold the same contracts now, run against a real database instead of a
+recording fake.
+====
 
 Links: TD-PROD-4a; ADR-009; ADR-006; SPEC-001; SPEC-005.

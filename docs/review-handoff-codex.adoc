@@ -85,7 +85,7 @@ message families. What drifts that the test cannot see?
 
 . Read the ADRs (005–010) and SPEC-001..007 first; they state intent.
 . Verify claims against code — every spec contract maps to a test in
-`dq/tests/test_postgres_sink.py`, `test_spark_adapter_groups.py`,
+`dq/tests/test_sqlalchemy_sink.py`, `test_spark_adapter_groups.py`,
 `test_spark_adapter_ranges.py`, `test_groups_differential.py`,
 `test_ranges_differential.py`, `test_error_catalog.py`.
 . Run: `pytest dq/tests/ -q` (full, needs Spark+jars) and

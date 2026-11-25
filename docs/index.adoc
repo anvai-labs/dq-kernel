@@ -29,6 +29,8 @@ pip install 'dq-kernel[spark,deequ]'
 Add `aws` for Glue/S3 support, `databricks` for the Databricks SDK integration, and
 `greatexpectations` for the Great Expectations engine. That extra pins GX Core
 (`great_expectations >=1.24,<2`) and is imported lazily, so the base package stays GE-free.
+Add `sqlalchemy` for the durable SQL sink and `arrow` for its Arrow path; neither is imported
+until a SQL sink is configured.
 
 == Architecture
 
@@ -372,6 +374,61 @@ repository {
 The helper appends partitioned file results and appends to or creates catalog tables with metric
 suffixes. It does not implement retries, alert delivery, retention, or access control; those are
 deployment responsibilities.
+
+=== Durable SQL sink
+
+`repository { type = "postgres" }` keeps evidence in a SQL database instead of files (ADR-006):
+one run is one transaction, a write repeated under the same key adds nothing, and a failed run
+leaves nothing behind. The sink is `dq.sqlalchemy_sink.SqlAlchemyOutcomeSink`, built on
+SQLAlchemy Core and taking an injected `Engine` or `Connection`; `PostgresOutcomeSink` is the
+same class under its earlier name. See `examples/durable_evidence.conf`.
+
+[source,hocon]
+----
+repository {
+  type = "postgres"
+  dataset = "orders"
+  dsn_env = "DQ_POSTGRES_DSN"
+  schema = "dq"
+  namespace = "team_a"
+  retention_days = 30
+  arrow = true
+}
+----
+
+The environment variable named by `dsn_env` (default `DQ_POSTGRES_DSN`) holds the database
+location, which is a SQLAlchemy URL such as `postgresql+psycopg://user@host/quality`. A URL
+written `postgresql://` means the psycopg 3 driver, as it always did, and a libpq keyword/value
+DSN (`host=... dbname=...`) is read by psycopg 3 too. Credentials stay in the environment and
+never appear in a rule pack. The driver is the deployment's to install (`pip install
+"psycopg[binary]"`); a missing driver or dialect is reported when the sink is built, before
+any rule runs.
+
+PostgreSQL is the certified database, and the only one the sink is tested against a real server
+of (`DQ_TEST_POSTGRES_URL=... pytest dq/tests/test_sqlalchemy_sink_postgres.py`). The statements
+use forms other databases also accept and the DDL is compiled for the engine's own dialect, but
+nothing else is certified. Schema, table and namespace names are validated by `dq.identifiers`
+and quoted only where the dialect requires it, so a mixed-case schema keeps its case.
+
+`sink.ddl_statements()` returns the reference DDL for operators, the two evidence tables and the
+`runs_completed` and `latest_per_dataset` views; provisioning belongs to deployment and
+re-running it is idempotent. `sink.verify_schema()` checks that both tables exist and returns
+their row counts. `sink.prune()` deletes artifacts before runs older than the cutoff, within the
+sink's namespace unless `all_namespaces=True`, and requires `retention_days`. A `Connection` the
+caller owns is never closed by the sink, and inside the caller's transaction a run is a
+savepoint.
+
+Each artifact row is stored as one JSON document, made strict first: a NaN becomes `null`, and a
+decimal or a timestamp becomes its text, because a `jsonb` column refuses what Python's `json`
+module writes for a NaN. A timestamp is stored as wall time without its offset.
+
+With the `arrow` extra installed, a Spark DataFrame's rows are read through Arrow (PySpark 3.5
+has no public export, so its `_collect_as_arrow` is used when it is there), and a pyarrow table,
+or anything that exports the Arrow stream interface (Polars, pandas, DuckDB, DataFusion), is
+read directly. Otherwise the frame's own rows are read. Either way the stored payload is the
+same. `arrow = false` turns it off.
+
+Install with `pip install dq-kernel[sqlalchemy]`, adding `[arrow]` for the Arrow path.
 
 == Command-line tools
 

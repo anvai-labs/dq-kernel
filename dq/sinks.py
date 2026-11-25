@@ -22,6 +22,7 @@ from typing import Optional
 
 from dq.exceptions import ConfigurationError, RepositoryError
 from dq.identifiers import ColumnName, TableName
+from dq.utils.imports import require_extra
 
 _FILE_FORMATS = ("parquet", "csv", "json", "delta", "orc")
 
@@ -202,8 +203,9 @@ def sink_from_config(repoconfig) -> OutcomeSink | None:
     """Build the production sink from repository configuration.
 
     Returns ``None`` for empty configuration, which callers treat as
-    "do not persist". ``type = "postgres"`` builds the durable sink
-    (ADR-006); any other type fails closed.
+    "do not persist". ``type = "postgres"`` builds the durable SQL sink
+    (ADR-006, SPEC-007), which needs the ``sqlalchemy`` extra; any other
+    type fails closed.
     """
     if not repoconfig:
         return None
@@ -211,7 +213,10 @@ def sink_from_config(repoconfig) -> OutcomeSink | None:
     if kind is None:
         return RepositorySink(repoconfig)
     if kind == "postgres":
-        from dq.postgres_sink import PostgresOutcomeSink
+        require_extra(
+            "sqlalchemy", "sqlalchemy", "sqlalchemy", pin="sqlalchemy>=2.0,<2.2"
+        )
+        from dq.sqlalchemy_sink import SqlAlchemyOutcomeSink
 
-        return PostgresOutcomeSink.from_config(repoconfig)
+        return SqlAlchemyOutcomeSink.from_config(repoconfig)
     raise ConfigurationError(f"repository sink type {kind!r} is not supported")

@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 205 raise sites across the modules below; the contract
+The framework raises 208 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -70,16 +70,22 @@ the evidence store refused an unsafe write.
 * Fix: provide dataset, whitelisted format, and at least one target; a
   duplicate key means the caller is reusing an execution key.
 
-== dq/postgres_sink.py
+== dq/sqlalchemy_sink.py
 
-*Content:* 4 `ConfigurationError` + 3 `RepositoryError` sites.
+*Content:* 6 `ConfigurationError` + 4 `RepositoryError` sites.
 
-* Cause: the PostgreSQL DSN environment variable is absent, the dataset
-  name is missing, retention is not explicitly configured, the evidence
-  schema is absent, or a database failure occurred during a check.
-* Fix: export the DSN variable (default `DQ_POSTGRES_DSN`), set
-  `dataset`, configure `retention_days`, and apply `ddl_statements()`
-  before querying evidence.
+* Cause: the durable sink was given something other than a SQLAlchemy
+  `Engine` or `Connection` -- a DB-API connect callable, as before SPEC-007;
+  the database location names a driver or a dialect that is not installed;
+  the location's environment variable is absent; the dataset name is missing;
+  retention is not explicitly configured; the evidence tables are absent; or
+  a database failure occurred during the schema check.
+* Fix: build the engine with `sqlalchemy.create_engine(url)` and install the
+  driver the URL names (`pip install "psycopg[binary]"` for
+  `postgresql+psycopg://`), export the location variable (default
+  `DQ_POSTGRES_DSN`), set `dataset`, configure `retention_days`, and apply
+  `ddl_statements()` before querying evidence. A failure while writing
+  surfaces as the database driver's own exception.
 
 == dq/spark_adapter.py
 

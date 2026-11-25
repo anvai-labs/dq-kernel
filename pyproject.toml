@@ -52,6 +52,11 @@ delta-spark = {version = ">=3.3,<3.4", optional = true}
 # databricks-sdk requirement (>=0.73,<1) overlaps the databricks extra, so
 # the two extras are co-installable; Poetry skips this extra on Python 3.13.
 databricks-labs-dqx = {version = ">=0.17.2,<0.18", optional = true, python = ">=3.12,<3.13"}
+# The durable SQL sink and its Arrow batch path (SPEC-007). SQLAlchemy's range
+# overlaps the dqx extra's (<2.1), so an installation with every extra
+# resolves a 2.0 release and one with only this extra a 2.1 release.
+sqlalchemy = {version = ">=2.0,<2.2", optional = true}
+pyarrow = {version = ">=16,<27", optional = true}
 
 [tool.poetry.extras]
 spark = ["pyspark"]
@@ -62,6 +67,8 @@ databricks = ["databricks-sdk", "cron-schedule-triggers"]
 greatexpectations = ["great_expectations"]
 delta = ["delta-spark", "pyspark"]
 dqx = ["databricks-labs-dqx"]
+sqlalchemy = ["sqlalchemy"]
+arrow = ["pyarrow"]
 
 # Minimal development dependencies (only for CI)
 [tool.poetry.group.dev.dependencies]

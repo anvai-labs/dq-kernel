@@ -144,13 +144,18 @@ poetry --version
 git clone https://github.com/YOUR_USERNAME/dq-kernel.git
 cd dq-kernel
 
-# Install all dependencies (core + dev + extras)
-poetry install --with dev -E spark -E deequ -E aws
+# Install every dependency, as the CI lanes do (core + dev + every extra with
+# tests; Poetry skips the `dqx` extra on Python 3.13, where it has no wheel)
+poetry install --with dev \
+  -E spark -E deequ -E aws -E databricks -E greatexpectations -E dqx \
+  -E sqlalchemy -E arrow
 
-# Download Deequ JAR for testing
+# Download the JARs the Spark test fixture loads, as CI does
 mkdir -p lib
-curl -L -o lib/deequ-2.0.8-spark-3.5.jar \
-  https://repo1.maven.org/maven2/com/amazon/deequ/deequ/2.0.8-spark-3.5/deequ-2.0.8-spark-3.5.jar
+curl -L -o lib/deequ-2.0.21-spark-3.5.jar \
+  https://repo1.maven.org/maven2/com/amazon/deequ/deequ/2.0.21-spark-3.5/deequ-2.0.21-spark-3.5.jar
+curl -L -o lib/dqdl-1.0.0.jar \
+  https://repo1.maven.org/maven2/software/amazon/glue/dqdl/1.0.0/dqdl-1.0.0.jar
 ```
 
 ---
