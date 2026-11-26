@@ -25,7 +25,7 @@ def test_invalid_summary_limit_is_rejected_before_execution(limit):
 
 
 def test_repository_request_is_not_silently_ignored():
-    with pytest.raises(ConfigurationError, match="persistence is unsupported"):
+    with pytest.raises(ConfigurationError, match="persistence=False"):
         DqdlEngine({}).apply(object(), repository={"dataset": "quality"})
 
 

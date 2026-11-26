@@ -2,9 +2,10 @@
 :toc:
 :sectlinks.
 
-Status: Draft for review +
+Status: Released — 0.2.0 +
 Date: 2026-09-21 +
-Driven by: TD-PROD-1, ADR-006
+Driven by: TD-PROD-1, ADR-006 +
+Milestone: Shipped +
 
 == Purpose
 
@@ -34,17 +35,22 @@ framework's code.
 == Contracts
 
 * `prune(before_millis: int) -> tuple[int, int]`: (artifacts deleted, runs
-  deleted); artifacts first, then runs — referential order.
+  deleted); artifacts first, then runs -- referential order.
 * `verify_schema() -> dict`: `{"runs": int, "artifacts": int}` row counts.
 * Errors: absent schema or database failure surface as `RepositoryError`
   with the qualified table named; the connection closes on every path.
 
 == Acceptance gates
 
-* Fake-DB-API contracts: prune emits `DELETE FROM artifacts` before
+* G1 — Fake-DB-API contracts: prune emits `DELETE FROM artifacts` before
   `DELETE FROM runs` with the cutoff parameter; verify_schema issues two
   existence checks and returns counts; failures roll back, close, and raise.
-* Retention defaults: no `retention_days` configured means `prune` refuses
-  to run (deleting evidence requires explicit configuration).
+* G2 — Retention defaults: no `retention_days` configured means `prune`
+  refuses to run (deleting evidence requires explicit configuration).
 
-Links: TD-PROD-1; ADR-006; ADR-007 (MVP-1).
+== Progress
+
+* [x] G1 — evidence: `dq/tests/test_postgres_sink.py::test_prune_is_namespace_scoped_and_deletes_artifacts_first`, `::test_prune_derives_cutoff_from_retention_days`, `::test_verify_schema_reports_counts_and_fails_closed`, `::test_verify_schema_wraps_database_failures`
+* [x] G2 — evidence: `dq/tests/test_postgres_sink.py::test_prune_requires_explicit_retention_configuration`, `::test_retention_days_must_be_positive`
+
+Links: TD-PROD-1; ADR-006; ADR-007; SPEC-006; SPEC-007.

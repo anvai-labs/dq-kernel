@@ -16,8 +16,14 @@ class ConfigurationError(DQFrameworkError):
     pass
 
 
-class EngineNotFoundError(DQFrameworkError):
-    """Raised when the specified engine cannot be loaded."""
+class EngineNotFoundError(DQFrameworkError, ImportError):
+    """Raised when the specified engine cannot be loaded.
+
+    Deliberately also an ``ImportError``: existing callers (notably the
+    CLI's missing-dependency handler) catch ``ImportError`` around engine
+    loading, and vendor-import failures must keep flowing through that
+    net unchanged.
+    """
 
     pass
 

@@ -19,7 +19,15 @@ from dq.exceptions import ConfigurationError
 
 @dataclass(frozen=True, slots=True)
 class GateEvent:
-    """Immutable record of a gate result, built from validated outcomes."""
+    """Immutable record of a gate result, built from validated outcomes.
+
+    ``status``/``failed`` cover every failed check (evidence semantics,
+    unchanged). ``blocked``/``warned`` add the severity split: failures
+    whose engine-reported ``details.criticality`` is ``"warn"`` land in
+    ``warned``, everything else (including engines that report no
+    severity) lands in ``blocked`` -- consumers route alerting on the
+    split without changing what evidence says.
+    """
 
     run_key: int
     dataset: str
@@ -28,6 +36,8 @@ class GateEvent:
     total: int
     ts: int
     job_id: str
+    blocked: tuple[str, ...] = ()
+    warned: tuple[str, ...] = ()
 
     @classmethod
     def from_outcomes(
@@ -38,20 +48,30 @@ class GateEvent:
         ts: int,
         job_id: str,
     ) -> GateEvent:
-        failed_checks = tuple(
-            outcome["check"]
-            for outcome in outcomes
-            if outcome.get("success") is not True
-        )
-        status = "passed" if not failed_checks else "failed"
+        failed: list[str] = []
+        blocked: list[str] = []
+        warned: list[str] = []
+        for outcome in outcomes:
+            if outcome.get("success") is True:
+                continue
+            check = outcome["check"]
+            failed.append(check)
+            details = outcome.get("details") or {}
+            if details.get("criticality") == "warn":
+                warned.append(check)
+            else:
+                blocked.append(check)
+        status = "passed" if not failed else "failed"
         return cls(
             run_key=run_key,
             dataset=dataset,
             status=status,
-            failed=failed_checks,
+            failed=tuple(failed),
             total=len(outcomes),
             ts=ts,
             job_id=job_id,
+            blocked=tuple(blocked),
+            warned=tuple(warned),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -63,6 +83,8 @@ class GateEvent:
             "total": self.total,
             "ts": self.ts,
             "job_id": self.job_id,
+            "blocked": list(self.blocked),
+            "warned": list(self.warned),
         }
 
 
@@ -89,12 +111,14 @@ class LoggingNotifier(GateNotifier):
 
     def notify(self, event: GateEvent) -> None:
         self._logger.info(
-            "gate_event dataset=%s status=%s run_key=%d failed=%d/%d",
+            "gate_event dataset=%s status=%s run_key=%d failed=%d/%d blocked=%d warned=%d",
             event.dataset,
             event.status,
             event.run_key,
             len(event.failed),
             event.total,
+            len(event.blocked),
+            len(event.warned),
         )
 
 

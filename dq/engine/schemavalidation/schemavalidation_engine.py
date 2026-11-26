@@ -2,43 +2,60 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-from typing import Optional
+from typing import Any, Optional, List, Dict
 
-from dq.engine.deequ.deequ_engine import DeequEngine
+from dq.engine.dq_engine import DQEngine
+from dq.engine.deequ.verification import (
+    metrics_from_check_results,
+    run_verification,
+)
 from pyhocon import ConfigTree
 from pyspark.sql import DataFrame
-from pydeequ.verification import VerificationSuite, VerificationResult
 
-from dq.utils import constants
+from dq.utils import keys
 from dq.engine.schemavalidation.schemavalidation_check import SchemavalidationCheck
 
 logger = logging.getLogger(__name__)
 
 
-class SchemavalidationEngine(DeequEngine):
+class SchemavalidationEngine(DQEngine):
     """Engine that validates DataFrame schemas against expected definitions.
 
-    Extends ``DeequEngine`` to check datatype, nullable, unique, and
-    foreign-key constraints using Spark schema introspection.  Supports
-    Unity Catalog, Glue, Hive, and default Spark catalog types.
+    Checks datatype, nullable, unique, and foreign-key constraints using
+    Spark schema introspection.  Supports Unity Catalog, Glue, Hive, and
+    default Spark catalog types.
+
+    Belongs to the deequ engine family (shared pydeequ scaffold and raw
+    vendor artifact shapes) without inheriting the deequ engine itself:
+    composition through ``dq.engine.deequ.verification`` keeps the two
+    engines independently evolvable.
     """
 
+    #: Severity is native (pydeequ CheckLevel); no row scoping or counts.
+    CAPABILITIES = {
+        "criticality": "native",
+        "row_filter": False,
+        "failed_rows": False,
+        "persistence": True,
+    }
+
     def __init__(self, config: ConfigTree, dqts: Optional[int] = None):
+        self._sparkSession = None
+        self._last_verification_artifacts = None
         super().__init__(config, dqts)
 
-    def _run_verification(self, dataframe: DataFrame):
-        """Run schema validation via ``validate_dataframe``.
+    def _prepare(self, dataframe) -> None:
+        """Bind the run's Spark session."""
+        self._sparkSession = dataframe.sparkSession
+        return None
 
-        The template ``apply`` has already bound ``self._sparkSession``
-        from ``dataframe`` before this hook runs.
-
-        Args:
-            dataframe: Spark DataFrame to validate.
-
-        Returns:
-            Tuple of (successMetrics DataFrame, checkVerifications DataFrame).
-        """
-        return self.validate_dataframe(dataframe)
+    def _execute(self, dataframe, prepared) -> List[Dict[str, Any]]:
+        """Run schema validation and shape check-result rows."""
+        successMetrics, checkVerifications = self.validate_dataframe(dataframe)
+        # Raw pydeequ frames stashed for _persist_outcomes (deequ-family
+        # artifact schema, deliberately unchanged).
+        self._last_verification_artifacts = (successMetrics, checkVerifications)
+        return metrics_from_check_results(checkVerifications.collect())
 
     def validate_dataframe(self, df: DataFrame):
         """Validate the DataFrame against schema and additional constraints.
@@ -50,11 +67,11 @@ class SchemavalidationEngine(DeequEngine):
             Tuple of (successMetrics DataFrame, checkVerifications DataFrame).
         """
         catalog_type = self._config.get(
-            f"{constants.SCHEMA_VALIDATION_SCHEMA}.catalog_type", None
+            f"{keys.SCHEMA_VALIDATION_SCHEMA}.catalog_type", None
         )
-        single_check_mode = self._config.get(constants.DQ_SINGLE_CHECK_MODE, True)
+        single_check_mode = self._config.get(keys.DQ_SINGLE_CHECK_MODE, True)
         schema_validation_check = SchemavalidationCheck(
-            schema_config=self._config.get(constants.SCHEMA_VALIDATION_SCHEMA, {}),
+            schema_config=self._config.get(keys.SCHEMA_VALIDATION_SCHEMA, {}),
             single_check_mode=single_check_mode,
         )
 
@@ -65,30 +82,17 @@ class SchemavalidationEngine(DeequEngine):
             )
         )
 
-        if single_check_mode:
-            verification_result = (
-                VerificationSuite(self._sparkSession)
-                .onData(joined_df)
-                .addCheck(checks)
-                .run()
-            )
-        else:
-            verification_run_builder = VerificationSuite(self._sparkSession).onData(
-                joined_df
-            )
+        def _add_checks(builder):
+            if single_check_mode:
+                return builder.addCheck(checks)
             for check in checks:
-                verification_run_builder = verification_run_builder.addCheck(check)
-            verification_result = verification_run_builder.run()
+                builder = builder.addCheck(check)
+            return builder
 
-        if verification_result.status == "Success":
-            logger.info("Schema validation succeeded.")
-        else:
-            logger.warning("Schema validation failed.")
+        return run_verification(self._sparkSession, joined_df, _add_checks)
 
-        final_successmetrics_result_df = VerificationResult.successMetricsAsDataFrame(
-            self._sparkSession, verification_result
-        )
-        final_checkverification_result_df = VerificationResult.checkResultsAsDataFrame(
-            self._sparkSession, verification_result
-        )
-        return final_successmetrics_result_df, final_checkverification_result_df
+    def _persist_outcomes(self, repository, metrics, dataframe) -> None:
+        """Persist raw pydeequ artifact frames (deequ-family schema)."""
+        if not repository or self._last_verification_artifacts is None:
+            return
+        self._persist(repository, *self._last_verification_artifacts)

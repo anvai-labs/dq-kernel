@@ -2,16 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Any, Optional, List, Dict
 
 from pyhocon import ConfigTree
-from pyspark.sql import DataFrame
-from pydeequ.verification import VerificationSuite, VerificationResult
 
 from dq.engine import checkspec
 from dq.engine.dq_engine import DQEngine
 from dq.engine.deequ.deequ_check import DeequCheck
-from dq.utils import constants
+from dq.engine.deequ.verification import (
+    PYDEEQU_CHECK_STATUS_SUCCESS,
+    metrics_from_check_results,
+    run_verification,
+)
+from dq.utils import keys
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +27,9 @@ class DeequEngine(DQEngine):
     mode (all constraints in one ``Check``) and multi-check mode
     (one ``Check`` per constraint).
 
-    ``apply`` is a template method: subclasses customize verification by
-    overriding ``_run_verification`` while sharing logging, persistence,
-    and summary conversion.
+    Subclasses customize verification by overriding ``_run_verification``
+    while sharing the artifact contract (raw pydeequ frames, unchanged
+    shapes -- downstream consumers join on those columns).
     """
 
     #: Deequ carries per-rule severity natively (CheckLevel) and exposes it
@@ -35,77 +38,49 @@ class DeequEngine(DQEngine):
         "criticality": "native",
         "row_filter": False,
         "failed_rows": False,
+        "persistence": True,
     }
 
     def __init__(self, config: ConfigTree, dqts: Optional[int] = None):
         self._sparkSession = None
+        self._last_verification_artifacts = None
         super().__init__(config, dqts)
 
-    def apply(self, dataframe: DataFrame, repository=None) -> List[Dict[str, Any]]:
-        """Run Deequ verification checks against the DataFrame.
-
-        Args:
-            dataframe: Spark DataFrame to validate.
-            repository: Optional repository config for persisting metrics.
-
-        Returns:
-            List of metric dicts with ``check``, ``success``, ``details``
-            keys; ``details`` carries the rule's ``criticality``.
-        """
-        self._log_processing_start()
+    def _prepare(self, dataframe) -> DeequCheck:
+        """Bind the run's Spark session and build the configured checks."""
         self._sparkSession = dataframe.sparkSession
-        successMetrics, checkVerifications = self._run_verification(dataframe)
-        self._persist(repository, successMetrics, checkVerifications)
+        return DeequCheck(
+            checks_config=self._config.get("checks", []),
+            single_check_mode=self._config.get(keys.DQ_SINGLE_CHECK_MODE, False),
+        )
 
-        summarymetrics = []
-        for check in checkVerifications.collect():
-            details = check.asDict(recursive=True)
-            summarymetrics.append(
-                checkspec.build_result(
-                    check["check"],
-                    check["check_status"] == "Success",
-                    details,
-                    criticality=details.get("check_level"),
-                )
-            )
+    def _execute(self, dataframe, prepared: DeequCheck) -> List[Dict[str, Any]]:
+        """Run verification and shape check-result rows into metric dicts."""
+        successMetrics, checkVerifications = self._run_verification(dataframe, prepared)
+        # Raw pydeequ frames stashed for _persist_outcomes: the deequ-family
+        # artifact schema (metrics/verifications vendor columns) is
+        # downstream-consumed and is deliberately not reshaped here.
+        self._last_verification_artifacts = (successMetrics, checkVerifications)
+        return metrics_from_check_results(checkVerifications.collect())
 
-        return summarymetrics
-
-    def _run_verification(self, dataframe: DataFrame):
+    def _run_verification(self, dataframe, prepared: DeequCheck):
         """Build and run the Deequ ``VerificationSuite`` for configured checks.
 
         Args:
             dataframe: Spark DataFrame to validate.
+            prepared: The ``DeequCheck`` built by ``_prepare``.
 
         Returns:
             Tuple of (successMetrics DataFrame, checkVerifications DataFrame).
         """
-        deequ_check = DeequCheck(
-            checks_config=self._config.get("checks", []),
-            single_check_mode=self._config.get(constants.DQ_SINGLE_CHECK_MODE, False),
+        return run_verification(
+            self._sparkSession,
+            dataframe,
+            lambda builder: prepared.apply_checks(builder, self._sparkSession),
         )
 
-        verification_run_builder = VerificationSuite(
-            spark_session=self._sparkSession
-        ).onData(df=dataframe)
-
-        verification_run_builder = deequ_check.apply_checks(
-            verification_run_builder, self._sparkSession
-        )
-
-        verification_result = verification_run_builder.run()
-
-        if verification_result.status == "SUCCESS":
-            logger.info("Data quality checks passed successfully.")
-        else:
-            logger.warning("Data quality checks failed.")
-
-        successMetrics = VerificationResult.successMetricsAsDataFrame(
-            spark_session=self._sparkSession,
-            verificationResult=verification_result,
-        )
-        checkVerifications = VerificationResult.checkResultsAsDataFrame(
-            spark_session=self._sparkSession,
-            verificationResult=verification_result,
-        )
-        return successMetrics, checkVerifications
+    def _persist_outcomes(self, repository, metrics, dataframe) -> None:
+        """Persist raw pydeequ artifact frames (deequ-family schema)."""
+        if not repository or self._last_verification_artifacts is None:
+            return
+        self._persist(repository, *self._last_verification_artifacts)

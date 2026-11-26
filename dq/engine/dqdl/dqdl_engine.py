@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Optional
 
 from pydeequ.dqdl import EvaluateDataQuality
 from pyhocon import ConfigTree
-from pyspark.sql import DataFrame
 
+from dq.engine.checkspec import build_result
 from dq.engine.dq_engine import DQEngine
 from dq.exceptions import ConfigurationError, ValidationError
 
@@ -24,14 +24,20 @@ class DqdlEngine(DQEngine):
     the framework boundary could exhaust driver memory.
     """
 
+    #: DQDL rule evaluation returns bounded outcome dicts only; no vendor
+    #: artifact frames exist to persist.
+    CAPABILITIES = {
+        "criticality": "absent",
+        "row_filter": False,
+        "failed_rows": False,
+        "persistence": False,
+    }
+
     def __init__(self, config: ConfigTree, dqts: Optional[int] = None):
         super().__init__(config, dqts)
 
-    def apply(self, dataframe: DataFrame, repository=None) -> List[Dict[str, Any]]:
-        if repository:
-            raise ConfigurationError(
-                "DQDL repository persistence is unsupported; use framework report output"
-            )
+    def _execute(self, dataframe, prepared) -> List[Dict[str, Any]]:
+        """Evaluate the DQDL ruleset with bounded driver collection."""
         ruleset = self._config.get("ruleset", None)
         if not isinstance(ruleset, str) or not ruleset.strip():
             raise ConfigurationError("DQDL engine requires a non-empty 'ruleset'")
@@ -59,13 +65,7 @@ class DqdlEngine(DQEngine):
             rule = details.get("Rule") or details.get("EvaluatedRule")
             if not isinstance(rule, str) or not rule.strip():
                 raise ValidationError("DQDL outcome has no rule identity")
-            metrics.append(
-                {
-                    "check": rule,
-                    "success": outcome == "Passed",
-                    "details": details,
-                }
-            )
+            metrics.append(build_result(rule, outcome == "Passed", details))
 
         logger.info("DQDL emitted %d bounded rule outcomes", len(metrics))
         return metrics

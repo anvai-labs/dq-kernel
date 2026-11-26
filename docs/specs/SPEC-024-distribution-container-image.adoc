@@ -1,0 +1,57 @@
+= SPEC-024: Distribution container image
+:toc:
+:sectlinks.
+
+Status: Deferred — needs an owner decision on the registry +
+Date: 2026-11-24 +
+Driven by: product-strategy (packaging), ADR-011 (deployment targets) +
+Milestone: M5 +
+Depends on: SPEC-003 +
+
+== Purpose
+
+Ship a ready-to-run image. The product strategy's packaging gap names a
+container image beside signed wheels and an SBOM. ADR-011 confines the
+validation path to Spark-native targets — Databricks, EMR, Glue, Kubernetes,
+self-hosted runners — and on Kubernetes an image with Spark, the Deequ and
+DQDL jars, and this framework already installed is the difference between a
+one-line job and a per-team assembly step.
+
+== In scope
+
+* A `Dockerfile`: a pinned Spark base image, a pinned JRE, the Deequ and DQDL
+  jars at their pinned versions, and the framework installed with the extras
+  the image is built for.
+* A build in CI that produces the image and scans it, without publishing.
+* An SBOM for the image (SPEC-003's tooling extended to the image).
+* Publishing and signing once a registry is chosen.
+
+== Out of scope
+
+* Choosing a registry (an owner decision: see Gate);
+* a Helm chart, an operator, or any scheduler integration;
+* images for every extras combination: one image per published variant.
+
+== Contracts
+
+* The image is reproducible from a tag: the same tag builds the same layers.
+* The image passes the framework's own smoke test at build time.
+* Container image signing follows SPEC-003's keyless approach; no long-lived
+  signing key is introduced.
+
+== Acceptance gates
+
+* G1 — The registry decision is recorded here.
+* G2 — The image builds in CI, is scanned, and the scan gate passes.
+* G3 — The smoke test runs a checked-in rule pack inside the image and the
+  gate exit code is observed.
+* G4 — The image carries an SBOM and is signed before it is published.
+
+== Progress
+
+* [ ] G1 — awaiting an owner decision on the registry
+* [ ] G2 — not started
+* [ ] G3 — not started
+* [ ] G4 — not started
+
+Links: product-strategy; ADR-011; SPEC-003.

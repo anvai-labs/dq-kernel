@@ -1,0 +1,78 @@
+= SPEC-010: Rule-pack configuration
+:toc:
+:sectlinks.
+
+Status: Accepted +
+Date: 2026-11-24 +
+Driven by: ADR-001, SPEC-004 +
+Milestone: M1 +
+
+== Purpose
+
+Let teams author rule packs in the format their platform already uses —
+YAML, JSON, or HOCON — and have every pack validated once, before any Spark
+work, from one typed snapshot. Today only HOCON loads, `pyyaml` is declared
+as a core dependency but never imported, and the framework and
+`dq-validate` each carry their own copy of the source-dispatch logic.
+
+== In scope
+
+* Format detection by extension for local and remote sources: `.conf` and
+  `.hocon` (pyhocon), `.yaml` and `.yml` (safe-load YAML), `.json`. Every
+  format normalizes to one `ConfigTree`, so nothing downstream knows which
+  format a pack was written in.
+* One loader shared by `DQFramework` and `dq-validate`, replacing their
+  duplicated scheme dispatch.
+* A typed, frozen `RulePack` snapshot — rules (name, engine, dataframes,
+  payload), gate policy, notifiers, repository — parsed once and failing
+  closed, consumed by validation, the run core, and the CLI.
+* A published JSON Schema for the rule-pack envelope, shipped in the wheel.
+  Engine payloads stay open; the per-engine required key comes from the
+  registry.
+* `dq-validate`: format-agnostic, registry-driven, with its structured JSON
+  output kept stable.
+* Environment overlays, documented and tested, using HOCON `include` and
+  environment substitution. Secrets never appear inline in a rule pack.
+
+== Out of scope
+
+* A third-party validation framework (the snapshot is plain dataclasses);
+* a configuration service, hot reload, or a long-running process;
+* converting one engine's vocabulary into another's (ADR-002);
+* a complete schema for every engine payload field (a v2 candidate once
+  SPEC-011's conformance kit can generate it).
+
+== Contracts
+
+* `dq.utils.config_utils.load_config(reference) -> ConfigTree` accepts any
+  supported extension on every supported scheme.
+* `dq.config.parse_rule_pack(config) -> RulePack`; `RulePack.rules` is a
+  tuple of `RuleRef` values. Plain dictionaries parse too, so tests and
+  embedders that build configuration in code keep working.
+* A parse failure names the rule index and the offending key.
+* `dq.config` and the loader import with every optional dependency blocked.
+
+== Acceptance gates
+
+* G1 — YAML, JSON and HOCON packs expressing the same rules produce equal
+  `RulePack` snapshots and equal run outcomes.
+* G2 — Remote YAML and JSON sources load through the shared loader (fakes
+  for the object stores).
+* G3 — Invalid packs fail closed before any Spark action, naming the rule
+  index and the key.
+* G4 — Every checked-in example, in every format, validates against the
+  published schema.
+* G5 — An overlay example resolves environment-specific values, and the
+  secrets-hygiene contract passes on all examples.
+* G6 — `dq.config` and the loader import with all extras blocked.
+
+== Progress
+
+* [ ] G1 — not started
+* [ ] G2 — not started
+* [ ] G3 — not started
+* [ ] G4 — not started
+* [ ] G5 — not started
+* [ ] G6 — not started
+
+Links: ADR-001; ADR-012; SPEC-004; SPEC-011.

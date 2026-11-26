@@ -30,6 +30,8 @@ import datetime
 import json
 from typing import Dict, List, Optional
 
+from dq.engine.checkspec import build_result
+
 from databricks.sdk import WorkspaceClient
 
 from dq.engine.databricks.workspace_auth import (
@@ -101,17 +103,17 @@ def expectation_outcomes(
                 dropped = _number(
                     expectation, "dropped_records", timestamp, dataset, name
                 )
-                outcome = {
-                    "check": f"{dataset}.{name}",
-                    "success": dropped == 0 if fail_on_drops else True,
-                    "details": {
+                outcome = build_result(
+                    f"{dataset}.{name}",
+                    dropped == 0 if fail_on_drops else True,
+                    {
                         "dataset": dataset,
                         "expectation": name,
                         "passed_records": passed,
                         "dropped_records": dropped,
                         "timestamp": timestamp,
                     },
-                }
+                )
                 for source_key in ("batch_id", "update_id"):
                     if isinstance(expectation, dict) and source_key in expectation:
                         outcome["details"][source_key] = expectation[source_key]

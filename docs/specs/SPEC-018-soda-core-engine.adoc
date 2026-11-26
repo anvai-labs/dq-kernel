@@ -1,0 +1,68 @@
+= SPEC-018: Soda Core engine
+:toc:
+:sectlinks.
+
+Status: Accepted — gated on the live dependency and API check +
+Date: 2026-11-24 +
+Driven by: ADR-012, ADR-011 +
+Milestone: M3 +
+Depends on: SPEC-011 +
+Gate: before any build, install the pinned version in an isolated
+  environment together with the other extras, confirm they resolve, and
+  record the verified API calls here. Soda Core brings its own dependency
+  surface; if it cannot coexist with the existing extras, this spec becomes
+  Blocked with the conflict recorded, and is not forced. +
+
+== Purpose
+
+Wrap Soda Core so that SodaCL checks — the checks many data teams already
+have — run over their warehouse and land in the same evidence stream as
+everything else.
+
+== In scope
+
+* `dq/engine/soda/`: an engine on the ADR-012 hooks.
+* Payload: a SodaCL check set as a YAML mapping. Data source and connection
+  come from the engine configuration, with credentials from the environment.
+* Results: one outcome per check with its outcome, the measured value where
+  Soda reports one, and a bounded diagnostic.
+* An optional `soda` extra and live tests against DuckDB in the main test
+  lane.
+
+== Out of scope
+
+* Soda Cloud (any hosted product);
+* Soda's own alerting and scheduling;
+* programmatic checks written in Python.
+
+== Contracts
+
+* Capabilities are declared honestly; Soda's `warn` outcome maps to the
+  `warn` criticality.
+* The engine imports no Soda package until it is used.
+* A skipped check is reported as skipped, never as passed.
+
+== Acceptance gates
+
+* G1 — The live dependency and API check is recorded here: versions
+  installed, the calls verified against the real package, the date, and the
+  result of co-installing with the other extras.
+* G2 — The engine passes the conformance suite (SPEC-011).
+* G3 — Live round trips against DuckDB: passing, failing, warning, and
+  skipped checks each produce the specified outcomes.
+* G4 — An invalid SodaCL document fails closed with Soda's message preserved
+  as the cause.
+* G5 — A checked-in example rule pack validates and is covered by a test.
+
+== Progress
+
+* [ ] G1 — PyPI checked 2026-11-24: soda-core 4.31.0, Python >=3.10, depends
+  on opentelemetry-api, an OTLP exporter, pydantic, python-dotenv, requests,
+  ruamel.yaml, sqlglot, tabulate (it no longer requires dbt). The live check
+  has not been run
+* [ ] G2 — not started
+* [ ] G3 — not started
+* [ ] G4 — not started
+* [ ] G5 — not started
+
+Links: ADR-012; ADR-011; SPEC-011; SPEC-016; SPEC-014.

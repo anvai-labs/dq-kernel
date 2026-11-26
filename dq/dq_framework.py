@@ -10,10 +10,11 @@ from urllib.parse import urlparse
 from pyhocon import ConfigFactory
 
 from dq.engine.engine_loader import EngineLoader
-from dq.utils import config_utils, constants
+from dq.utils import config_utils, keys
 from dq.catalog.catalog_factory import CatalogFactory
 from dq.exceptions import ConfigurationError, DataFrameNotFoundError, ValidationError
 from dq.identifiers import IdentifierError, TableName
+from dq.notifier import GateEvent, notifier_from_config
 from dq.outcomes import MAX_BATCH_BYTES, MAX_OUTCOMES, CheckOutcome, normalize_outcomes
 from dq.sinks import sink_from_config
 
@@ -185,6 +186,11 @@ class DQFramework:
                 - ``details``: Detailed check output
                 - ``ts``: Timestamp in milliseconds
                 - ``jobid``: Spark application ID
+
+        When ``dqframework.notify`` is configured, one :class:`GateEvent`
+        is announced per run after the rules complete (severity split into
+        ``blocked``/``warned`` per ``details.criticality``); notification
+        failures never alter the run's outcome.
         """
         from contextlib import nullcontext
 
@@ -192,6 +198,7 @@ class DQFramework:
         cumulative_metrics = []
         cumulative_bytes = 0
         sink = sink_from_config(self._config.get("dqframework.repository", {}))
+        notifier = notifier_from_config(self._config.get("dqframework.notify", None))
 
         rule_configs = self._config.get("dqframework.dqrules", [])
         if not rule_configs:
@@ -205,7 +212,7 @@ class DQFramework:
         with scope:
             for rule_index, rule_config in enumerate(rule_configs):
                 df_names = rule_config.get("dataframes", ["default"])
-                engine_name = rule_config.get(constants.DQ_ENGINE_NAME, None)
+                engine_name = rule_config.get(keys.DQ_ENGINE_NAME, None)
 
                 if engine_name is None:
                     raise ConfigurationError(
@@ -238,6 +245,17 @@ class DQFramework:
                             )
                         cumulative_metrics.append(metric)
 
+            notifier.notify(
+                GateEvent.from_outcomes(
+                    run_key=current_time_in_millis,
+                    dataset=self._config.get("dqframework.dataset", None)
+                    or getattr(sink, "dataset", None)
+                    or "unknown",
+                    outcomes=cumulative_metrics,
+                    ts=current_time_in_millis,
+                    job_id=self._spark.sparkContext.applicationId,
+                )
+            )
             return cumulative_metrics
 
         return cumulative_metrics

@@ -2,9 +2,12 @@
 :toc:
 :sectlinks.
 
-Status: Draft for review +
+Status: In Progress — two gates remain; SPEC-012 delivers them +
 Date: 2026-09-21 +
-Driven by: TD-PROD-2, ADR-008
+Reconciled: 2026-11-24 +
+Driven by: TD-PROD-2, ADR-008 +
+Milestone: M1 +
+Depends on: SPEC-012 +
 
 == Purpose
 
@@ -45,11 +48,30 @@ run's outcome.
 
 == Acceptance gates
 
-* A fake notifier records one event per run with the correct status and
-  failing-check identities (passing and failing runs).
-* `WebhookNotifier` retries three times with backoff on transport failure
-  and gives up without raising.
-* Unknown notifier types fail closed at configuration time; zero notifiers
-  configured is the default and emits nothing.
+* G1 — `GateEvent` carries the correct status and failing-check identities
+  for passing and failing runs.
+* G2 — A notifier receives exactly one event per `run()` invocation, for
+  passing and failing runs.
+* G3 — `WebhookNotifier` retries three times with backoff on transport
+  failure and gives up without raising.
+* G4 — Unknown notifier types fail closed at configuration time, and the
+  default `LoggingNotifier` emits one structured line per run.
 
-Links: TD-PROD-2; ADR-008; ADR-007 (MVP-1).
+== Progress
+
+* [x] G1 — evidence: `dq/tests/test_notifier.py::test_gate_event_from_outcomes_collects_failures`, `::test_gate_event_passing_run_has_empty_failures`
+* [ ] G2 — failing-run emission is asserted through the default logging
+  notifier (`dq/tests/test_framework_contract.py::test_run_emits_gate_event_with_severity_split`); an injectable recording notifier and the passing-run assertion arrive with SPEC-012
+* [ ] G3 — the adapter makes a single attempt today
+* [x] G4 — evidence: `dq/tests/test_notifier.py::test_notifier_from_config_rejects_unknown_types`, `::test_logging_notifier_produces_structured_output`
+
+[NOTE]
+====
+Amended 2026-11-24. The original G4 ended "zero notifiers configured is the
+default and emits nothing", which contradicted ADR-008 ("the default
+`LoggingNotifier` emits a structured line per run"). This gate follows the
+ADR. The `report` reference and `InMemoryNotifier` listed in scope are also
+delivered by SPEC-012.
+====
+
+Links: TD-PROD-2; ADR-008; ADR-007; SPEC-012.

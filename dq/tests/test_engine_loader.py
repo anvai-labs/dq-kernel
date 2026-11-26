@@ -5,7 +5,7 @@ from dq.engine.engine_loader import EngineLoader
 from dq.engine.dq_engine import DQEngine
 from pyhocon import ConfigFactory
 import pytest
-from dq.utils import constants
+from dq.utils import keys
 
 
 @pytest.fixture
@@ -104,9 +104,7 @@ def dqrule_notdefined_config():
 
 
 def process_engine_load_with_config(config):
-    return EngineLoader().load_engine(
-        config.get(constants.DQ_ENGINE_NAME, None), config
-    )
+    return EngineLoader().load_engine(config.get(keys.DQ_ENGINE_NAME, None), config)
 
 
 def test_deequ_engine_load_success(dqrule_deequ_config):

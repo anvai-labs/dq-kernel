@@ -1,0 +1,81 @@
+= SPEC-011: Engine SDK and conformance kit
+:toc:
+:sectlinks.
+
+Status: Accepted +
+Date: 2026-11-24 +
+Driven by: ADR-012, ADR-002 +
+Milestone: M1 +
+
+== Purpose
+
+Make third-party engines first-class. ADR-012 defined the engine contract
+but left it implicit in the built-in engines and in internal tests. This
+spec turns that contract into something an engine author outside this
+repository can run, and gives every compute adapter one shared fixture
+corpus.
+
+== In scope
+
+* `dq.sdk.conformance`: `assert_engine_conforms(...)` and a pytest-friendly
+  suite factory that any engine's own tests can call. It checks that
+  capabilities are valid; the template order holds (guard, log, prepare,
+  execute, persist); results pass the strict outcome gate; criticality is
+  canonical; persistence honours the declared capability; artifacts land
+  under the injected run key; and two runs over the same input give the same
+  outcomes.
+* One differential fixture corpus under `dq/sdk/fixtures/`, with expected
+  outcomes per semantic version, and a loader for it. The Spark adapter's
+  differential tests consume it now; the Arrow and SQL adapters will
+  (SPEC-015, SPEC-016).
+* `scripts/new_engine.py NAME`: scaffolds an engine module with the hooks
+  and capabilities, its unit tests with fakes, and an example rule pack, and
+  prints the registry line to add.
+* `dq-engines`: lists registry and entry-point engines with capabilities and
+  payload key, and reports which extras are installed, with install hints.
+* Property-based tests (Hypothesis, a development dependency) for the pure
+  kernel functions: the sanitizer, outcome normalization, and fingerprint
+  canonicalization.
+* Documentation: a "Writing an engine" guide.
+
+== Out of scope
+
+* A plugin registry service or marketplace;
+* loading a Python path from configuration (ADR-001 non-goal);
+* certifying an engine's *semantics* — the kit certifies contract
+  conformance; semantic equivalence is the differential fixtures' job.
+
+== Contracts
+
+* `dq.sdk` imports with every optional dependency blocked and never imports
+  a vendor library itself.
+* The conformance API takes callables (an engine factory and a frame
+  factory); it imports no engine module.
+* A violation is reported with the check that failed and the offending
+  value.
+
+== Acceptance gates
+
+* G1 — Every built-in engine passes the conformance suite (engines whose
+  extra is absent skip).
+* G2 — A deliberately non-conforming engine — wrong result shape, missing
+  criticality, ignoring its declared persistence capability — is rejected
+  with a message naming the violated check.
+* G3 — The Spark adapter's differential tests run on the shared corpus and
+  pass in full.
+* G4 — The scaffold's output passes lint, its own unit tests, and the
+  registry drift guard without manual edits.
+* G5 — `dq-engines` lists built-in and entry-point engines with
+  capabilities; its JSON output is covered by a snapshot test.
+* G6 — The property tests run in the unit lane.
+
+== Progress
+
+* [ ] G1 — not started
+* [ ] G2 — not started
+* [ ] G3 — not started
+* [ ] G4 — not started
+* [ ] G5 — not started
+* [ ] G6 — not started
+
+Links: ADR-012; ADR-002; SPEC-015; SPEC-016; SPEC-017; SPEC-018.

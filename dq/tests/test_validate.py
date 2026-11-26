@@ -97,6 +97,11 @@ def test_validate_config_accepts_executable_local_rule_set(tmp_path):
     ("engine", "payload"),
     [
         ("dqdl", 'ruleset = "Rules=[RowCount >= 1]"'),
+        (
+            "portable",
+            'plan = [{ constraint = "isComplete", column = "id" }], '
+            'dataset = "snap", snapshot_sha256 = "' + "a" * 64 + '"',
+        ),
         ("schemavalidation", "schema = { id = { datatype = long } }"),
         (
             "greatexpectations",

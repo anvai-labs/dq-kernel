@@ -9,6 +9,8 @@
 
 NOTE: This document is a backlog of ideas and illustrative designs. Features and code fragments
 below are not supported behavior unless they also exist in the current source and tests.
+Every proposal in this document has a disposition in
+link:roadmap.adoc[the roadmap and spec tracker].
 
 == Executive Summary
 

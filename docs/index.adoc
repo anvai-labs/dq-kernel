@@ -47,8 +47,10 @@ The implemented execution path is:
 . `CatalogFactory` selects the Spark, Hive, Unity/Delta, or Glue catalog provider.
 . Configured DataFrames are resolved before rule execution; an optional default DataFrame can be
   supplied directly.
-. `EngineLoader` accepts a lowercase alphanumeric/underscore engine name and imports
-  `dq.engine.<name>.<name>_engine`.
+. `EngineLoader` resolves the engine through the declarative registry
+  (`dq.engine.registry`: one `EngineSpec` per engine), then third-party engines
+  registered in the `dq_kernel.engines` entry-point group, then the historical
+  `dq.engine.<name>.<name>_engine` naming convention (fallback).
 . Each engine returns metric dictionaries. `DQFramework.run()` adds the execution timestamp and
   Spark application ID.
 . When a rule supplies repository configuration, supporting engines can append metric and
@@ -151,6 +153,11 @@ markers and otherwise selects `spark`. Catalog permissions and cloud credentials
 the runtime; the framework does not embed them.
 
 == Engines
+
+Non-Spark compute (pandas, Polars, Arrow/DataFusion, SQLAlchemy/DuckDB)
+rides the same plugin contract -- see
+xref:compute-engines.adoc[Compute engines beyond Spark] for the vendor
+support matrix and engine recipes.
 
 === Deequ
 
@@ -378,7 +385,9 @@ self-hosted capacity. Other pull requests stay on GitHub-hosted runners.
 == Examples and planning records
 
 * link:../examples/README.md[Runnable configuration examples]
-* link:modernization-plan.adoc[Active architecture modernization plan]
+* link:roadmap.adoc[Roadmap and spec tracker] -- what is planned, in flight, and
+  done; every spec is indexed there with its status and per-gate evidence
+* link:modernization-plan.adoc[Architecture modernization plan (U1-U7, complete)]
 * link:decisions/adr/ADR-001-incremental-typed-execution-kernel.adoc[ADR-001: typed execution kernel]
 * link:decisions/adr/ADR-002-engine-neutral-rule-kernel.adoc[ADR-002: engine-neutral rule kernel]
 * link:decisions/adr/ADR-003-custom-constraint-adapter.adoc[ADR-003: custom constraint adapter]
@@ -389,20 +398,15 @@ self-hosted capacity. Other pull requests stay on GitHub-hosted runners.
 * link:decisions/adr/ADR-008-gate-event-notifier-port.adoc[ADR-008: gate-event notifier port]
 * link:decisions/adr/ADR-009-open-core-boundary.adoc[ADR-009: open-core boundary]
 * link:decisions/adr/ADR-010-compute-agnostic-dataplane.adoc[ADR-010: compute-agnostic data plane]
-* link:decisions/adr/ADR-010-compute-agnostic-dataplane.adoc[ADR-010: compute-agnostic data plane]
+* link:decisions/adr/ADR-011-dq-federation-and-deployment.adoc[ADR-011: DQ federation and deployment]
+* link:decisions/adr/ADR-012-engine-plugin-contract.adoc[ADR-012: engine plugin contract]
+* link:decisions/adr/ADR-013-gate-policy-and-severity.adoc[ADR-013: gate policy and severity]
+* link:decisions/adr/ADR-014-one-run-core-many-runners.adoc[ADR-014: one run core, many runners]
+* link:decisions/adr/ADR-015-row-outcomes-data-plane.adoc[ADR-015: row outcomes and the data-plane sink]
 * link:product-strategy.adoc[Product strategy and market landscape]
 * link:quickstart.adoc[Quickstart]
 * link:error-catalog.adoc[Error catalog]
-* link:specs/SPEC-001-evidence-plane-rollout.adoc[SPEC-001: evidence plane rollout]
-* link:specs/SPEC-002-gate-notifier.adoc[SPEC-002: gate-event notifier]
-* link:specs/SPEC-003-release-signing-sbom.adoc[SPEC-003: release signing and SBOM]
-* link:specs/SPEC-004-error-catalog-and-quickstart.adoc[SPEC-004: error catalog and quickstart]
-* link:specs/SPEC-005-control-plane-outline.adoc[SPEC-005: multi-tenant control plane (outline)]
-* link:specs/SPEC-006-tenant-namespaces.adoc[SPEC-006: tenant namespaces]
-* link:specs/SPEC-007-sqlalchemy-arrow-sink.adoc[SPEC-007: SQLAlchemy sink and Arrow fast path]
 * link:review-handoff-codex.adoc[Adversarial review handoff for Codex]
-* link:reviews/2026-09-21-adversarial-review.md[Adversarial review findings (Codex, 2026-09-21)]
-* link:reviews/2026-09-21-review-triage.md[Triage and dispositions]
 * link:technical-debt-analysis.adoc[Historical technical-debt analysis]
 * link:architecture-improvements.adoc[Architecture planning record]
 * link:performance-optimization.adoc[Performance ideas]

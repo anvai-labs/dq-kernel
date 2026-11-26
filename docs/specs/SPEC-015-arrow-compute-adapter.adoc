@@ -1,0 +1,82 @@
+= SPEC-015: Arrow compute adapter and Spark-free runner
+:toc:
+:sectlinks.
+
+Status: Accepted +
+Date: 2026-11-24 +
+Driven by: ADR-010, ADR-002, ADR-014 +
+Milestone: M3 +
+Depends on: SPEC-011, SPEC-012 +
+
+== Purpose
+
+Evaluate portable plans without a Spark cluster. ADR-010 gated its
+Arrow-native engine on "differential equivalence over the shared fixtures";
+this spec builds it. Arrow is the interchange standard, so one adapter
+reaches pandas, Polars, and DataFusion, which is also the only way most
+teams outside a lakehouse will ever run this framework.
+
+== In scope
+
+* `dq.arrow_adapter`: executes counts/v1, groups/v1, and ranges/v1 plans
+  over Arrow tables and hands the values to the kernel's own evaluation, so
+  decisions are made in exactly one place.
+* Input normalization through Arrow interchange: a pyarrow table, or any
+  object that exports one, is accepted. pandas, Polars, and DataFusion are
+  supported through that path and are not dependencies.
+* A capability set for the adapter. Semantics it cannot honour are declared
+  absent so a plan fails closed at validation, never approximates.
+* Wiring: `engine = "portable"` with `adapter = "arrow"`.
+* A shared run core (`dq/run.py`) that owns the rule loop, outcome
+  normalization, the gate policy, notifiers, and observers — extracted from
+  `DQFramework.run()` so that a second runner reuses it rather than copying
+  it.
+* A Spark-free runner (`dq.runner`) and a `dq-run` command: datasets read
+  with pyarrow.dataset (Parquet, CSV, JSON), the gate policy applied, and
+  `dq-report/v1` written.
+
+== Out of scope
+
+* Arrow-native rebuilds of vendor engines (Deequ, Great Expectations, DQX);
+* distributed Arrow runtimes;
+* streaming;
+* a query planner: the adapter computes the kernel's metrics and nothing
+  more.
+
+== Contracts
+
+* The adapter produces the same metric values the Spark adapter does for
+  every fixture the kernel defines, including null, NaN, decimal, and
+  empty-input cases.
+* Only bounded summaries leave the compute layer: one aggregate row per
+  dataset.
+* `dq.arrow_adapter` imports with pyarrow absent (it fails closed when used
+  without it) and with every other extra blocked.
+* `DQFramework` remains the Spark facade (ADR-001); its behaviour and its
+  return type do not change.
+
+== Acceptance gates
+
+* G1 — The Arrow adapter passes the shared fixture corpus in full, including
+  the null, NaN, decimal, and empty-input cases.
+* G2 — A direct Spark-versus-Arrow differential over the same data agrees on
+  every plan in the corpus.
+* G3 — pandas, Polars, and DataFusion frames are accepted through Arrow
+  interchange (each tested when its library is installed).
+* G4 — `dq-run` completes an end-to-end run and writes a valid
+  `dq-report/v1` in a process where importing Spark fails.
+* G5 — `dq.arrow_adapter`, `dq.runner`, and `dq.run` import with all extras
+  blocked.
+* G6 — The Spark facade's outcomes are unchanged by extracting the run core
+  (the existing framework contract tests pass unmodified).
+
+== Progress
+
+* [ ] G1 — not started
+* [ ] G2 — not started
+* [ ] G3 — not started
+* [ ] G4 — not started
+* [ ] G5 — not started
+* [ ] G6 — not started
+
+Links: ADR-010; ADR-002; ADR-014; SPEC-011; SPEC-016.

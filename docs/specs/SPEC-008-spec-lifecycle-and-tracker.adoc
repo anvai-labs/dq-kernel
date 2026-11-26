@@ -1,0 +1,84 @@
+= SPEC-008: Spec lifecycle and progress tracker
+:toc:
+:sectlinks.
+
+Status: In Progress — awaiting CI on the carrying pull request +
+Date: 2026-11-24 +
+Driven by: owner directive of 2026-11-24, ADR-012 +
+Milestone: M0 +
+
+== Purpose
+
+Make "specs first, delivery tracked against them" an enforced property of
+the repository instead of a habit. Before this spec every document still
+read "Draft for review" whether or not it had shipped, and nothing tied a
+claim of done to evidence.
+
+== In scope
+
+* `docs/roadmap.adoc`: the status model, the milestones, one tracker table,
+  a per-milestone summary, and the triage of historical proposals.
+* Spec format v2, a superset of the original: header fields `Status`,
+  `Date`, `Driven by`, `Milestone`, and the optional `Depends on` and
+  `Gate`; sections `Purpose`, `In scope`, `Out of scope`, the optional
+  `Contracts`, `Acceptance gates`, `Progress`, and a trailing `Links:` line.
+* Stable gate IDs (`G1`, `G2`, ...) so each `Progress` line cites the gate
+  it reports on.
+* The status vocabulary and its rules (see Contracts).
+* `scripts/roadmap.py`: regenerates the tracker from the spec files
+  (`--write`) and fails when it is stale (`--check`).
+* The contract test `dq/tests/test_specs_contract.py`.
+* Reconciliation of SPEC-001..007 against the code.
+* A status banner on every historical planning document, and a disposition
+  for every proposal those documents make.
+
+== Out of scope
+
+* Estimates, assignees, and dates for work that is not released;
+* a dashboard, an issue-tracker sync, or a hosted project board;
+* changing what any existing spec requires (reconciliation records what is
+  true; it does not move goalposts, and any amendment is written down).
+
+== Contracts
+
+* The spec file is the single source of truth. The tracker table and the
+  milestone summary in `docs/roadmap.adoc` are generated from it and must
+  match it byte for byte.
+* Statuses, in lifecycle order: `Proposed` (written, awaiting acceptance),
+  `Accepted` (scope frozen and scheduled), `In Progress` (at least one gate
+  met), `Verified`, `Released`. Side states: `Blocked`, `Deferred`,
+  `Superseded`, `Rejected` — each must say why on its status line.
+* `Verified` requires every gate checked, each with an `evidence:` citation,
+  and a green CI run on the pull request that carries it. A status may not
+  skip `Verified`.
+* `Released` requires a tagged release; the version is on the status line
+  and has a heading in `CHANGELOG.md`.
+* Acceptance gates are testable statements. A gate that cannot be evidenced
+  by a test, a command, or an observed CI run is not a gate.
+
+== Acceptance gates
+
+* G1 — The tracker table and milestone summary in `docs/roadmap.adoc` equal
+  what the spec files generate, and `python scripts/roadmap.py --check`
+  exits 0.
+* G2 — The contract test fails for each drift class: a spec missing from or
+  out of sync with the tracker, a `Verified` status with an unchecked or
+  evidence-free gate, a missing required section or header field, a
+  `Progress` line citing an unknown gate, a non-contiguous gate or spec ID,
+  a dangling ADR or SPEC reference, and a `Released` status whose version is
+  not in the changelog.
+* G3 — SPEC-001..007 carry reconciled statuses, and every checked gate cites
+  a test that exists.
+* G4 — Every historical planning document points at the tracker, and every
+  proposal it makes has a disposition in the triage table.
+* G5 — CI is green on the pull request carrying this spec.
+
+== Progress
+
+* [x] G1 — evidence: `dq/tests/test_specs_contract.py::test_tracker_table_is_up_to_date`, `::test_tracker_summary_is_up_to_date`
+* [x] G2 — evidence: `dq/tests/test_specs_contract.py::test_tracker_detects_a_stale_table` and the `test_validator_rejects_*` cases
+* [x] G3 — evidence: `dq/tests/test_specs_contract.py::test_evidence_citations_name_real_tests`
+* [x] G4 — evidence: `dq/tests/test_specs_contract.py::test_historical_docs_point_at_the_tracker`
+* [ ] G5 — carried by the `specs/roadmap` pull request; checked when its CI run is green
+
+Links: ADR-012; SPEC-009; docs/roadmap.adoc.

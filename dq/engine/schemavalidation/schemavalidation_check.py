@@ -23,7 +23,8 @@ from pyspark.sql.types import (
 )
 import json, re
 from dq.identifiers import ColumnName, TableName
-from dq.utils import constants
+from dq.engine.schemavalidation import datatypes
+from dq.utils import keys
 
 
 def _fraction_is_one(value):
@@ -73,11 +74,11 @@ class SchemavalidationCheck:
         - ref_column : Reference Colun for Foreign key Constraint
         """
         threshold_list_count = self._schema_config.get(
-            constants.SCHEMA_VALIDATION_CHECK_FK_THRESHOLD_COUNT_KEY,
-            constants.SCHEMA_VALIDATION_CHECK_FK_THRESHOLD_COUNT_VALUE,
+            keys.SCHEMA_VALIDATION_CHECK_FK_THRESHOLD_COUNT_KEY,
+            keys.SCHEMA_VALIDATION_CHECK_FK_THRESHOLD_COUNT_VALUE,
         )
         use_list_check = self._schema_config.get(
-            constants.SCHEMA_VALIDATION_CHECK_FK_USE_LIST_KEY, True
+            keys.SCHEMA_VALIDATION_CHECK_FK_USE_LIST_KEY, True
         )
         cache_key = f"{full_tablename}.{ref_column}"
         if cache_key not in self._ref_cache:
@@ -97,7 +98,7 @@ class SchemavalidationCheck:
 
             self._ref_cache[cache_key] = {
                 "ref_df": ref_df,
-                constants.SCHEMA_VALIDATION_CHECK_FK_USE_LIST_KEY: use_list_check,
+                keys.SCHEMA_VALIDATION_CHECK_FK_USE_LIST_KEY: use_list_check,
                 "distinct_count": distinct_count,
             }
         # Serve the output from cache
@@ -114,10 +115,10 @@ class SchemavalidationCheck:
         Returns:
             Tuple of (src_column, full_tablename, ref_column, cached_data).
         """
-        src_column = fk.get(constants.SCHEMA_VALIDATION_SRC_COLUMN)
-        ref_db = fk.get(constants.SCHEMA_VALIDATION_REF_DB, None)
-        ref_table = fk.get(constants.SCHEMA_VALIDATION_REF_TABLE)
-        ref_column = fk.get(constants.SCHEMA_VALIDATION_REF_COLUMN)
+        src_column = fk.get(keys.SCHEMA_VALIDATION_SRC_COLUMN)
+        ref_db = fk.get(keys.SCHEMA_VALIDATION_REF_DB, None)
+        ref_table = fk.get(keys.SCHEMA_VALIDATION_REF_TABLE)
+        ref_column = fk.get(keys.SCHEMA_VALIDATION_REF_COLUMN)
         full_tablename = self._get_fulltable(db=ref_db, tbl=ref_table)
         cached_data = self.get_ref_cached_data(full_tablename, ref_column)
         return src_column, full_tablename, ref_column, cached_data
@@ -132,12 +133,10 @@ class SchemavalidationCheck:
         """
 
         joined_df = df
-        for fk in self._schema_config.get(
-            constants.SCHEMA_VALIDATION_FK_CONSTRAINTS, []
-        ):
+        for fk in self._schema_config.get(keys.SCHEMA_VALIDATION_FK_CONSTRAINTS, []):
             src_column, full_tablename, ref_column, cached_data = self._fk_binding(fk)
 
-            if not (cached_data[constants.SCHEMA_VALIDATION_CHECK_FK_USE_LIST_KEY]):
+            if not (cached_data[keys.SCHEMA_VALIDATION_CHECK_FK_USE_LIST_KEY]):
                 ref_df = cached_data["ref_df"]
                 joined_df = joined_df.join(
                     ref_df,
@@ -158,12 +157,10 @@ class SchemavalidationCheck:
         Returns:
         - The modified check object with foreign key constraints applied.
         """
-        for fk in self._schema_config.get(
-            constants.SCHEMA_VALIDATION_FK_CONSTRAINTS, []
-        ):
+        for fk in self._schema_config.get(keys.SCHEMA_VALIDATION_FK_CONSTRAINTS, []):
             src_column, full_tablename, ref_column, cached_data = self._fk_binding(fk)
 
-            if cached_data[constants.SCHEMA_VALIDATION_CHECK_FK_USE_LIST_KEY]:
+            if cached_data[keys.SCHEMA_VALIDATION_CHECK_FK_USE_LIST_KEY]:
                 ref_df = cached_data["ref_df"]
                 # Keep th following code commented as pydeequ passes all values in string format as expected on scala version of isContainedIn constraint.
                 # The following code could be used to uncomment and parse specific data type if required for data type check not natively supported.
@@ -203,7 +200,7 @@ class SchemavalidationCheck:
         return check
 
     def _get_typeofcheck_data_type(self, data_type, parameters):
-        lookupvalue = constants.SCHEMA_VALIDATION_TYPEOF_DATATYPE_MAP.get(
+        lookupvalue = datatypes.SCHEMA_VALIDATION_TYPEOF_DATATYPE_MAP.get(
             data_type, "unknown"
         )
         if "decimal" == lookupvalue:
@@ -226,7 +223,7 @@ class SchemavalidationCheck:
         assertion_lambda = _fraction_is_one
         # Validate schema for each column
         not_null_contraints = self._schema_config.get(
-            constants.SCHEMA_VALIDATION_NOT_NULL_COLUMNS_KEY, []
+            keys.SCHEMA_VALIDATION_NOT_NULL_COLUMNS_KEY, []
         )
         for field in tableSchema.fields:
             column_name = field.name
@@ -247,7 +244,7 @@ class SchemavalidationCheck:
                 (
                     o
                     for o in self._schema_config.get(
-                        constants.SCHEMA_VALIDATION_OVERRIDE_KEY, []
+                        keys.SCHEMA_VALIDATION_OVERRIDE_KEY, []
                     )
                     if column_name == o["column"]
                 ),
@@ -356,7 +353,7 @@ class SchemavalidationCheck:
         """Chain the datatype match constraint (hasDataType or typeof satisfies)."""
         if not nullable:
             mapped_constrainable_datatype = (
-                constants.SCHEVA_VALIDATION_PYDEEQU_DATATYPE_MAP.get(data_type)
+                datatypes.SCHEVA_VALIDATION_PYDEEQU_DATATYPE_MAP.get(data_type)
             )
             return check.hasDataType(
                 column=column_name,
@@ -388,11 +385,11 @@ class SchemavalidationCheck:
         Shared by single-check mode (one chained Check) and multi-check
         mode (one fresh Check per column); only the receiver differs.
         """
-        if data_type in constants.SCHEVA_VALIDATION_PYDEEQU_DATATYPE_MAP:
+        if data_type in datatypes.SCHEVA_VALIDATION_PYDEEQU_DATATYPE_MAP:
             if override:
-                if constants.SCHEMA_VALIDATION_OVERRIDE_CONFIG_PATTERN_KEY in override:
+                if keys.SCHEMA_VALIDATION_OVERRIDE_CONFIG_PATTERN_KEY in override:
                     pattern_regex = override.get(
-                        constants.SCHEMA_VALIDATION_OVERRIDE_CONFIG_PATTERN_KEY
+                        keys.SCHEMA_VALIDATION_OVERRIDE_CONFIG_PATTERN_KEY
                     )
                     check = check.hasPattern(
                         column=column_name,
@@ -403,7 +400,7 @@ class SchemavalidationCheck:
                     )
                     if not (
                         override.get(
-                            constants.SCHEMA_VALIDATION_OVERRIDE_CONFIG_REPLACE_KEY,
+                            keys.SCHEMA_VALIDATION_OVERRIDE_CONFIG_REPLACE_KEY,
                             True,
                         )
                     ):
@@ -427,9 +424,9 @@ class SchemavalidationCheck:
                     hint_expr,
                     assertion_lambda,
                 )
-        elif data_type in constants.SCHEVA_VALIDATION_CASTSPARKSQL_DATATYPE_MAP:
+        elif data_type in datatypes.SCHEVA_VALIDATION_CASTSPARKSQL_DATATYPE_MAP:
             cast_sparksql_type = (
-                constants.SCHEVA_VALIDATION_CASTSPARKSQL_DATATYPE_MAP.get(data_type)
+                datatypes.SCHEVA_VALIDATION_CASTSPARKSQL_DATATYPE_MAP.get(data_type)
             )
             cast_datatype_expr = f"{column_name} is NULL OR CAST({column_name} AS {cast_sparksql_type}) IS NOT NULL"
             if not nullable:
@@ -474,10 +471,10 @@ class SchemavalidationCheck:
         from dq.catalog.catalog_factory import CatalogFactory
 
         supported_types = [
-            constants.SCHEMA_VALIDATION_CATALOG_TYPE_SPARK,
-            constants.SCHEMA_VALIDATION_CATALOG_TYPE_HIVE,
-            constants.SCHEMA_VALIDATION_CATALOG_TYPE_UNITY,
-            constants.SCHEMA_VALIDATION_CATALOG_TYPE_GLUE,
+            keys.SCHEMA_VALIDATION_CATALOG_TYPE_SPARK,
+            keys.SCHEMA_VALIDATION_CATALOG_TYPE_HIVE,
+            keys.SCHEMA_VALIDATION_CATALOG_TYPE_UNITY,
+            keys.SCHEMA_VALIDATION_CATALOG_TYPE_GLUE,
         ]
 
         if catalog_type not in supported_types:
@@ -486,10 +483,8 @@ class SchemavalidationCheck:
                 f"Supported types: {', '.join(supported_types)}"
             )
 
-        database = self._schema_config.get(
-            constants.SCHEMA_VALIDATION_DATABASE_KEY, None
-        )
-        table = self._schema_config.get(constants.SCHEMA_VALIDATION_TABLE_KEY)
+        database = self._schema_config.get(keys.SCHEMA_VALIDATION_DATABASE_KEY, None)
+        table = self._schema_config.get(keys.SCHEMA_VALIDATION_TABLE_KEY)
         catalog_name = self._schema_config.get("catalog", None)
 
         provider = CatalogFactory.get_provider(
@@ -528,18 +523,18 @@ class SchemavalidationCheck:
             checks = []
 
         catalog_type = self._schema_config.get(
-            constants.SCHEMA_VALIDATION_CATALOG_TYPE_KEY,
-            constants.SCHEMA_VALIDATION_CATALOG_TYPE_SPARK,
+            keys.SCHEMA_VALIDATION_CATALOG_TYPE_KEY,
+            keys.SCHEMA_VALIDATION_CATALOG_TYPE_SPARK,
         )
         tableSchema = self._fetch_table_schema(catalog_type)
-        if catalog_type == constants.SCHEMA_VALIDATION_CATALOG_TYPE_SPARK:
+        if catalog_type == keys.SCHEMA_VALIDATION_CATALOG_TYPE_SPARK:
             checks = self._apply_spark_datatype_checks(
                 checks=checks, tableSchema=tableSchema
             )
         elif catalog_type in [
-            constants.SCHEMA_VALIDATION_CATALOG_TYPE_GLUE,
-            constants.SCHEMA_VALIDATION_CATALOG_TYPE_UNITY,
-            constants.SCHEMA_VALIDATION_CATALOG_TYPE_HIVE,
+            keys.SCHEMA_VALIDATION_CATALOG_TYPE_GLUE,
+            keys.SCHEMA_VALIDATION_CATALOG_TYPE_UNITY,
+            keys.SCHEMA_VALIDATION_CATALOG_TYPE_HIVE,
         ]:
             # Catalog schemas arrive pre-converted to a Spark StructType,
             # so the Spark datatype checks apply unchanged.
@@ -549,7 +544,7 @@ class SchemavalidationCheck:
 
         # Apply multi-column UNIQUE constraints
         unique_constraints = self._schema_config.get(
-            constants.SCHEMA_VALIDATION_UNQK_CONSTRAINTS, []
+            keys.SCHEMA_VALIDATION_UNQK_CONSTRAINTS, []
         )
         if unique_constraints:
             for unique_set in unique_constraints:
@@ -572,7 +567,7 @@ class SchemavalidationCheck:
                         )
                     )
         foreign_key_constraints = self._schema_config.get(
-            constants.SCHEMA_VALIDATION_FK_CONSTRAINTS, []
+            keys.SCHEMA_VALIDATION_FK_CONSTRAINTS, []
         )
         if foreign_key_constraints:
             if self._single_check_mode:

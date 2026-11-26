@@ -1,0 +1,60 @@
+= SPEC-023: Pipeline-expectation compiler
+:toc:
+:sectlinks.
+
+Status: Deferred — ADR-011 sequences role A after OSS Spark 4 adoption grows +
+Date: 2026-11-24 +
+Driven by: ADR-011 role A +
+Milestone: M5 +
+
+== Purpose
+
+Let the platform enforce what it can express natively. ADR-011 federates:
+one rule pack is enforced by whatever the platform can say natively, and
+this framework validates the residue and unifies both into one evidence
+stream. Roles B (Change Data Feed validator) and C (event-log harvester)
+are built; role A, the compiler, is not.
+
+== In scope
+
+* A pure compiler from the row-level subset of a rule pack to
+  pipeline-expectation clauses (`CONSTRAINT name EXPECT (predicate)`), with
+  the equivalent for Spark Declarative Pipelines.
+* A residue report: every rule the platform cannot express — aggregates,
+  uniqueness, foreign keys, ranges — named, with the reason, so it stays on
+  this framework.
+* `dq-compile`: emits the clauses and the residue report.
+
+== Out of scope
+
+* Deploying or applying the clauses to a pipeline;
+* compiling aggregate rules into platform expectations (they cannot be
+  expressed there by construction);
+* Databricks-specific APIs beyond the clause syntax.
+
+== Contracts
+
+* The compiler is a pure function of a rule pack; it imports no Spark and
+  contacts no service.
+* A rule is either compiled or reported as residue; nothing is dropped
+  silently.
+* Compiled clauses keep the rule's name so platform-emitted results can be
+  joined back to the rule pack.
+
+== Acceptance gates
+
+* G1 — Every row-level rule in the supported subset compiles to the
+  specified clause text (snapshot).
+* G2 — Every aggregate, uniqueness, foreign-key, and range rule appears in
+  the residue report with a reason, and the two sets partition the rule
+  pack.
+* G3 — The harvester for platform-emitted expectation results (role C)
+  joins each result back to its originating rule by name.
+
+== Progress
+
+* [ ] G1 — not started; waiting on the ADR-011 gate
+* [ ] G2 — not started
+* [ ] G3 — not started
+
+Links: ADR-011; SPEC-013.

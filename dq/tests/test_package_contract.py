@@ -56,6 +56,32 @@ def test_core_package_imports_without_heavy_optional_dependencies():
     assert result.returncode == 0, result.stderr
 
 
+def test_framework_facade_imports_without_heavy_optional_dependencies():
+    result = _run_with_blocked_imports(
+        "boto3",
+        "databricks",
+        "pydeequ",
+        "pyspark",
+        statement="import dq.dq_framework; print('framework ok')",
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_engine_contract_imports_without_spark_or_vendor_libraries():
+    result = _run_with_blocked_imports(
+        "boto3",
+        "databricks",
+        "pydeequ",
+        "pyspark",
+        statement=(
+            "from dq.engine.dq_engine import DQEngine; "
+            "from dq.engine import checkspec; "
+            "from dq.utils import keys; print('contract ok')"
+        ),
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_config_helpers_import_without_aws_extra():
     result = _run_with_blocked_imports(
         "boto3", statement="from dq.utils import config_utils"

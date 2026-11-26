@@ -1,0 +1,106 @@
+# ADR-012: Engine Plugin Contract
+
+Date: 2026-11-24
+Status: Accepted
+Context: engine plugin architecture redesign (7 built-in engines, third-party distribution, non-Spark roadmap)
+
+## Context
+
+The plugin boundary grew engine-by-engine. Every integration point was an
+implicit convention rediscovered from sibling engines: result dicts were
+hand-shaped 6 times, the lazy-import/install-hint pattern duplicated, the
+orchestrator was the only notifier-consumer that never wired the notifier,
+capabilities were declared but read by nobody, and an engine's identity
+lived in three stringly-typed places at once (loader naming convention,
+validate.py's hardcoded payload table, and the engine directory itself).
+Vendor imports leaked into the foundation (pydeequ via `dq.utils.constants`)
+and into the engine ABC (pyspark), so `import dq.dq_framework` required the
+pydeequ extra -- breaking the light-core import contract (ADR-009) one
+layer above where it was tested.
+
+## Decision
+
+**Layer model (downward-only dependencies):**
+
+```
+L5 entry        cli.py, validate.py (reads the registry; no engine tables)
+L4 orchestrate  dq_framework.py -- the only engine caller; notifier wiring
+L3 plugins      dq/engine/* engines, sink impls, catalog impls
+L1 contracts    DQEngine ABC (template apply + hooks + CAPABILITIES v2),
+                engine_loader + registry (built-ins + entry points),
+                OutcomeSink port, catalog base
+L2 kernel       plan, envelope, portable_config, spark/cdf adapters
+L0 foundation   exceptions, identifiers, outcomes, checkspec,
+                utils/{keys, config_utils, sanitization, imports}
+```
+
+**1. Template-method `apply` (L1 contract).** `DQEngine.apply` is concrete:
+capability guard (persistence refusal fires before any work) -> shared log
+preamble -> `_prepare` (once-per-instance vendor plumbing) -> `_execute`
+(the one abstract hook) -> `_persist_outcomes` (default standard frames;
+engines with non-standard artifact shapes override -- artifact table
+schemas are downstream-consumed and are never silently reshaped).
+Built-in engines may not override `apply` (contract test); external
+overrides keep working through MRO with a `DeprecationWarning`, and must
+provide a trivial `_execute` to instantiate.
+
+**2. CAPABILITIES v2.** `{criticality: native|derived|absent, row_filter,
+failed_rows, persistence}`. Consumers branch on capabilities, never on
+engine names. `persistence: False` engines (dqdl) reject a configured
+repository declaratively instead of a bespoke runtime raise.
+
+**3. Declarative registry + entry points.** `dq.engine.registry` declares
+each built-in engine once (`EngineSpec`: module, class, payload key/type,
+extra, renamed-from). `EngineLoader` resolution: registry -> `dq_kernel.engines`
+entry-point group -> naming-convention fallback (debug-logged). `validate.py`
+reads payload rules from the registry -- the parallel-edit trap is dead, and
+a drift-guard contract test pins every engine directory to a registry entry.
+`EngineNotFoundError(DQFrameworkError, ImportError)` replaces raw
+ImportError/AttributeError leaks while keeping `except ImportError` callers
+working.
+
+**4. Shared seam helpers.** `checkspec.build_result` is the only way result
+dicts are built (identity + severity + bool-coerced success, one
+definition); `utils.imports.require_extra` is the only lazy-import
+install-hint pattern; `utils.keys` carries HOCON key strings with zero
+vendor imports; `dq_engine` imports pyspark under TYPE_CHECKING only.
+
+**5. One run key per run.** `_persist` uses the framework-injected `dqts`,
+so artifacts, `run_scope`, metric `ts`, and `GateEvent.run_key` all share
+one key; direct engine construction without `dqts` falls back to epoch
+millis.
+
+**6. Notifier wired by orchestration.** `run()` builds the notifier from
+`dqframework.notify` and emits one `GateEvent` per run with the additive
+severity split (`blocked`/`warned` from `details.criticality`); `status`
+and `failed` semantics are unchanged (evidence compat), and delivery
+failures stay fail-open.
+
+**7. Portable engine.** The kernel's portable plans execute through the
+same plugin path (`engine = "portable"`, payload: `plan` + `dataset` +
+caller-certified `snapshot_sha256` -- never auto-derived). The fail-closed
+translator rejects anything outside the supported subset; no automatic
+translation (ADR-002), and new compute engines land behind kernel semantic
+versions (ADR-010).
+
+## Consequences
+
+* New-engine integration drops to: create the directory (hooks + capabilities
+  via `build_result`/`require_extra`), add one `EngineSpec`, add tests.
+  validate.py needs no edits.
+* Non-Spark engines (ADR-010) can subclass the ABC today: the contract is
+  pyspark-free, and Spark coupling is confined to the default persistence
+  path, which engines override.
+* Artifact table schemas are preserved per engine (deequ-family raw frames,
+  businessrules native frames) and pinned by shape-guard tests.
+* `dq.utils.constants` is removed; import from `dq.utils.keys` (keys) or
+  `dq.engine.schemavalidation.datatypes` (pydeequ datatype maps).
+* Engine lifecycle is uniform: log preamble, prepare-once caching, bounded
+  persistence, capability guard.
+
+## References
+
+ADR-002 (engine-neutral kernel), ADR-009 (open-core boundary),
+ADR-010 (compute-agnostic data plane), ADR-011 (federation).
+Contract tests: `test_engine_contract.py`, `test_registry.py`,
+`test_package_contract.py`.

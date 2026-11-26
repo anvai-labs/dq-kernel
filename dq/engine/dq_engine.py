@@ -4,49 +4,149 @@
 import json
 import logging
 import time
+import warnings
 from abc import ABC, abstractmethod
-from typing import Optional, List, Dict, Any
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from pyhocon import ConfigTree
-from pyspark.sql import DataFrame
-from pyspark.sql.types import BooleanType, StringType, StructField, StructType
 
-from dq.utils import constants
+from dq.exceptions import ConfigurationError
+from dq.utils import keys
+
+if TYPE_CHECKING:  # light-core: the engine contract imports with no extras installed
+    from pyspark.sql import DataFrame
 
 
 class DQEngine(ABC):
-    """Abstract base class for all data quality engines.
+    """Contract for all data quality engines (ADR-012).
 
-    Engines implement validation logic by overriding the ``apply`` method.
-    They are loaded dynamically by ``EngineLoader`` based on the engine name
-    in the HOCON configuration.
+    Engines subclass this ABC and implement the ``_execute`` hook; the
+    ``apply`` template method standardizes the run lifecycle so every
+    engine gets the same log preamble, capability guard, prepare-once
+    caching seam, and persistence path. Engines loaded dynamically by
+    ``EngineLoader`` based on the engine name in the HOCON configuration.
+
+    The ``dataframe`` argument is the engine-native frame object (a
+    pyspark DataFrame for Spark engines, duck-typed at this boundary --
+    the ABC itself does not import pyspark, so non-Spark engines may
+    subclass it and receive their own frame type).
     """
 
-    #: Capability manifest: what this engine natively supports. Consumers
-    #: (sinks, notifier, report) may branch on capabilities, never on engine
+    #: Capability manifest (v2): what this engine natively supports. The
+    #: template and consumers branch on capabilities, never on engine
     #: names, so new engines plug in by declaring what they can do.
     #: * ``criticality`` -- ``native`` (engine has per-rule severity that
     #:   affects behavior/results), ``derived`` (kernel normalizes an
     #:   engine-native axis onto it), or ``absent`` (no per-rule severity).
     #: * ``row_filter`` / ``failed_rows`` -- boolean support flags.
+    #: * ``persistence`` -- whether the engine can persist evidence to a
+    #:   repository (``False`` engines reject a configured repository).
     CAPABILITIES = {
         "criticality": "absent",
         "row_filter": False,
         "failed_rows": False,
+        "persistence": True,
     }
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if "apply" in cls.__dict__:
+            warnings.warn(
+                f"{cls.__name__} overrides DQEngine.apply; engines implement "
+                "_prepare/_execute hooks instead. apply() overrides are "
+                "deprecated since 0.3 and rejected by the engine contract "
+                "test.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     def __init__(self, config: ConfigTree, dqts: Optional[int] = None):
         self._config = config
         self._dqts = dqts
 
+    def apply(self, dataframe, repository=None) -> List[Dict[str, Any]]:
+        """Template method: guard, log, prepare, execute, persist.
+
+        Args:
+            dataframe: Engine-native frame to validate.
+            repository: Optional ``OutcomeSink``; nothing is persisted
+                when falsy.
+
+        Returns:
+            List of metric dictionaries with ``check``, ``success``,
+            and ``details`` keys.
+
+        Raises:
+            ConfigurationError: When the engine declares
+                ``persistence=False`` and a repository is configured.
+        """
+        if repository and not self.CAPABILITIES.get("persistence", True):
+            raise ConfigurationError(
+                f"{type(self).__name__} declares persistence=False; engine "
+                "cannot persist evidence. Remove the repository "
+                "configuration or pick a persistence-capable engine."
+            )
+        self._log_processing_start()
+        prepared = self._prepare(dataframe)
+        metrics = self._execute(dataframe, prepared)
+        self._persist_outcomes(repository, metrics, dataframe)
+        return metrics
+
     def _log_processing_start(self) -> None:
         """Log the rule/engine preamble shared by engine ``apply`` methods."""
-        rule_name = self._config.get(constants.DQ_RULE_NAME, "Unknown")
-        engine_name = self._config.get(constants.DQ_ENGINE_NAME, "Unknown")
+        rule_name = self._config.get(keys.DQ_RULE_NAME, "Unknown")
+        engine_name = self._config.get(keys.DQ_ENGINE_NAME, "Unknown")
         # Log under the concrete engine's module channel so per-engine
         # log routing keeps working after this shared-helper extraction.
         logging.getLogger(type(self).__module__).info(
             "Processing %s with %s Engine", rule_name, engine_name
         )
+
+    def _prepare(self, dataframe) -> Any:
+        """Optional one-time vendor plumbing before the first execution.
+
+        Engines may cache construction on ``self`` (lazy vendor imports,
+        suite/definition building) -- the framework reuses engine
+        instances across apply calls, so once-per-instance caching is the
+        convention. The returned object is passed to ``_execute``.
+
+        Args:
+            dataframe: The engine-native frame for this run.
+
+        Returns:
+            Anything ``_execute`` needs; ``None`` by default.
+        """
+        return None
+
+    @abstractmethod
+    def _execute(self, dataframe, prepared) -> List[Dict[str, Any]]:
+        """Run the engine's checks against the frame.
+
+        Args:
+            dataframe: The engine-native frame for this run.
+            prepared: Whatever ``_prepare`` returned.
+
+        Returns:
+            Metric dicts built with :func:`dq.engine.checkspec.build_result`.
+        """
+
+    def _persist_outcomes(self, repository, metrics, dataframe) -> None:
+        """Persist engine evidence under the run key.
+
+        Default path: the standard (check, success, details-JSON) artifact
+        frames via :meth:`_artifact_frames`. Engines with non-standard
+        artifact shapes (raw vendor frames, native verification columns)
+        override this method to keep their own -- artifact table schemas
+        are downstream-consumed and are never silently reshaped.
+
+        Args:
+            repository: Optional ``OutcomeSink`` (falsy skips persistence).
+            metrics: The metric dicts ``_execute`` returned.
+            dataframe: The engine-native frame for this run.
+        """
+        if not repository:
+            return
+        metrics_df, verifications_df = self._artifact_frames(metrics, dataframe)
+        self._persist(repository, metrics_df, verifications_df)
 
     def _persist(self, repository, successMetrics, checkVerifications) -> None:
         """Persist metrics and verification DataFrames under one result key.
@@ -58,17 +158,21 @@ class DQEngine(ABC):
                 ``DQ_REPOSITORY_VERIFICATIONS``.
         """
         if repository:
-            # Epoch millis, equivalent to pydeequ's ResultKey.current_milli_time()
-            # but pydeequ-free so any extras combination can persist.
-            current_milli_time = int(time.time() * 1000)
+            # One run key per run: the framework stamps every engine with the
+            # run timestamp (dqts), so artifacts land under the same key as
+            # run_scope(...) and the ts on each metric dict. Engines built
+            # directly without a timestamp fall back to epoch millis.
+            current_milli_time = (
+                self._dqts if self._dqts is not None else int(time.time() * 1000)
+            )
             repository.save(
                 successMetrics,
-                constants.DQ_REPOSITORY_METRICS,
+                keys.DQ_REPOSITORY_METRICS,
                 current_milli_time,
             )
             repository.save(
                 checkVerifications,
-                constants.DQ_REPOSITORY_VERIFICATIONS,
+                keys.DQ_REPOSITORY_VERIFICATIONS,
                 current_milli_time,
             )
 
@@ -77,8 +181,11 @@ class DQEngine(ABC):
         """Build the run's metrics and verifications artifact DataFrames.
 
         Shared by engines that persist a run as one (check, success,
-        details-JSON) pair of frames under a single repository key.
+        details-JSON) pair of frames under a single repository key. Pyspark
+        is imported lazily so this contract module stays import-light.
         """
+        from pyspark.sql.types import BooleanType, StringType, StructField, StructType
+
         spark = dataframe.sparkSession
         metrics_df = spark.createDataFrame(
             [(metric["check"], metric["success"]) for metric in metrics],
@@ -107,17 +214,3 @@ class DQEngine(ABC):
             ),
         )
         return metrics_df, verifications_df
-
-    @abstractmethod
-    def apply(self, dataframe: DataFrame, repository=None) -> List[Dict[str, Any]]:
-        """Apply data quality checks to the given DataFrame.
-
-        Args:
-            dataframe: Spark DataFrame to validate.
-            repository: Optional repository configuration for persisting results.
-
-        Returns:
-            List of metric dictionaries with ``check``, ``success``,
-            and ``details`` keys.
-        """
-        raise NotImplementedError("Subclasses must implement this method")

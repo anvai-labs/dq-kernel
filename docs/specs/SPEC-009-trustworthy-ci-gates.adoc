@@ -1,0 +1,101 @@
+= SPEC-009: Trustworthy CI gates
+:toc:
+:sectlinks.
+
+Status: In Progress — one gate remains: the lock hotfix needs merging +
+Date: 2026-11-24 +
+Driven by: ADR-009 (CI proves the open repo), SPEC-008 +
+Milestone: M0 +
+
+== Purpose
+
+Make a green CI run mean what it says: every lane passed, and any failure
+says why. On 2026-11-24 none of that held. `main` had been red for six days
+because a dependency-floor commit never regenerated the lock file; the merge
+gate ignored a red lane; stacked pull requests ran no CI at all; and no
+failing test or collection error printed a traceback.
+
+== In scope
+
+* Lock discipline: `poetry check --lock` in the lint lane, so a
+  `pyproject.toml` change without a lock regeneration cannot merge.
+* An honest merge gate: the `build` job lists every other lane in `needs`
+  and its verify step is generic over that list, so adding a lane cannot
+  produce a red job that merges anyway.
+* CI on every pull request regardless of its base branch, so stacked pull
+  requests are tested.
+* Failure visibility: pytest options never silence the summary; subprocess
+  contract tests force a collection error and a failing test and assert the
+  traceback is printed.
+* An explicit lane matrix: the main test lane installs every extra that has
+  tests. Extras are co-installable because the lock resolves one version per
+  package for the union; an extra with a Python marker is skipped by Poetry
+  where it does not apply.
+* A unit lane hermetic to which extras are installed.
+* Workflow hygiene: actionlint (version-pinned, sha256-verified download)
+  and commit-SHA-pinned actions, both enforced by test.
+* Repairs: the stale lock on `main`, and the two stacked pull requests.
+
+== Out of scope
+
+* The owner-private workflow and its runner configuration;
+* release signing (SPEC-003);
+* branch-protection settings — "require `build`" is an owner setting, not
+  code, and is recommended rather than specified;
+* test-suite performance work.
+
+== Contracts
+
+* `build.needs` equals the set of all other jobs in `ci.yml`.
+* The gate passes when every lane is `success` or `skipped`, and on pull
+  requests additionally requires `dependency-review` to be `success`.
+* The gate runs under `always()`, so a failed lane produces a red gate
+  instead of a skipped one.
+* The main test lane performs exactly one `poetry install`, naming every
+  extra under test.
+* The gate script is executed by the workflow contract test against sample
+  `needs` maps; it is never checked by pattern matching alone.
+
+== Acceptance gates
+
+* G1 — `main` is green and its lock satisfies `poetry check --lock`.
+* G2 — A collection error and a failing test each print their traceback
+  under the repository's default pytest options.
+* G3 — The gate script, executed against success, failure, cancelled and
+  skipped lane results, passes and fails as specified; `build.needs` lists
+  every other lane.
+* G4 — CI runs on a pull request whose base is not `main`.
+* G5 — The main lane installs the `dqx` extra and the live DQX tests run
+  and pass in CI on the 3.12 job.
+* G6 — The unit lane passes with DQX installed and with it absent.
+* G7 — Workflow syntax is linted in CI, and every action is pinned to a
+  commit SHA.
+* G8 — Pull requests #54 and #55 are green.
+
+== Progress
+
+* [ ] G1 — the hotfix is ready: PR #56 regenerated the lock with Poetry
+  2.4.2 and its CI run succeeded; `main` turns green when it merges
+* [x] G2 — evidence: `dq/tests/test_pytest_output_contract.py::test_collection_error_prints_its_traceback`, `::test_failing_test_prints_its_traceback`, `::test_repository_addopts_never_silence_the_summary`
+* [x] G3 — evidence: `dq/tests/test_ci_workflow_contract.py::test_gate_passes_when_every_lane_succeeds`, `::test_gate_fails_when_any_lane_fails`, `::test_gate_fails_on_every_non_success_result`, `::test_merge_gate_lists_every_other_lane`
+* [x] G4 — observed: CI run 45510661749 on PR #55, whose base is a feature
+  branch, completed `success`
+* [x] G5 — observed: CI run 45510652808 on PR #54 installed
+  `databricks-labs-dqx 0.17.2` in the 3.12 job and all four `test_dqx.py`
+  tests passed (624 passed)
+* [x] G6 — observed: the unit lane passed in a CI-like environment with DQX
+  and pydeequ installed (429 passed) and in the default one without them;
+  the guards are the `importorskip` calls in `test_dqx_unit.py`,
+  `test_databricks_check.py` and `test_package_contract.py`
+* [x] G7 — evidence: `dq/tests/test_ci_workflow_contract.py::test_every_action_is_pinned_to_a_commit_sha`, `::test_lint_lane_validates_workflow_syntax`; the lint lane ran `poetry check --lock` and actionlint green in run 45510652808
+* [x] G8 — observed: CI runs 45510652808 (#54) and 45510661749 (#55)
+  completed `success`
+
+[NOTE]
+====
+Known gaps, recorded rather than hidden: the `delta` extra has no live test
+in CI (the Change Data Feed tests run on fakes), and the `cron` package is
+exercised only through the `databricks` extra.
+====
+
+Links: ADR-009; ADR-012; SPEC-008; SPEC-003.

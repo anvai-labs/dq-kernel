@@ -1,0 +1,72 @@
+= SPEC-016: SQL compute adapter
+:toc:
+:sectlinks.
+
+Status: Accepted +
+Date: 2026-11-24 +
+Driven by: ADR-002, ADR-011 +
+Milestone: M3 +
+Depends on: SPEC-015 +
+
+== Purpose
+
+Evaluate portable plans where the data already lives: in a database. ADR-011
+recorded that "nothing in the kernel assumes Spark" and deliberately kept a
+SQL adapter possible; ADR-002 planned non-Spark compilers. Counts, groups,
+and ranges are aggregates, and every SQL engine computes aggregates natively,
+so the plan compiles to one query per dataset and the data never moves.
+
+== In scope
+
+* `dq.sql_adapter`: compiles a counts/v1, groups/v1, or ranges/v1 plan into a
+  single aggregate `SELECT` per dataset, with named bind parameters, and
+  evaluates the returned values with the kernel's own evaluation.
+* Execution over an injected SQLAlchemy `Engine` or `Connection`. DuckDB is
+  the certified lane; PostgreSQL-dialect statement compilation is
+  snapshot-tested without a server.
+* A capability set for the adapter. Where an engine's semantics differ from
+  the kernel's (NaN ordering in min/max, floating-point ranges that must be
+  exact), the capability is declared absent and the plan fails closed at
+  validation.
+* Wiring: `engine = "portable"` with `adapter = "sql"` and a connection
+  reference whose credentials come from the environment.
+
+== Out of scope
+
+* Certifying warehouses other than DuckDB (the statements are ANSI, but
+  each warehouse is a separate lane);
+* compiling vendor-engine vocabularies to SQL;
+* DDL or any write to the target database;
+* a query builder dependency: the compiler emits SQL itself.
+
+== Contracts
+
+* One query per dataset per plan; no per-rule query and no client-side
+  filtering of rows.
+* Compilation is deterministic: a plan always compiles to the same text, so
+  the statement can be logged, reviewed, and snapshot-tested.
+* The adapter returns metric values in the Python types the Spark adapter
+  returns, so the kernel's evaluation cannot tell the adapters apart.
+* `dq.sql_adapter` imports with SQLAlchemy absent and with every other extra
+  blocked.
+
+== Acceptance gates
+
+* G1 — The SQL adapter passes the shared fixture corpus on DuckDB, for every
+  case its capability set claims.
+* G2 — Every corpus plan compiles to the expected PostgreSQL-dialect
+  statement (snapshot).
+* G3 — A plan requiring a semantic the adapter declares absent fails with a
+  `ConfigurationError` before any query executes, naming the rule and the
+  missing capability.
+* G4 — A fake connection records exactly one query per dataset for a
+  multi-rule plan.
+
+== Progress
+
+* [ ] G1 — not started
+* [ ] G2 — not started
+* [ ] G3 — not started
+* [ ] G4 — not started
+
+Links: ADR-002; ADR-011; SPEC-007; SPEC-015.
