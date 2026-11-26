@@ -18,24 +18,32 @@ this framework's reports, sinks, or gate.
 
 == In scope
 
-* One `Harvester` contract: read an external result source and yield the
-  existing outcome dictionaries, or reject the source.
-* Provenance on every imported outcome: `details.origin` records the source
-  system and a reference to the input.
+* One `Harvester` contract: `harvest(source, *, reference)` takes the bytes
+  of an external result source and returns the existing outcome
+  dictionaries, or rejects the source.
+* Provenance on every imported outcome: `details.origin` names the source
+  system, the reference it was read under, and the SHA-256 of the exact bytes
+  that were parsed.
 * Importers, pure stdlib, no vendor dependency:
 ** dbt `run_results.json`;
 ** Great Expectations validation-result JSON;
 ** a generic columnar file (CSV or JSON) with the columns `check`, `success`,
    an optional `criticality`, and an optional `details` object, so any tool
    can federate through a trivial format.
-* `dq-import`: writes a `dq-report/v1` document from an imported source, so
-  imported outcomes get the same report, gate, and sinks.
+* `dq-import`: writes a `dq-report/v1` document from an imported source and
+  applies the gate policy to it. Imported outcomes are ordinary outcome
+  dictionaries, so they reach the same report, gate and sinks as any other.
+* A checked-in example of each source, which the tests import.
 
 == Out of scope
 
 * Live API clients for any vendor;
 * parsers for every vendor's export variants;
-* a scheduled or long-running ingestion process (ADR-001).
+* a scheduled or long-running ingestion process (ADR-001);
+* the Lakeflow pipeline-expectations harvester
+  (`PipelineExpectationsHarvester`). It reads a live event log through Spark
+  rather than parsing bytes, and its outcomes already carry the event's own
+  identifiers. It keeps its shape.
 
 == Contracts
 
@@ -43,22 +51,173 @@ this framework's reports, sinks, or gate.
 * An unknown or malformed status fails closed with a message naming the
   offending record and its position.
 * Importing never widens the outcome contract: a record either normalizes
-  into it or is rejected (ADR-011).
+  into it or is rejected (ADR-011). Every batch leaves `dq.harvest` through
+  the outcome gate (`normalize_outcomes`) and with unique labels.
 * Raw row-level data from the source is never copied into `details`; bounded
   identifiers, counts, and measurements only.
+* A source that holds no check results is rejected. Both vendors call that
+  case a success: an empty Great Expectations suite validates with
+  `success: true`, and the artifact of a `dbt run` holds models and no tests.
+* A rejected source raises `HarvestError`, which is a `ConfigurationError`:
+  the input is to be fixed, not the data, so `dq-import` exits 2.
+* Only the fields a harvester reads are required of a source; others are
+  ignored. dbt 1.12 writes a field its own published schema does not list.
+* The digest in a report is of the bytes that were parsed. A source is read
+  once.
+
+=== What every imported outcome looks like
+
+[source,json]
+----
+{
+  "check": "<label>",
+  "success": false,
+  "details": {
+    "criticality": "error",
+    "status": "<the source system's own word for the outcome>",
+    "observed": {"<count or measurement>": 3},
+    "origin": {"system": "dbt", "reference": "target/run_results.json",
+               "sha256": "<64 hex digits>", "run": "<the source's run id>"}
+  }
+}
+----
+
+`status` and `observed` are present when the source has them. `run` is
+present when the source names the run that produced it. `criticality` is
+`error` unless the source says the check is advisory. SPEC-020's policy
+outcomes use the same `origin`.
+
+=== dbt `run_results.json`
+
+Only data tests are imported: records whose `unique_id` begins `test.`. The
+`unique_id` is the label. Models, seeds and snapshots are not quality
+results. A unit test (`unit_test.`) judges a model's logic on fixed inputs,
+not a dataset, so it is left out too.
+
+dbt's own status is kept in `details.status` and maps like this:
+
+[cols="1,1,1,3",options="header"]
+|===
+| dbt status | `success` | `criticality` | Why
+
+| `pass`
+| true
+| error
+| Evaluated. Neither threshold was met.
+
+| `fail`
+| false
+| error
+| Evaluated. The `error_if` threshold was met at `severity: error`.
+
+| `warn`
+| false
+| warn
+| Evaluated. Only the `warn_if` threshold was met.
+
+| `error`
+| false
+| error
+| The test's own query failed. Nothing was judged.
+
+| `skipped`
+| false
+| error
+| The test did not run: `dbt build` skips what follows a failed test.
+    Nothing was judged.
+|===
+
+Any other status on a data test is rejected. The artifact does not record a
+test's configured severity, so a test that was not evaluated cannot be read
+as the advisory kind. No verdict is not a pass.
+
+`observed.failures` is dbt's count of failing rows where dbt reports one.
+`observed.execution_time` is kept for a test that ran; a skipped test reports
+`0`, which would say it ran in no time. `message` is never copied: it is free
+text, a stock sentence or a database error, not a measurement.
+
+=== Great Expectations validation-result JSON
+
+The document is one `ExpectationSuiteValidationResult` as `to_json_dict()`
+writes it. One outcome per entry of `results`, in the document's order.
+
+The label follows the rule every engine follows, and the one the
+`greatexpectations` engine gives the same expectation: the expectation type
+and its column, `expect_column_values_to_not_be_null_id`, or the type alone
+for a table-level expectation. Great Expectations 1.24 and 1.25 have no name
+of their own for an expectation.
+
+* `success` must be a JSON boolean; anything else is rejected.
+* `criticality` is `warn` when the expectation's `severity` is `warning`, and
+  `error` otherwise.
+* `details.status` is `success`, `failure`, or `error` when the expectation
+  raised. A raised expectation comes back as `success: false` with an empty
+  `result`: nothing was judged, and it is a failed check.
+* `details.observed` holds the numbers at the top level of `result`:
+  `unexpected_count`, `element_count`, `observed_value` where it is a
+  number. Lists, strings and nested objects are not copied. That leaves out
+  `partial_unexpected_list` and `partial_unexpected_counts`, which hold row
+  values, `partial_unexpected_index_list`, which holds row locators, and the
+  traceback a raised expectation carries.
+
+=== The columnar format
+
+One record per check, as a JSON array of objects or as a CSV file with a
+header row:
+
+[source,csv]
+----
+check,success,criticality,details
+orders_id_unique,false,error,"{""failed_rows"": 3}"
+orders_status_in_set,false,warn,
+orders_row_count,true,,
+----
+
+* `check` is the label, a non-empty string, unique in the file.
+* `success` is required. In JSON it must be `true` or `false`. In CSV the
+  cell must read `true` or `false`, in any case.
+* `criticality` is optional and takes the spellings every engine takes
+  (`error`, `warn`, `warning`); it is `error` when absent.
+* `details` is optional. In JSON it is an object. In CSV it is that object
+  as JSON in one cell. It becomes `details.observed`, and is where a tool
+  puts its own bounded counts and measurements. What a tool writes there is
+  the tool's responsibility: this format cannot recognise a row of data.
+* Any other column is rejected, so that nothing is dropped silently.
+
+=== `dq-import`
+
+[source]
+----
+dq-import SOURCE --dataset-id ID --dataset-sha256 SHA --report-json PATH
+         [--system dbt|greatexpectations|columnar] [--fail-on any|error|never]
+----
+
+The source system is detected from the document; `--system` states it. The
+report's `rule_set` names the imported document, with the digest of the bytes
+that were parsed, standing in for a rule pack as the thing the evidence was
+produced from. `runtime.spark` is `null`. `runtime.application_id` is the
+run the source names, or `import-` and the first 16 digits of the digest
+when it names none. `--report-json` needs `--dataset-id` and
+`--dataset-sha256`, as it does for `dq-kernel`; without a report the command
+still applies the gate and prints its verdict.
+
+Exit codes are SPEC-012's: 0 the gate passed, 1 the gate failed, 2 the source
+was rejected or the arguments are invalid.
 
 == Acceptance gates
 
-* G1 — dbt: `pass`, `warn`, `error`, `fail` and `skip` statuses map to the
-  specified outcomes and criticality; a malformed file fails closed naming
-  the record.
+* G1 — dbt: `pass`, `fail`, `warn`, `error` and `skipped` map to the outcomes
+  and criticality in the table above; a malformed file fails closed naming
+  the record and its position.
 * G2 — Great Expectations: each expectation result becomes one outcome with
-  the expectation type and the observed values.
-* G3 — Columnar: the minimal format is documented; a record without a
-  boolean `success` is rejected.
-* G4 — `dq-import` writes a valid `dq-report/v1` from each importer.
+  the expectation type and the observed counts and measurements. Row values,
+  row locators and exception text are never copied.
+* G3 — Columnar: the minimal format is documented for CSV and JSON; a record
+  without a boolean `success` is rejected, naming the record.
+* G4 — `dq-import` writes a valid `dq-report/v1` from each importer, applies
+  the gate policy, and exits 0, 1 or 2 accordingly.
 * G5 — Every imported outcome carries provenance, and `dq.harvest` imports
-  with all extras blocked.
+  and harvests with every vendor library blocked.
 
 == Progress
 
@@ -68,4 +227,43 @@ this framework's reports, sinks, or gate.
 * [ ] G4 — not started
 * [ ] G5 — not started
 
-Links: ADR-011; ADR-012; SPEC-020.
+[NOTE]
+====
+Amended 2026-11-25, before implementation. The format facts below were read
+from each vendor's own output, not from memory: a `run_results.json` written
+by dbt-core 1.12.7 against a DuckDB adapter, and a validation result written
+by Great Expectations 1.24.1 and 1.25.0.
+
+* G1 named a `skip` status. dbt's artifact spells it `skipped`, and its
+  published schema lists a status the gate did not: `runtime error`, for unit
+  tests. dbt 1.12.7 writes schema v6.
+* `skipped` maps to a blocking failure. In dbt it is not a rare edge: `dbt
+  build` skips every test that follows a failed one, so one broken model can
+  leave a whole branch of tests unevaluated. Importing those as advisory
+  would let a dataset through with none of its checks run.
+* Unit tests are left out. Their results say whether a model's logic is
+  right, not whether a dataset is.
+* `message` is not copied. The first draft of this amendment justified that
+  by saying dbt's message lists the offending values. It does not: for a
+  failing test it is a stock sentence, and for an errored one a database
+  error. It is left out because it is free text, not a measurement.
+* The importer reads the fields it needs and ignores the rest. dbt 1.12.7
+  writes `overload_results`, which its published schema does not list under
+  `additionalProperties: false`, so validating against that schema would
+  reject a file dbt has just written.
+* Great Expectations has no name for an expectation in 1.24 or 1.25. A draft
+  read one from `meta.expectation_config_name`; that key appears nowhere in
+  its source. Labels follow the engine's rule instead.
+* A raised expectation in Great Expectations reports `success: false` with an
+  empty `result`, and its `exception_info` holds a traceback with local file
+  paths. The traceback is never copied.
+* The columnar file is an array of records in JSON. An object at the top
+  level would be indistinguishable, to detection, from a vendor's document.
+* The Lakeflow harvester is left as it is. The contract's first rule is that
+  a harvester parses bytes; that one reads a table.
+* The gate gained an exit-code clause (G4). The CLI had none, and SPEC-012's
+  exit codes are what let a pipeline tell a rejected source from a failed
+  dataset.
+====
+
+Links: ADR-011; ADR-012; SPEC-012; SPEC-020.
