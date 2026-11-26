@@ -149,32 +149,6 @@ def _pyarrow():
     return pyarrow
 
 
-def _arrow_table(arrow, df):
-    """Return ``df`` as a pyarrow table when Arrow can read it, else ``None``.
-
-    A pyarrow table is returned as it is. A Spark DataFrame is read through
-    the Arrow export it has: Spark Connect and PySpark 4 offer a public
-    ``toArrow()``; classic PySpark 3.5 offers only ``_collect_as_arrow()``,
-    which is used when it is there. Anything else that exports the Arrow
-    stream interface (Polars, pandas, DuckDB, DataFusion) is read through
-    that. None of these libraries is imported: each is a method on the
-    object, found by name.
-    """
-    if isinstance(df, arrow.Table):
-        return df
-    to_arrow = getattr(df, "toArrow", None)
-    if callable(to_arrow):
-        return to_arrow()
-    collect = getattr(df, "_collect_as_arrow", None)
-    if callable(collect):
-        batches = collect()
-        # An empty frame yields no batch, so no schema to build a table from.
-        return arrow.Table.from_batches(batches) if batches else arrow.table({})
-    if hasattr(df, "__arrow_c_stream__"):
-        return arrow.table(df)
-    return None
-
-
 def _spelled_like_frame_rows(value):
     """Spell a value read through Arrow as a frame's own rows spell it.
 
@@ -592,10 +566,14 @@ class SqlAlchemyOutcomeSink(OutcomeSink):
 
         Without pyarrow, or for a frame Arrow cannot read, the rows are the
         frame's own, as before; either way they are spelled the same. An
-        empty artifact is an empty list and writes nothing.
+        empty artifact is an empty list and writes nothing. How a frame is
+        read is known in one place, ``dq.arrow_adapter.table_of``, which
+        every Arrow reader shares.
         """
         if self._arrow is not None:
-            table = _arrow_table(self._arrow, df)
+            from dq.arrow_adapter import table_of
+
+            table = table_of(df)
             if table is not None:
                 return _spelled_like_frame_rows(table.to_pylist())
         return [row.asDict(recursive=True) for row in df.collect()]

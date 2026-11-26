@@ -5,6 +5,7 @@
     "One corpus, every compute adapter. Each case states the data, the rules, the metrics an adapter must compute, and the decision each rule must produce.",
     "The decisions follow from the metrics through the kernel's own evaluation (dq.plan); a pure unit test checks that arithmetic, so a wrong expectation here cannot hide behind an adapter.",
     "The metrics are derived by hand from the documented semantics and verified against Spark, and against Deequ wherever the two semantics coincide.",
+    "Signed zero: 0.0 and -0.0 are one value, in a distinct count and as a grouping key, and a bound of -0.0 is zero. Spark 3.5 gives these answers; Arrow counts a positive and a negative zero apart, so an Arrow adapter normalises them before counting.",
     "Cell encoding: a decimal is a string; in a double column the strings NaN, Infinity and -Infinity name those values; null is null.",
     "A cell must be storable in its column as written: a decimal is finite and fits the column's precision and scale, and a long fits 64 bits. An engine is not bound to refuse one that does not (Spark stores a decimal NaN as null, and 1.234 in a decimal(10,2) column as 1.23), so the validator refuses it here."
   ],
@@ -1071,6 +1072,186 @@
       }
     },
     {
+      "id": "groups-signed-zeros-are-one-value",
+      "semantics": "groups/v1",
+      "why": "A negative zero and a positive zero are one value: east holds three distinct values and west one. Spark counts them so; Arrow counts them apart unless they are normalised first, which is why this case exists.",
+      "columns": [
+        [
+          "region",
+          "string"
+        ],
+        [
+          "v",
+          "double"
+        ]
+      ],
+      "rows": [
+        [
+          "east",
+          0.0
+        ],
+        [
+          "east",
+          -0.0
+        ],
+        [
+          "east",
+          1.0
+        ],
+        [
+          "east",
+          1.0
+        ],
+        [
+          "east",
+          2.0
+        ],
+        [
+          "east",
+          2.0
+        ],
+        [
+          "west",
+          0.0
+        ],
+        [
+          "west",
+          -0.0
+        ],
+        [
+          "north",
+          7.0
+        ],
+        [
+          "north",
+          8.0
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "wests_zeroes_are_one_value",
+          "kind": "grouped_distinct",
+          "operator": "eq",
+          "threshold": "1",
+          "column": "v",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_min_distinct"
+        },
+        {
+          "rule_id": "no_region_has_four_values",
+          "kind": "grouped_distinct",
+          "operator": "lt",
+          "threshold": "4",
+          "column": "v",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_max_distinct"
+        },
+        {
+          "rule_id": "east_has_three_values",
+          "kind": "grouped_distinct",
+          "operator": "eq",
+          "threshold": "3",
+          "column": "v",
+          "group_by": [
+            "region"
+          ],
+          "target": "group_max_distinct"
+        }
+      ],
+      "metrics": {
+        "group_count:region": 3,
+        "group_min_distinct:v:region": 1,
+        "group_max_distinct:v:region": 3
+      },
+      "expected": {
+        "wests_zeroes_are_one_value": true,
+        "no_region_has_four_values": true,
+        "east_has_three_values": true
+      }
+    },
+    {
+      "id": "groups-signed-zero-key-is-one-group",
+      "semantics": "groups/v1",
+      "why": "A negative zero and a positive zero are one grouping key, as they are one value: the two rows keyed 0.0 and -0.0 form a single group.",
+      "columns": [
+        [
+          "k",
+          "double"
+        ],
+        [
+          "id",
+          "string"
+        ]
+      ],
+      "rows": [
+        [
+          0.0,
+          "a"
+        ],
+        [
+          -0.0,
+          "a"
+        ],
+        [
+          1.0,
+          "b"
+        ],
+        [
+          1.0,
+          "c"
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "every_group_has_a_value",
+          "kind": "grouped_distinct",
+          "operator": "ge",
+          "threshold": "1",
+          "column": "id",
+          "group_by": [
+            "k"
+          ],
+          "target": "group_min_distinct"
+        },
+        {
+          "rule_id": "largest_group_exactly_two",
+          "kind": "grouped_distinct",
+          "operator": "eq",
+          "threshold": "2",
+          "column": "id",
+          "group_by": [
+            "k"
+          ],
+          "target": "group_max_distinct"
+        },
+        {
+          "rule_id": "more_than_two_groups",
+          "kind": "grouped_distinct",
+          "operator": "gt",
+          "threshold": "2",
+          "column": "id",
+          "group_by": [
+            "k"
+          ],
+          "target": "group_max_distinct"
+        }
+      ],
+      "metrics": {
+        "group_count:k": 2,
+        "group_min_distinct:id:k": 1,
+        "group_max_distinct:id:k": 2
+      },
+      "expected": {
+        "every_group_has_a_value": true,
+        "largest_group_exactly_two": true,
+        "more_than_two_groups": false
+      }
+    },
+    {
       "id": "ranges-integer-bounds",
       "semantics": "ranges/v1",
       "why": "Nulls are excluded from the count and from both bounds.",
@@ -1427,6 +1608,177 @@
         "v_min_at_least_a_thousand": true,
         "v_max_below_minus_five": true,
         "d_min_at_least_zero": true
+      }
+    },
+    {
+      "id": "ranges-empty-input-passes-vacuously",
+      "semantics": "ranges/v1",
+      "why": "With no row there is no value, and so no bound to violate: every range rule passes vacuously, and the adapter reports zero for the missing bounds.",
+      "columns": [
+        [
+          "v",
+          "double"
+        ],
+        [
+          "d",
+          "decimal(10,2)"
+        ]
+      ],
+      "rows": [],
+      "rules": [
+        {
+          "rule_id": "v_max_at_most_ten",
+          "kind": "value_range",
+          "operator": "le",
+          "threshold": "10",
+          "column": "v",
+          "target": "column_max"
+        },
+        {
+          "rule_id": "d_min_above_zero",
+          "kind": "value_range",
+          "operator": "gt",
+          "threshold": "0",
+          "column": "d",
+          "target": "column_min"
+        }
+      ],
+      "metrics": {
+        "column_count:v": 0,
+        "column_max:v": "0",
+        "column_count:d": 0,
+        "column_min:d": "0"
+      },
+      "expected": {
+        "v_max_at_most_ten": true,
+        "d_min_above_zero": true
+      }
+    },
+    {
+      "id": "ranges-negative-zero-bound-is-zero",
+      "semantics": "ranges/v1",
+      "why": "The smallest of -0.0, 0.0 and 1.0 comes back as -0.0. A negative zero is zero: the bound is exactly zero, and not below it.",
+      "columns": [
+        [
+          "v",
+          "double"
+        ]
+      ],
+      "rows": [
+        [
+          -0.0
+        ],
+        [
+          0.0
+        ],
+        [
+          1.0
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "min_at_least_zero",
+          "kind": "value_range",
+          "operator": "ge",
+          "threshold": "0",
+          "column": "v",
+          "target": "column_min"
+        },
+        {
+          "rule_id": "min_below_zero",
+          "kind": "value_range",
+          "operator": "lt",
+          "threshold": "0",
+          "column": "v",
+          "target": "column_min"
+        },
+        {
+          "rule_id": "max_exactly_one",
+          "kind": "value_range",
+          "operator": "eq",
+          "threshold": "1",
+          "column": "v",
+          "target": "column_max"
+        }
+      ],
+      "metrics": {
+        "column_count:v": 3,
+        "column_min:v": "0",
+        "column_max:v": "1"
+      },
+      "expected": {
+        "min_at_least_zero": true,
+        "min_below_zero": false,
+        "max_exactly_one": true
+      }
+    },
+    {
+      "id": "ranges-boolean-bounds-are-zero-and-one",
+      "semantics": "ranges/v1",
+      "why": "A boolean column has bounds: false is 0 and true is 1, as exact fractions. A null is not a value, so the count is three and not four.",
+      "columns": [
+        [
+          "flag",
+          "boolean"
+        ],
+        [
+          "note",
+          "string"
+        ]
+      ],
+      "rows": [
+        [
+          true,
+          "y"
+        ],
+        [
+          false,
+          "n"
+        ],
+        [
+          null,
+          "y"
+        ],
+        [
+          true,
+          null
+        ]
+      ],
+      "rules": [
+        {
+          "rule_id": "min_at_least_zero",
+          "kind": "value_range",
+          "operator": "ge",
+          "threshold": "0",
+          "column": "flag",
+          "target": "column_min"
+        },
+        {
+          "rule_id": "min_above_zero",
+          "kind": "value_range",
+          "operator": "gt",
+          "threshold": "0",
+          "column": "flag",
+          "target": "column_min"
+        },
+        {
+          "rule_id": "max_exactly_one",
+          "kind": "value_range",
+          "operator": "eq",
+          "threshold": "1",
+          "column": "flag",
+          "target": "column_max"
+        }
+      ],
+      "metrics": {
+        "column_count:flag": 3,
+        "column_min:flag": "0",
+        "column_max:flag": "1"
+      },
+      "expected": {
+        "min_at_least_zero": true,
+        "min_above_zero": false,
+        "max_exactly_one": true
       }
     },
     {

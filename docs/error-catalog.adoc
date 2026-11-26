@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 219 raise sites across the modules below; the contract
+The framework raises 222 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -98,6 +98,24 @@ the evidence store refused an unsafe write; `HarvestError` is a
   `execute_envelope`, a missing or ambiguous column, an infinite bound -- is
   refused by `dq/compute_support.py`, which every adapter shares.
 * Fix: pass a mapping of dataset names to DataFrames.
+
+== dq/arrow_adapter.py
+
+*Content:* 3 `ConfigurationError` sites.
+
+The Arrow compute adapter (SPEC-015): portable plans over Arrow tables.
+
+* Cause: dataset bindings are not a mapping, do not name exactly the plan's
+  datasets, or hold something Arrow cannot read -- not a pyarrow table, a
+  record batch, an object exporting Arrow's stream interface (Polars,
+  DataFusion, pandas), or a Spark DataFrame. Or Arrow has no kernel for what
+  a plan asks of a column: a list or a struct has no distinct count and no
+  bound, and the message names the dataset, the column and the metric.
+* Fix: bind each dataset to an Arrow table or to an object that exports one;
+  for a nested column, measure a column that holds values, or encode it
+  first. The refusals every adapter shares are listed under
+  `dq/compute_support.py`. Without pyarrow installed the adapter names the
+  `arrow` extra instead, before any dataset is read.
 
 == dq/compute_support.py
 

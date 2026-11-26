@@ -5,14 +5,15 @@
 
 The kernel owns the semantics and the decisions; an adapter computes metric
 values. Everything around that computation is the same whichever engine
-computes: refusing bindings that do not name exactly the plan's datasets,
-resolving a column by its exact name, turning a bound into an exact fraction,
-and the order of a plan's execution -- validate against the adapter's
-capabilities, check the bindings, compute the values, hand them to the
-kernel's own evaluation. All of it lives here, so the Spark, Arrow and SQL
-adapters cannot drift apart in what they accept or in what they say when
-they refuse: a corpus case that fails closed must fail closed identically on
-every adapter.
+computes: which metric kinds a semantic version defines, refusing bindings
+that do not name exactly the plan's datasets, resolving a column by its exact
+name, turning a bound into an exact fraction, visiting a plan's datasets and
+groupings in one order, and the order of a plan's execution -- validate
+against the adapter's capabilities, check the bindings, compute the values,
+hand them to the kernel's own evaluation. All of it lives here, so the Spark,
+Arrow and SQL adapters cannot drift apart in what they accept or in what they
+say when they refuse: a corpus case that fails closed must fail closed
+identically on every adapter.
 
 An adapter is three callables (:class:`ComputeAdapter`). What it is beyond
 them -- which engine it drives -- is its own module's business.
@@ -30,10 +31,37 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from dq.exceptions import ConfigurationError
 from dq.outcomes import CheckOutcome
-from dq.plan import CapabilitySet, ExecutionPlan
+from dq.plan import (
+    CapabilitySet,
+    ExecutionPlan,
+    MetricKind,
+    SEMANTIC_GROUPS_VERSION,
+    SEMANTIC_RANGES_VERSION,
+    SEMANTICS_VERSION,
+)
 
 #: How many column names a refusal lists before it stops.
 MAX_LISTED_COLUMNS = 8
+
+#: The metric kinds each semantic version defines.
+COUNT_METRICS = frozenset({MetricKind.ROW_COUNT, MetricKind.PRESENT_COUNT})
+GROUP_METRICS = frozenset(
+    {
+        MetricKind.GROUP_COUNT,
+        MetricKind.GROUP_MIN_DISTINCT,
+        MetricKind.GROUP_MAX_DISTINCT,
+    }
+)
+RANGE_METRICS = frozenset(
+    {MetricKind.COLUMN_COUNT, MetricKind.COLUMN_MIN, MetricKind.COLUMN_MAX}
+)
+
+#: Each semantic version with its metric kinds, oldest first.
+METRICS_BY_VERSION = {
+    SEMANTICS_VERSION: COUNT_METRICS,
+    SEMANTIC_GROUPS_VERSION: GROUP_METRICS,
+    SEMANTIC_RANGES_VERSION: RANGE_METRICS,
+}
 
 
 @dataclass(frozen=True)
@@ -89,6 +117,73 @@ def execute_envelope_with(
         bindings = adapter.validate_bindings(plan, datasets)
         values.update(adapter.compute_values(plan, bindings))
     return tuple(envelope.evaluate(values, capabilities_by_version))
+
+
+def capability_sets(adapter: str, version: str = "1") -> dict[str, CapabilitySet]:
+    """One capability set per semantic version: an adapter that honours all three.
+
+    An adapter that cannot honour a kind leaves it out of its set, and
+    :meth:`~dq.plan.ExecutionPlan.validate_for` then refuses a plan that needs
+    it. That is the fail-closed path; nothing is approximated.
+
+    Args:
+        adapter: The adapter's name, as outcomes record it.
+        version: The adapter's version.
+    """
+    return {
+        semantic: CapabilitySet(adapter, version, metrics, semantic)
+        for semantic, metrics in METRICS_BY_VERSION.items()
+    }
+
+
+def values_by_dataset(
+    plan: ExecutionPlan, bindings: dict, counts, groups, ranges
+) -> dict:
+    """Compute a plan's metrics one bound dataset at a time.
+
+    Each dataset's metrics are computed by the function its semantic version
+    names, and nothing else is decided here.
+
+    Args:
+        plan: The plan, already validated against the adapter.
+        bindings: The plan's datasets by name, as the adapter validated them.
+        counts: ``(name, frame, plan) -> {MetricKey: value}`` for counts/v1.
+        groups: The same for groups/v1.
+        ranges: The same for ranges/v1.
+    """
+    compute = {
+        SEMANTICS_VERSION: counts,
+        SEMANTIC_GROUPS_VERSION: groups,
+        SEMANTIC_RANGES_VERSION: ranges,
+    }[plan.semantic_version]
+    values = {}
+    for name in sorted(bindings):
+        values.update(compute(name, bindings[name], plan))
+    return values
+
+
+def metrics_of(plan: ExecutionPlan, name: str) -> list:
+    """Return a plan's metrics over the dataset called ``name``, in plan order."""
+    return [metric for metric in plan.metrics if metric.dataset.name == name]
+
+
+def metrics_by_grouping(metrics: Sequence) -> dict:
+    """Group a dataset's groups/v1 metrics by the columns they group on.
+
+    Returns:
+        ``{grouping columns: the metrics that share them}``, ordered by the
+        grouping's column names, so every adapter visits the same grouping
+        first and reports the same first refusal.
+    """
+    groupings = {}
+    for metric in metrics:
+        groupings.setdefault(metric.group_by, []).append(metric)
+    return {
+        grouping: groupings[grouping]
+        for grouping in sorted(
+            groupings, key=lambda columns: [column.name for column in columns]
+        )
+    }
 
 
 def require_exact_bindings(expected: Iterable[str], supplied: Iterable[str]) -> None:

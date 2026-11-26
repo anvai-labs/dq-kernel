@@ -20,11 +20,8 @@ import pytest
 pytest.importorskip("sqlalchemy", reason="the durable sink needs the sqlalchemy extra")
 
 from dq import sqlalchemy_sink as sink_module
-from dq.sqlalchemy_sink import (
-    SqlAlchemyOutcomeSink,
-    _arrow_table,
-    _spelled_like_frame_rows,
-)
+from dq.arrow_adapter import table_of
+from dq.sqlalchemy_sink import SqlAlchemyOutcomeSink, _spelled_like_frame_rows
 from dq.tests.helpers import FakeDataFrame
 from dq.tests.sink_support import provision, rows, sqlite_engine
 
@@ -66,7 +63,10 @@ def test_a_pyarrow_table_is_read_as_it_is(engine):
 def test_the_arrow_exports_are_found_by_what_the_frame_offers(engine):
     """Each is a method on the object: Spark Connect and PySpark 4 offer
     ``toArrow``, classic PySpark 3.5 only ``_collect_as_arrow``, and Polars,
-    pandas, DuckDB and DataFusion the stream interface. None is imported."""
+    pandas, DuckDB and DataFusion the stream interface. None is imported.
+    The sink reads a frame the way every Arrow reader does
+    (``dq.arrow_adapter.table_of``); what is checked here is that its rows
+    reach the database the same way the frame's own rows would."""
     pa = pytest.importorskip("pyarrow")
     table = pa.table({"check": ["a", "b"], "success": [True, False]})
     exporting = SimpleNamespace(toArrow=lambda: table)
@@ -76,12 +76,12 @@ def test_the_arrow_exports_are_found_by_what_the_frame_offers(engine):
     )
     streaming = SimpleNamespace(__arrow_c_stream__=table.__arrow_c_stream__)
     for frame in (exporting, batches_only, streaming):
-        assert _arrow_table(pa, frame).to_pylist() == TABLE_ROWS
+        assert table_of(frame).to_pylist() == TABLE_ROWS
     # A frame that offers no export is left to its own rows.
-    assert _arrow_table(pa, object()) is None
+    assert table_of(object()) is None
     # Classic PySpark yields no batch for an empty frame, so there is no schema.
     empty = SimpleNamespace(_collect_as_arrow=lambda: [])
-    assert _arrow_table(pa, empty).to_pylist() == []
+    assert table_of(empty).to_pylist() == []
 
 
 def test_an_arrow_value_is_spelled_as_a_frame_s_own_rows_spell_it():

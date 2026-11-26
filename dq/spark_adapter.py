@@ -22,11 +22,15 @@ from typing import TYPE_CHECKING
 
 from dq.compute_support import ComputeAdapter
 from dq.compute_support import as_exact_fraction as _as_exact_fraction
+from dq.compute_support import capability_sets
 from dq.compute_support import (
     execute_envelope_with,
     execute_plan_with,
+    metrics_by_grouping,
+    metrics_of,
     require_exact_bindings,
     require_exact_column,
+    values_by_dataset,
 )
 from dq.exceptions import ConfigurationError
 from dq.outcomes import CheckOutcome
@@ -36,6 +40,7 @@ from dq.plan import (
     MetricKind,
     SEMANTIC_GROUPS_VERSION,
     SEMANTIC_RANGES_VERSION,
+    SEMANTICS_VERSION,
 )
 
 if TYPE_CHECKING:
@@ -43,35 +48,12 @@ if TYPE_CHECKING:
 
 ADAPTER_NAME = "spark"
 ADAPTER_VERSION = "1"
-CAPABILITIES = CapabilitySet(
-    ADAPTER_NAME,
-    ADAPTER_VERSION,
-    frozenset({MetricKind.ROW_COUNT, MetricKind.PRESENT_COUNT}),
-)
-GROUP_CAPABILITIES = CapabilitySet(
-    ADAPTER_NAME,
-    ADAPTER_VERSION,
-    frozenset(
-        {
-            MetricKind.GROUP_COUNT,
-            MetricKind.GROUP_MIN_DISTINCT,
-            MetricKind.GROUP_MAX_DISTINCT,
-        }
-    ),
-    SEMANTIC_GROUPS_VERSION,
-)
-RANGES_CAPABILITIES = CapabilitySet(
-    ADAPTER_NAME,
-    ADAPTER_VERSION,
-    frozenset(
-        {
-            MetricKind.COLUMN_COUNT,
-            MetricKind.COLUMN_MIN,
-            MetricKind.COLUMN_MAX,
-        }
-    ),
-    SEMANTIC_RANGES_VERSION,
-)
+_SETS = capability_sets(ADAPTER_NAME, ADAPTER_VERSION)
+#: What this adapter can compute for each semantic version. These names are
+#: what ``capabilities_for`` reads, so a caller can narrow one for a test.
+CAPABILITIES = _SETS[SEMANTICS_VERSION]
+GROUP_CAPABILITIES = _SETS[SEMANTIC_GROUPS_VERSION]
+RANGES_CAPABILITIES = _SETS[SEMANTIC_RANGES_VERSION]
 
 
 def capabilities_for(plan: ExecutionPlan) -> CapabilitySet:
@@ -106,16 +88,13 @@ def execute_envelope(
 
 def compute_plan_values(plan: ExecutionPlan, bindings: dict) -> dict:
     """Compute every plan metric over the bound DataFrames."""
-
-    values = {}
-    for name in sorted(bindings):
-        if plan.semantic_version == SEMANTIC_GROUPS_VERSION:
-            values.update(_dataset_group_metrics(name, bindings[name], plan))
-        elif plan.semantic_version == SEMANTIC_RANGES_VERSION:
-            values.update(_dataset_range_metrics(name, bindings[name], plan))
-        else:
-            values.update(_dataset_counts(name, bindings[name], plan))
-    return values
+    return values_by_dataset(
+        plan,
+        bindings,
+        _dataset_counts,
+        _dataset_group_metrics,
+        _dataset_range_metrics,
+    )
 
 
 def _validated_bindings(plan: ExecutionPlan, datasets) -> dict[str, DataFrame]:
@@ -150,8 +129,7 @@ def _dataset_counts(name: str, dataframe, plan: ExecutionPlan) -> dict:
     from pyspark.sql import functions as F
     from pyspark.sql.types import DoubleType, FloatType
 
-    metrics = [metric for metric in plan.metrics if metric.dataset.name == name]
-
+    metrics = metrics_of(plan, name)
     aggregates = [F.count(F.lit(1)).alias("dq_row_count")]
     aliases = {}
     for index, metric in enumerate(metrics):
@@ -191,16 +169,8 @@ def _dataset_group_metrics(name: str, dataframe, plan: ExecutionPlan) -> dict:
     # without a JVM (see test_kernel_imports_without_optional_dependencies).
     from dq.utils.spark_expr import grouped_bounds_summary
 
-    metrics = [metric for metric in plan.metrics if metric.dataset.name == name]
-    groupings = {}
-    for metric in metrics:
-        groupings.setdefault(metric.group_by, []).append(metric)
-
     values = {}
-    for grouping in sorted(
-        groupings, key=lambda columns: [column.name for column in columns]
-    ):
-        group_metrics = groupings[grouping]
+    for grouping, group_metrics in metrics_by_grouping(metrics_of(plan, name)).items():
         columns = sorted(
             {
                 metric.column.name
@@ -248,7 +218,7 @@ def _dataset_range_metrics(name: str, dataframe, plan: ExecutionPlan) -> dict:
     from pyspark.sql import functions as F
     from pyspark.sql.types import DoubleType, FloatType
 
-    metrics = [metric for metric in plan.metrics if metric.dataset.name == name]
+    metrics = metrics_of(plan, name)
     columns = sorted({metric.column.name for metric in metrics if metric.column})
     for column in columns:
         _require_exact_column(dataframe, name, column)
