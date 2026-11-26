@@ -1,12 +1,14 @@
 # Copyright 2024 Data Quality Framework Contributors
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import logging
 import time
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any
 from pyhocon import ConfigTree
 from pyspark.sql import DataFrame
+from pyspark.sql.types import BooleanType, StringType, StructField, StructType
 
 from dq.utils import constants
 
@@ -18,6 +20,19 @@ class DQEngine(ABC):
     They are loaded dynamically by ``EngineLoader`` based on the engine name
     in the HOCON configuration.
     """
+
+    #: Capability manifest: what this engine natively supports. Consumers
+    #: (sinks, notifier, report) may branch on capabilities, never on engine
+    #: names, so new engines plug in by declaring what they can do.
+    #: * ``criticality`` -- ``native`` (engine has per-rule severity that
+    #:   affects behavior/results), ``derived`` (kernel normalizes an
+    #:   engine-native axis onto it), or ``absent`` (no per-rule severity).
+    #: * ``row_filter`` / ``failed_rows`` -- boolean support flags.
+    CAPABILITIES = {
+        "criticality": "absent",
+        "row_filter": False,
+        "failed_rows": False,
+    }
 
     def __init__(self, config: ConfigTree, dqts: Optional[int] = None):
         self._config = config
@@ -56,6 +71,42 @@ class DQEngine(ABC):
                 constants.DQ_REPOSITORY_VERIFICATIONS,
                 current_milli_time,
             )
+
+    @staticmethod
+    def _artifact_frames(metrics, dataframe):
+        """Build the run's metrics and verifications artifact DataFrames.
+
+        Shared by engines that persist a run as one (check, success,
+        details-JSON) pair of frames under a single repository key.
+        """
+        spark = dataframe.sparkSession
+        metrics_df = spark.createDataFrame(
+            [(metric["check"], metric["success"]) for metric in metrics],
+            StructType(
+                [
+                    StructField("check", StringType()),
+                    StructField("success", BooleanType()),
+                ]
+            ),
+        )
+        verifications_df = spark.createDataFrame(
+            [
+                (
+                    metric["check"],
+                    metric["success"],
+                    json.dumps(metric["details"], sort_keys=True),
+                )
+                for metric in metrics
+            ],
+            StructType(
+                [
+                    StructField("check", StringType()),
+                    StructField("success", BooleanType()),
+                    StructField("details", StringType()),
+                ]
+            ),
+        )
+        return metrics_df, verifications_df
 
     @abstractmethod
     def apply(self, dataframe: DataFrame, repository=None) -> List[Dict[str, Any]]:

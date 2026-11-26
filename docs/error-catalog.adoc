@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 177 raise sites across the modules below; the contract
+The framework raises 185 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -263,3 +263,37 @@ Fail-closed expectation resolution for the greatexpectations engine.
   `expectations` payload: every entry needs a snake-case GX expectation
   `type` (e.g. `expect_column_values_to_not_be_null`).
 
+
+== dq/engine/dqx/dqx_check.py
+
+Fail-closed DQX metadata check construction for the dqx engine.
+
+* `ValueError` -- the rule has no `checks` list, an entry lacks a `check`
+  block or `check.function`, `criticality` is not `error`/`warn`, or a
+  check name is duplicated. Fix the rule's `checks` payload: every entry
+  is a DQX metadata check dict
+  (`{check = {function = "is_not_null", arguments = {column = "id"}}}`);
+  names must be unique so evidence maps unambiguously to rules.
+
+== dq/engine/dqx/dqx_engine.py
+
+DQX engine wiring: client-mode resolution and DQX-side validation gate.
+
+* `ValueError` -- `client.mode` is neither `stub` nor `workspace`, or
+  DQX's structural validator rejects the checks (unknown check function,
+  bad argument types). Fix `client.mode` (`stub` for workspace-free
+  validation, `workspace` with an optional `client.profile`) and correct
+  the flagged check definitions; DQX's error message names the offending
+  check.
+
+== dq/engine/checkspec.py
+
+Engine-neutral rule identity and severity normalization: the shared check
+seam all engines cross for the axes that are truly common.
+
+* `ValueError` -- an unknown severity spelling reaches `normalize_criticality`
+  (accepted: `error`/`warn`, Deequ's `Error`/`Warning`, and common short
+  forms), or explicitly configured check names repeat in
+  `require_unique_names`, or a `CheckSpec` is built with a severity outside
+  the canonical set. Fix the rule payload's `criticality`/`name` fields;
+  derived names are exempt from the uniqueness gate.
