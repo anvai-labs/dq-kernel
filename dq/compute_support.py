@@ -4,11 +4,18 @@
 """What every compute adapter shares (ADR-010, ADR-014).
 
 The kernel owns the semantics and the decisions; an adapter computes metric
-values. Two steps of that are the same whichever engine computes: resolving a
-column by its exact name, and turning a bound into an exact fraction. They
-live here so that the Spark, Arrow and SQL adapters cannot drift apart in
-what they accept, or in what they say when they refuse -- a corpus case that
-fails closed must fail closed identically on every adapter.
+values. Everything around that computation is the same whichever engine
+computes: refusing bindings that do not name exactly the plan's datasets,
+resolving a column by its exact name, turning a bound into an exact fraction,
+and the order of a plan's execution -- validate against the adapter's
+capabilities, check the bindings, compute the values, hand them to the
+kernel's own evaluation. All of it lives here, so the Spark, Arrow and SQL
+adapters cannot drift apart in what they accept or in what they say when
+they refuse: a corpus case that fails closed must fail closed identically on
+every adapter.
+
+An adapter is three callables (:class:`ComputeAdapter`). What it is beyond
+them -- which engine it drives -- is its own module's business.
 
 This module imports nothing optional.
 """
@@ -17,13 +24,92 @@ from __future__ import annotations
 
 import decimal
 import math
+from dataclasses import dataclass
 from fractions import Fraction
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from dq.exceptions import ConfigurationError
+from dq.outcomes import CheckOutcome
+from dq.plan import CapabilitySet, ExecutionPlan
 
 #: How many column names a refusal lists before it stops.
 MAX_LISTED_COLUMNS = 8
+
+
+@dataclass(frozen=True)
+class ComputeAdapter:
+    """What a compute adapter offers a plan.
+
+    Attributes:
+        capabilities_for: The adapter's capabilities for a plan's semantics.
+        validate_bindings: ``(plan, datasets) -> bindings``: the plan's
+            datasets by name as the engine's own frame, or a refusal.
+        compute_values: ``(plan, bindings) -> {MetricKey: value}``: the
+            plan's metric values, as the kernel requires them.
+    """
+
+    capabilities_for: Callable[[ExecutionPlan], CapabilitySet]
+    validate_bindings: Callable[[ExecutionPlan, Mapping[str, Any]], dict]
+    compute_values: Callable[[ExecutionPlan, dict], dict]
+
+
+def execute_plan_with(
+    plan: ExecutionPlan, datasets: Mapping[str, Any], adapter: ComputeAdapter
+) -> tuple[CheckOutcome, ...]:
+    """Compute a plan's metrics with an adapter and evaluate exact outcomes."""
+    capabilities = adapter.capabilities_for(plan)
+    plan.validate_for(capabilities)
+    bindings = adapter.validate_bindings(plan, datasets)
+    values = adapter.compute_values(plan, bindings)
+    return plan.evaluate(values, capabilities)
+
+
+def execute_envelope_with(
+    envelope, datasets: Mapping[str, Any], adapter: ComputeAdapter
+) -> tuple[CheckOutcome, ...]:
+    """Execute every subplan of a :class:`~dq.envelope.RulesetEnvelope`.
+
+    Mixed-semantics rulesets get one entry point: each subplan's metrics are
+    computed with its own semantics and capabilities, and the envelope
+    dispatches evaluation into one aggregate verdict (ADR-004/005).
+    """
+    from dq.envelope import RulesetEnvelope
+
+    if not isinstance(envelope, RulesetEnvelope):
+        raise ConfigurationError(
+            "execute_envelope requires a RulesetEnvelope, not a bare plan; "
+            "use execute_plan for single-semantics execution"
+        )
+    capabilities_by_version = {}
+    values = {}
+    for plan in envelope.plans:
+        capabilities = adapter.capabilities_for(plan)
+        plan.validate_for(capabilities)
+        capabilities_by_version.setdefault(plan.semantic_version, capabilities)
+        bindings = adapter.validate_bindings(plan, datasets)
+        values.update(adapter.compute_values(plan, bindings))
+    return tuple(envelope.evaluate(values, capabilities_by_version))
+
+
+def require_exact_bindings(expected: Iterable[str], supplied: Iterable[str]) -> None:
+    """Refuse bindings that do not name exactly a plan's datasets.
+
+    Raises:
+        ConfigurationError: When a dataset the plan requires is not bound, or
+            a binding names a dataset the plan does not require.
+    """
+    expected, supplied = set(expected), set(supplied)
+    missing = sorted(expected - supplied)
+    unknown = sorted(supplied - expected)
+    if missing or unknown:
+        detail = []
+        if missing:
+            detail.append(f"missing {missing}")
+        if unknown:
+            detail.append(f"unknown {unknown}")
+        raise ConfigurationError(
+            "dataset bindings must exactly match plan datasets: " + "; ".join(detail)
+        )
 
 
 def require_exact_column(

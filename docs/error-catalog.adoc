@@ -90,30 +90,34 @@ the evidence store refused an unsafe write; `HarvestError` is a
 
 == dq/spark_adapter.py
 
-*Content:* 4 `ConfigurationError` sites.
+*Content:* 2 `ConfigurationError` sites.
 
-* Cause: bindings do not exactly match plan datasets, bound objects are not
-  Spark DataFrames, or `execute_envelope` is handed a bare plan instead of a
-  `RulesetEnvelope`. A column that is missing or ambiguous, and an
-  infinite bound, are refused by `dq/compute_support.py`, which this adapter
-  shares with every other.
-* Fix: align binding names with the plan and pass DataFrames; execute
-  single-semantics plans with `execute_plan`.
+* Cause: dataset bindings are not a mapping, or a bound object is not a
+  Spark DataFrame. Everything else a plan can get wrong -- bindings that do
+  not exactly match the plan's datasets, a bare plan handed to
+  `execute_envelope`, a missing or ambiguous column, an infinite bound -- is
+  refused by `dq/compute_support.py`, which every adapter shares.
+* Fix: pass a mapping of dataset names to DataFrames.
 
 == dq/compute_support.py
 
-*Content:* 4 `ConfigurationError` sites.
+*Content:* 6 `ConfigurationError` sites.
 
-What every compute adapter shares: resolving a column by exact name, and
-converting a bound to an exact fraction (ADR-010).
+What every compute adapter shares (ADR-010, ADR-014): the order of a plan's
+execution, resolving a column by exact name, and converting a bound to an
+exact fraction.
 
-* Cause: a plan names a column that the dataset does not have exactly -- and
-  the message lists the columns it does have -- or that is ambiguous: a
-  duplicate, or one of two columns whose names differ only in case. Or a
-  range bound is infinite: there is no exact fraction for it.
-* Fix: use the column's exact casing; give one of two colliding columns a
-  distinct name in the dataset; and keep `Infinity` out of a column a
-  ranges/v1 rule measures.
+* Cause: bindings do not exactly match the plan's datasets (a dataset is
+  missing, or a binding names one the plan does not require);
+  `execute_envelope` is handed a bare plan instead of a `RulesetEnvelope`; a
+  plan names a column that the dataset does not have exactly -- and the
+  message lists the columns it does have -- or that is ambiguous: a
+  duplicate, or one of two columns whose names differ only in case; or a
+  range bound is infinite or of a type with no exact fraction.
+* Fix: align binding names with the plan; execute single-semantics plans
+  with `execute_plan`; use the column's exact casing; give one of two
+  colliding columns a distinct name in the dataset; and keep `Infinity` out
+  of a column a ranges/v1 rule measures.
 
 == dq/run.py
 

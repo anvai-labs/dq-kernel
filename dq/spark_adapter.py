@@ -20,8 +20,14 @@ from collections.abc import Mapping
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
+from dq.compute_support import ComputeAdapter
 from dq.compute_support import as_exact_fraction as _as_exact_fraction
-from dq.compute_support import require_exact_column
+from dq.compute_support import (
+    execute_envelope_with,
+    execute_plan_with,
+    require_exact_bindings,
+    require_exact_column,
+)
 from dq.exceptions import ConfigurationError
 from dq.outcomes import CheckOutcome
 from dq.plan import (
@@ -84,11 +90,7 @@ def execute_plan(
     plan: ExecutionPlan, datasets: Mapping[str, DataFrame]
 ) -> tuple[CheckOutcome, ...]:
     """Compute the plan's metrics with Spark and evaluate exact outcomes."""
-    capabilities = _capabilities_for(plan)
-    plan.validate_for(capabilities)
-    bindings = _validated_bindings(plan, datasets)
-    values = compute_plan_values(plan, bindings)
-    return plan.evaluate(values, capabilities)
+    return execute_plan_with(plan, datasets, _ADAPTER)
 
 
 def execute_envelope(
@@ -96,26 +98,10 @@ def execute_envelope(
 ) -> tuple[CheckOutcome, ...]:
     """Execute every subplan of a :class:`RulesetEnvelope` with Spark.
 
-    Mixed-semantics rulesets get one entry point: each subplan's metrics are
-    computed with its own semantics and capabilities, and the envelope
-    dispatches evaluation into one aggregate verdict (ADR-004/005).
+    Mixed-semantics rulesets get one entry point, as for every adapter
+    (:func:`dq.compute_support.execute_envelope_with`).
     """
-    from dq.envelope import RulesetEnvelope
-
-    if not isinstance(envelope, RulesetEnvelope):
-        raise ConfigurationError(
-            "execute_envelope requires a RulesetEnvelope, not a bare plan; "
-            "use execute_plan for single-semantics execution"
-        )
-    capabilities_by_version = {}
-    values = {}
-    for plan in envelope.plans:
-        capabilities = _capabilities_for(plan)
-        plan.validate_for(capabilities)
-        capabilities_by_version.setdefault(plan.semantic_version, capabilities)
-        bindings = _validated_bindings(plan, datasets)
-        values.update(compute_plan_values(plan, bindings))
-    return tuple(envelope.evaluate(values, capabilities_by_version))
+    return execute_envelope_with(envelope, datasets, _ADAPTER)
 
 
 def compute_plan_values(plan: ExecutionPlan, bindings: dict) -> dict:
@@ -138,18 +124,7 @@ def _validated_bindings(plan: ExecutionPlan, datasets) -> dict[str, DataFrame]:
             "dataset bindings require a mapping of dataset names to DataFrames"
         )
     bindings = dict(datasets)
-    expected = {metric.dataset.name for metric in plan.metrics}
-    missing = sorted(expected - set(bindings))
-    unknown = sorted(set(bindings) - expected)
-    if missing or unknown:
-        detail = []
-        if missing:
-            detail.append(f"missing {missing}")
-        if unknown:
-            detail.append(f"unknown {unknown}")
-        raise ConfigurationError(
-            "dataset bindings must exactly match plan datasets: " + "; ".join(detail)
-        )
+    require_exact_bindings((metric.dataset.name for metric in plan.metrics), bindings)
     from pyspark.sql import DataFrame
 
     for name, dataframe in bindings.items():
@@ -316,3 +291,7 @@ def _dataset_range_metrics(name: str, dataframe, plan: ExecutionPlan) -> dict:
         bound = _as_exact_fraction(raw, name, metric.column.name)
         values[metric] = Fraction(0) if bound is None else bound
     return values
+
+
+#: What this module offers a plan: its capabilities, its binding check, its computation.
+_ADAPTER = ComputeAdapter(capabilities_for, _validated_bindings, compute_plan_values)
