@@ -56,7 +56,7 @@ def test_dqx_engine_naming_and_success(sample_frame):
     )
     results = DqxEngine(config).apply(sample_frame)
     assert len(results) == 2
-    assert results[0]["check"] == "is_not_null_0"
+    assert results[0]["check"] == "is_not_null_id"
     assert results[1]["check"] == "emails_present"
     # Row 2 has a null email: the id check passes, the warn check fails.
     assert results[0]["success"] is True
@@ -80,8 +80,8 @@ def test_dqx_engine_failures_and_persistence(sample_frame):
     results = DqxEngine(config).apply(sample_frame, repository=sink)
     assert_any_failure(results)
     by_check = results_by_check(results)
-    assert by_check["is_not_null_0"]["details"]["failed_rows"] == 1
-    assert by_check["is_not_null_0"]["details"]["criticality"] == "error"
+    assert by_check["is_not_null_email"]["details"]["failed_rows"] == 1
+    assert by_check["is_not_null_email"]["details"]["criticality"] == "error"
     assert by_check["ids_unique"]["success"] is True
     assert_sink_received_both_artifacts(results, sink)
 

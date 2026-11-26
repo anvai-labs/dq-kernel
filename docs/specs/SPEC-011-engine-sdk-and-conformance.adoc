@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: Verified — CI run 45604665907 green on PR #60 +
+Status: Verified — CI run 45739970088 green on PR #62, re-verified after the attribution amendment (first verified in CI run 45604665907 on PR #60) +
 Date: 2026-11-24 +
 Driven by: ADR-012, ADR-002 +
 Milestone: M1 +
@@ -22,8 +22,9 @@ corpus.
   capabilities are valid; the template order holds (guard, log, prepare,
   execute, persist); results pass the strict outcome gate; criticality is
   canonical; persistence honours the declared capability; artifacts land
-  under the injected run key; and two runs over the same input give the same
-  outcomes.
+  under the injected run key; two runs over the same input give the same
+  outcomes; and, given an engine built with the same checks in another
+  order, every check keeps its outcome under its own name.
 * One differential fixture corpus under `dq/sdk/fixtures/`, with expected
   outcomes per semantic version, and a loader for it. The Spark adapter's
   differential tests consume it now; the Arrow and SQL adapters will
@@ -59,8 +60,9 @@ corpus.
 * G1 — Every built-in engine passes the conformance suite (engines whose
   extra is absent skip).
 * G2 — A deliberately non-conforming engine — wrong result shape, missing
-  criticality, ignoring its declared persistence capability — is rejected
-  with a message naming the violated check.
+  criticality, ignoring its declared persistence capability, or reading a
+  vendor's result positions as check identities — is rejected with a
+  message naming the violated check.
 * G3 — The Spark adapter's differential tests run on the shared corpus and
   pass in full.
 * G4 — The scaffold's output passes lint, its own unit tests, and the
@@ -71,13 +73,18 @@ corpus.
 
 == Progress
 
-* [x] G1 — evidence: `dq/tests/test_conformance_builtin.py::test_every_built_in_engine_conforms`.
-  Verified with every vendor library installed (pyspark 3.5.9, pydeequ 1.7.0,
-  Great Expectations 1.25.0, DQX 0.17.2): 7 of 7 engines pass, none skipped
+* [x] G1 — evidence: `dq/tests/test_conformance_builtin.py::test_every_built_in_engine_conforms`,
+  `dq/tests/test_greatexpectations.py::test_each_result_is_attributed_to_its_own_expectation`.
+  Verified from the lock with every vendor library installed (Python 3.12.16,
+  pyspark 3.5.9, pydeequ 1.7.0, Great Expectations 1.24.1, DQX 0.17.2): 7 of 7
+  engines pass, none skipped, 6 of them with their checks reordered as well
+  (schema validation takes a schema, not checks). On Python 3.13 with Great
+  Expectations 1.25.0: 6 pass and DQX, which has no 3.13 release, skips
 * [x] G2 — evidence: `dq/tests/test_conformance_unit.py::test_a_wrong_result_shape_is_rejected`,
   `::test_a_missing_criticality_is_rejected_when_the_engine_claims_one`,
   `::test_an_engine_that_ignores_its_declared_persistence_capability_is_rejected`,
-  `::test_an_engine_that_ignores_the_injected_run_key_is_rejected`
+  `::test_an_engine_that_ignores_the_injected_run_key_is_rejected`,
+  `::test_an_engine_that_reads_position_as_identity_is_rejected`
 * [x] G3 — evidence: `dq/tests/test_corpus_spark.py::test_spark_decides_every_case_as_the_corpus_documents`,
   `::test_deequ_agrees_with_the_corpus_where_the_semantics_coincide`
 * [x] G4 — evidence: `dq/tests/test_scaffold.py::test_the_generated_engine_is_green_as_generated`
@@ -136,6 +143,57 @@ Amended 2026-11-24, during implementation.
   and failing on the keyed run. They have one each
   (`test_conformance_unit.py`), as do the Deequ matcher's refusals
   (`test_deequ_attribution_unit.py`).
+====
+
+[NOTE]
+====
+Amended 2026-11-25, while starting the evidence importers (SPEC-013).
+
+* G1 was true, and the `greatexpectations` engine was still reporting checks
+  with each other's verdicts. The labelling rule above is what the engine
+  used to give a result its label and criticality, and it applied it by
+  position: its labels in definition order, walked side by side with GX's
+  results. GX returns results grouped by column, not in definition order.
+  So in any rule that mixed the two, a check was reported with another's
+  outcome. Criticality travels with the label, so a failed `error` check
+  could be reported as passed while a passing one was reported as failed at
+  `warn`, and a gate set to `fail_on = error` opened. Every check in the
+  suite passed: the failure count was right, the labels were unique, and two
+  runs agreed. The suite's own Great Expectations rule happened to list its
+  expectations in an order GX preserves.
+* The engine now attributes each result by what it carries -- the
+  expectation's type, arguments and severity, as GX normalised them -- and
+  refuses a run it cannot attribute: a result that matches no expectation,
+  two results for one, none for one. A live regression test pins the case
+  GX reorders, and was shown to fail against the previous code on Great
+  Expectations 1.24.1 and 1.25.0.
+* The suite has a check it lacked, `attribution_survives_reordering`: given
+  an engine built with the same checks in another order, every check must
+  keep its outcome under its own name (G2). That is what makes this a
+  contract rather than a fixed instance; run against the previous engine, it
+  reports the Great Expectations rule. It cannot judge a check named by its
+  position -- the label keeps its text but means another check -- and the
+  guide says so.
+* GX also drops, without an error, an expectation that is "the same" as one
+  already in its suite: one type and arguments (`meta` and `notes` do not
+  count). Two such checks under different names therefore produced one
+  result, and the engine failed with a bare `zip` length error. It now
+  refuses the pair while the suite is built, and names both.
+* The reordered check found that the DQX engine did not follow the labelling
+  rule. A check without a name was `<function>_<index>`, so its evidence was
+  renamed whenever the checks were reordered. It is now the function and its
+  columns (`is_not_null_id`, `is_unique_a_b` for `for_each_column`), and by
+  position only for a second check of one kind that has no columns at all.
+  This changes the default names in DQX evidence.
+* The other engines were checked, not assumed sound. DQX joins on the
+  check's name. Deequ matches a Check by its description and a constraint by
+  its position inside one Check, an order Deequ's own source keeps
+  (`Check.evaluate` maps over `constraints`); across Checks Deequ keeps no
+  order, and the engine does not read it. Business rules build each label
+  and its result in one pass.
+* The G1 line said Great Expectations 1.25.0. The lock pins 1.24.1, which is
+  what CI runs; 1.25.0 came from a developer environment. The line now says
+  what was measured, and where.
 ====
 
 Links: ADR-012; ADR-002; SPEC-015; SPEC-016; SPEC-017; SPEC-018.
