@@ -13,6 +13,7 @@ This directory contains example configurations and scripts demonstrating how to 
 - `dqx_validation.conf` - Databricks Labs DQX metadata checks through the dqx engine (needs the `dqx` extra; Python <3.13 only)
 - `multi_engine_pipeline.conf` - Multi-engine pipeline combining Deequ and schema validation
 - `gate_policy.conf` - Gate policy (`fail_on`), notifiers, and severity-aware outcomes (ADR-013)
+- `observability.conf` - Observing a run (SPEC-014): observers configured like notifiers. With nothing configured a run is logged, one line per notification; `DQ_LOG_FORMAT=json` writes JSON, and `otel` opens OpenTelemetry spans (needs the `otel` extra)
 - `overlays/` - Per-environment overlays: `prod.conf` includes `base.conf` and overrides keys; environment values arrive through `${?VAR}`
 - `unity_catalog.conf` - Configuration using Databricks Unity Catalog
 - `glue_catalog.conf` - Configuration using AWS Glue Data Catalog

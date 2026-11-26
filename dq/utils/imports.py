@@ -1,13 +1,13 @@
 # Copyright 2024 Data Quality Framework Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Optional-dependency import helper shared by all vendor-wrapping engines.
+"""Optional-dependency import helper shared by every vendor-wrapping component.
 
-Every engine that wraps an optional vendor library uses the same
-fail-closed pattern: import lazily, and on absence raise an ImportError
-that names the engine, the package, the poetry extra, the pinned version
-range, and any known caveat. Centralizing the message keeps install hints
-consistent (and test-asserted) across engines.
+Every engine, and the OpenTelemetry observer, that wraps an optional vendor
+library uses the same fail-closed pattern: import lazily, and on absence
+raise an ImportError that names the extra, the package, the poetry extra,
+the pinned version range, and any known caveat. Centralizing the message
+keeps install hints consistent (and test-asserted) across components.
 """
 
 import importlib
@@ -20,6 +20,7 @@ def require_extra(
     extra: str,
     pin: Optional[str] = None,
     note: Optional[str] = None,
+    kind: str = "engine",
 ):
     """Import an optional vendor module or raise with install instructions.
 
@@ -32,6 +33,8 @@ def require_extra(
             bare package name).
         note: Optional trailing caveat (e.g. Python-version or
             extra-conflict constraints).
+        kind: What the extra is for, as the error message names it: an
+            ``engine`` (the default) or an ``observer``.
 
     Returns:
         The imported module.
@@ -44,7 +47,7 @@ def require_extra(
         return importlib.import_module(module)
     except ImportError as exc:
         message = (
-            f"The {extra} engine requires the optional {package} package; "
+            f"The {extra} {kind} requires the optional {package} package; "
             f"install it with `poetry install -E {extra}` (or "
             f"`pip install '{pin or package}'`)."
         )

@@ -78,6 +78,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   formatter, its own unit tests and the repository's guards as generated
 - `docs/writing-an-engine.adoc`: the engine contract with a complete example
   that is executed as a test
+- **Run observability** (SPEC-014): a run tells an observer five things --
+  that it started, that each rule started and finished against each dataset
+  and how long that took, that it finished, and what the gate decided --
+  through `dq.observability.RunObserver`. Every notification is an immutable
+  record, and an observer that raises is logged and swallowed, so observing a
+  run can never change it. With nothing configured the run is logged under
+  `dq.run_events`, one line per notification, naming the run and, where one
+  applies, the rule and the engine; `DQ_LOG_FORMAT=json` writes each line as
+  JSON. `dqframework.observers` is configured like `dqframework.notifiers`
+  (`logging`, `memory`, `otel`), and `DQFramework(..., observer=...)` injects
+  one. A rule or a run that raises is still announced as finished, with the
+  error
+- An `otel` extra, `pip install dq-kernel[otel]`: an `OpenTelemetryObserver`
+  with one span per run and one per rule application, and one counter of
+  outcomes by status and criticality. It depends on `opentelemetry-api` only;
+  the application brings its own SDK, and until its providers are configured
+  the observer records nothing
+- `examples/observability.conf`, and "Observing a run" in the operator
+  reference
 - **Evidence importers** (SPEC-013): `dq.harvest` reads another tool's
   quality results as this framework's own evidence, and imports no vendor
   library to do it. Three sources: dbt's `run_results.json` (its data tests),
@@ -226,6 +245,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its control plane moved to a closed repository
 - The historical planning documents state that they are proposals and
   point at the tracker; every proposal they make has a recorded disposition
+- The rule-pack schema declares `dqframework.observers`, so a misspelled
+  observer type is refused before any rule runs, and `RulePack.observers`
+  reads it back
+- `dq.utils.imports.require_extra` takes a `kind`, so something that is not
+  an engine names itself in the missing-dependency message. Every existing
+  message is unchanged
 - `dq.engine.dq_engine.outcome_frames(spark, outcomes)` frames outcome
   dictionaries for the sinks, as the engine base has always framed its own
   (`_artifact_frames` now calls it). The schema is stated rather than

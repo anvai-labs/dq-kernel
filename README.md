@@ -30,6 +30,11 @@ results = DQFramework(spark, config, default_dataframe=df).run()
 Each result carries `check`, `success`, and bounded `details`. Evidence is
 bound to dataset and rule-set digests as `dq-report/v1`.
 
+A run explains itself: with nothing configured it is logged, one line per
+notification, naming the run and each rule (`DQ_LOG_FORMAT=json` for JSON
+lines). `dq.observability` is the port, with an OpenTelemetry adapter behind
+the `otel` extra.
+
 ## Three semantic versions
 
 | Version | Semantics | Example |

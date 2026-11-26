@@ -20,6 +20,7 @@ VALID = {
         "dataset": "orders",
         "gate": {"fail_on": "error"},
         "notifiers": [{"type": "logging"}],
+        "observers": [{"type": "logging"}, {"type": "otel"}],
         "repository": {"dataset": "orders"},
         "dqrules": [
             {
@@ -68,6 +69,7 @@ def test_run_level_settings_are_read_from_the_pack():
     assert pack.dataset == "orders"
     assert pack.catalog_type == "glue"
     assert [entry["type"] for entry in pack.notifiers] == ["logging"]
+    assert [entry["type"] for entry in pack.observers] == ["logging", "otel"]
     assert pack.repository == {"dataset": "orders"}
 
 
@@ -75,7 +77,8 @@ def test_run_level_settings_default_when_unset():
     pack = parse_rule_pack({"dqframework.dqrules": [{"engine": "deequ"}]})
     assert pack.gate_policy == "any"
     assert pack.dataset is None and pack.catalog_type is None
-    assert pack.notifiers is None and pack.repository == {}
+    assert pack.notifiers is None and pack.observers is None
+    assert pack.repository == {}
 
 
 @pytest.mark.parametrize(

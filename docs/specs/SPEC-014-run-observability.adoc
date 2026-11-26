@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: Accepted +
+Status: In Progress — all gates met; awaiting CI on the carrying pull request +
 Date: 2026-11-24 +
 Driven by: ADR-008 (the port pattern), SPEC-012 +
 Milestone: M2 +
@@ -56,7 +56,7 @@ rule_started     run_key, rule, engine, dataset
 rule_finished    run_key, rule, engine, dataset, duration_ms, outcomes, failed
 rule_started     run_key, rule, engine, dataset
 rule_finished    run_key, rule, engine, dataset, duration_ms, outcomes, failed
-run_finished     run_key, job_id, dataset, duration_ms, rules, outcomes, failed
+run_finished     run_key, job_id, dataset, duration_ms, rules, outcomes, failed, blocking, advisory
 gate_event       the run's `GateEvent`, the record the notifier receives
 ----
 
@@ -69,6 +69,11 @@ gate_event       the run's `GateEvent`, the record the notifier receives
 * Each event is an immutable record. `rule_finished` carries counts and
   check names, never the outcome dictionaries: those are what the run
   returns to its caller, and an observer must not be able to change them.
+* `blocking` and `advisory` are how many failures block and how many are
+  advisory under the gate policy. They are `None` when the run raised and no
+  decision was reached.
+* `rules` is the applications to come on `run_started`, and the applications
+  made on `run_finished`, a rule that raised included.
 * The gate event comes last, after the run has finished and the decision
   has been made.
 
@@ -153,11 +158,22 @@ observer is built.
 
 == Progress
 
-* [ ] G1 — not started
-* [ ] G2 — not started
-* [ ] G3 — not started
-* [ ] G4 — not started
-* [ ] G5 — not started
+* [x] G1 — evidence: `dq/tests/test_run_observability.py::test_g1_the_observer_is_told_a_two_rule_run_in_order`,
+  `::test_a_rule_that_names_two_datasets_is_two_applications`,
+  `dq/tests/test_run_observability_spark.py::test_a_real_run_tells_its_observer_what_happened`
+* [x] G2 — evidence: `dq/tests/test_run_observability.py::test_g2_an_observer_that_raises_on_every_notification_changes_nothing`,
+  `::test_the_persisted_artifacts_of_the_two_runs_are_written_alike`,
+  `::test_no_event_holds_anything_the_run_returns`
+* [x] G3 — evidence: `dq/tests/test_observability.py::test_json_log_lines_parse_and_carry_the_run_and_the_rule`,
+  `dq/tests/test_run_observability.py::test_json_lines_from_a_real_run_parse_and_name_the_run`,
+  `dq/tests/test_run_observability_spark.py::test_a_real_run_writes_json_lines_that_parse_and_name_the_run`
+* [x] G4 — evidence: `dq/tests/test_observability.py::test_one_span_per_run_and_one_per_rule`,
+  `::test_the_counter_counts_outcomes_by_status_and_criticality`,
+  `::test_the_adapter_through_the_real_api_with_in_memory_providers`,
+  `::test_the_module_imports_with_every_vendor_library_blocked`
+* [x] G5 — evidence: `dq/tests/test_run_observability.py::test_g5_each_rule_has_a_duration_and_none_is_negative`,
+  `::test_durations_are_the_time_between_a_rule_starting_and_finishing`,
+  `dq/tests/test_run_observability_spark.py::test_a_real_run_tells_its_observer_what_happened`
 
 [NOTE]
 ====
@@ -206,6 +222,37 @@ were read from the installed 1.45.2 API and SDK, not from memory.
 * The CI lanes install the `otel` extra so the adapter's tests run there;
   the owner's lane is kept equal to the public one, and the change is said
   to the owner.
+====
+
+[NOTE]
+====
+Amended 2026-11-26, during implementation.
+
+* `run_finished` carries the gate's counts. The amendment above put the
+  gate decision on the gate event, which arrives after `run_finished`: the
+  run span would have been closed by then, or held open on the chance that
+  a gate event followed. With the counts on the run's own record, each span
+  ends at its own "finished" notification and no notification depends on
+  another. It also makes that one line a summary of the run.
+* A rule interrupted by anything at all is announced as finished. The first
+  draft caught `Exception` at the rule, so a `KeyboardInterrupt` left the
+  rule's announcement missing while the run's was there. A test for an
+  interrupted run showed it.
+* The rule-pack schema declares `dqframework.observers`, so a misspelled
+  observer type is refused before any rule runs, as a misspelled notifier is;
+  and `RulePack.observers` reads it back.
+* The logging observer writes the gate event once more, in its own words.
+  The notifier announces the same event separately (ADR-008), under
+  `dq.gate_events`.
+* For G4, the real API is exercised through one test helper
+  (`dq/tests/observability_support.py`). It began pasted into four tests,
+  where the duplication scan found it. One of the tests it replaced had
+  handed the adapter a tracer the test had named itself, and so asserted
+  nothing about the adapter; the adapter is now checked asking for its tracer
+  under its own name.
+* The tests also drive a real run: Spark, the Deequ engine, real time. They
+  are what showed that a rule is announced before and after its engine runs,
+  and that each rule's duration is a real measurement.
 ====
 
 Links: ADR-008; ADR-012; SPEC-012; SPEC-020.
