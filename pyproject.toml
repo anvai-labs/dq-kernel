@@ -88,6 +88,12 @@ hypothesis = ">=6.100,<7"      # Property-based tests for the pure kernel
 # The OpenTelemetry observer is also tested through the real API, with the
 # SDK's in-memory providers: nothing is exported off the process.
 opentelemetry-sdk = ">=1.25,<2"
+# Two libraries whose frames the Arrow adapter must accept through Arrow
+# interchange (SPEC-015). Development dependencies only: the package never
+# imports them. They are installed so that those tests run in CI instead of
+# skipping. The ranges are anchored on the versions the tests were run on.
+polars = "^2.0"
+datafusion = "^55.0"
 
 [tool.poetry.scripts]
 dq-kernel = "dq.cli:main"
