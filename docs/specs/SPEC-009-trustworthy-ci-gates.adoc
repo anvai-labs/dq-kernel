@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: In Progress — one gate remains: the lock hotfix needs merging +
+Status: Verified — CI run 45874745384 green on PR #66 +
 Date: 2026-11-24 +
 Driven by: ADR-009 (CI proves the open repo), SPEC-008 +
 Milestone: M0 +
@@ -83,13 +83,16 @@ failing test or collection error printed a traceback.
 
 == Progress
 
-* [ ] G1 — the hotfix is ready: PR #56 regenerated the lock with Poetry
-  2.4.2 and its CI run succeeded; `main` turns green when it merges
+* [x] G1 — evidence: CI run 45752024958 on `main` completed `success`. It is
+  the push run on `f596114`, the merge of PR #56 on 2026-11-26: lint, with
+  dependencies installed from the lock file; 550 passed in each test lane;
+  `build`. And `poetry check --lock` passes on that tree with Poetry 2.4.2.
+  It is `main`'s first green run since 2026-10-23
 * [x] G2 — evidence: `dq/tests/test_pytest_output_contract.py::test_collection_error_prints_its_traceback`, `::test_failing_test_prints_its_traceback`, `::test_repository_addopts_never_silence_the_summary`
 * [x] G3 — evidence: `dq/tests/test_ci_workflow_contract.py::test_gate_passes_when_every_lane_succeeds`, `::test_gate_fails_when_any_lane_fails`, `::test_gate_fails_on_every_non_success_result`, `::test_merge_gate_lists_every_other_lane`
-* [x] G4 — observed: CI run 45510661749 on PR #55, whose base is a feature
+* [x] G4 — evidence: CI run 45510661749 on PR #55, whose base is a feature
   branch, completed `success`
-* [x] G5 — observed: CI run 45510652808 on PR #54 installed
+* [x] G5 — evidence: CI run 45510652808 on PR #54 installed
   `databricks-labs-dqx 0.17.2` in the 3.12 job and all four `test_dqx.py`
   tests passed (624 passed)
 * [x] G6 — evidence: `dq/tests/test_lane_contract.py::test_every_test_using_the_spark_fixture_is_marked_spark`;
@@ -99,7 +102,7 @@ failing test or collection error printed a traceback.
   session without the `spark` marker, so they started a JVM inside the
   "JVM-free" unit lane; they are marked now and the contract keeps it so
 * [x] G7 — evidence: `dq/tests/test_ci_workflow_contract.py::test_every_action_is_pinned_to_a_commit_sha`, `::test_lint_lane_validates_workflow_syntax`; the lint lane ran `poetry check --lock` and actionlint green in run 45510652808
-* [x] G8 — observed: CI runs 45510652808 (#54) and 45510661749 (#55)
+* [x] G8 — evidence: CI runs 45510652808 (#54) and 45510661749 (#55)
   completed `success`
 * [x] G9 — evidence: `dq/tests/test_coverage_gate.py::test_a_report_holding_paths_outside_the_repository_is_refused`,
   `::test_each_floor_is_enforced_on_its_own`. Observed: CI run 45604665907
@@ -131,6 +134,11 @@ Known gaps, recorded rather than hidden: the `delta` extra has no live test
 in CI (the Change Data Feed tests run on fakes); the `cron` package is
 exercised only through the `databricks` extra; and `main` has no branch
 protection, so a red `build` does not by itself stop a merge.
+* G1 waited on the lock hotfix from 2026-11-24 to 2026-11-26, when it was
+  merged. One thing about reading `main` for it: `main`'s workflow is still
+  the one from before this spec, and has no `poetry check --lock` step. There
+  the mismatch showed as `poetry install` refusing to read the lock, so the
+  gate's second clause was checked by running `poetry check --lock` on
+  `main`'s tree itself.
 ====
-
 Links: ADR-009; ADR-012; SPEC-008; SPEC-003.
