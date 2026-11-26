@@ -21,12 +21,16 @@ teams outside a lakehouse will ever run this framework.
 * `dq.arrow_adapter`: executes counts/v1, groups/v1, and ranges/v1 plans
   over Arrow tables and hands the values to the kernel's own evaluation, so
   decisions are made in exactly one place.
-* Input normalization through Arrow interchange: a pyarrow table, or any
-  object that exports one, is accepted. pandas, Polars, and DataFusion are
-  supported through that path and are not dependencies.
+* Input normalization through Arrow interchange: a pyarrow table, a record
+  batch, or any object that exports one, is accepted. pandas, Polars, and
+  DataFusion are supported through that path and are not dependencies of
+  the package (Polars and DataFusion are development dependencies, so the
+  tests of that path run in CI).
 * A capability set for the adapter. Semantics it cannot honour are declared
   absent so a plan fails closed at validation, never approximates.
-* Wiring: `engine = "portable"` with `adapter = "arrow"`.
+* Wiring: `engine = "portable"` with `adapter = "arrow"`, in the Spark
+  facade and in the Spark-free runner alike. The adapter is chosen by a
+  mapping the SQL adapter (SPEC-016) extends by one entry.
 * A shared run core (`dq/run.py`) that owns the rule loop, outcome
   normalization, the gate policy, notifiers, and observers — extracted from
   `DQFramework.run()` so that a second runner reuses it rather than copying
@@ -52,6 +56,12 @@ teams outside a lakehouse will ever run this framework.
   dataset.
 * `dq.arrow_adapter` imports with pyarrow absent (it fails closed when used
   without it) and with every other extra blocked.
+* The Arrow adapter's surface is the Spark adapter's: a name and version, a
+  capability set per semantic version, `capabilities_for`, `execute_plan`,
+  `execute_envelope`, and `compute_plan_values`. Both convert a bound to an
+  exact fraction and resolve a column by exact name through one shared
+  function each, with the same messages, so a case that fails closed does so
+  identically on either adapter.
 * `DQFramework` remains the Spark facade (ADR-001); its behaviour and its
   return type do not change.
 
@@ -78,5 +88,70 @@ teams outside a lakehouse will ever run this framework.
 * [ ] G4 — not started
 * [ ] G5 — not started
 * [ ] G6 — not started
+
+[NOTE]
+====
+Amended 2026-11-26, before implementation. The facts below were read from the
+code and from probing pyarrow 24.0.0 and 26.0.1 and Spark 3.5.9, not from
+memory.
+
+* The adapter honours all three semantic versions, so its capability sets
+  declare the same metric kinds as the Spark adapter's. "Declared absent so a
+  plan fails closed" is the kernel's own `validate_for`; a test shows a plan
+  that needs a kind the adapter does not declare being refused.
+* What "exports an Arrow table" means, in order: a pyarrow table; a record
+  batch; an object with `__arrow_c_stream__` or `__arrow_c_dataframe__`
+  (Polars, Spark 4); one with `to_arrow_table()` (DataFusion); a pandas
+  DataFrame, through pyarrow's own conversion; and a classic PySpark
+  DataFrame through `_collect_as_arrow()`, which is private in PySpark 3.5
+  and returns no batch for an empty frame -- an empty frame gives a table
+  with the frame's column names and no rows. This becomes the one place that
+  knows how to get an Arrow table out of a Spark frame; the SQL sink's own
+  copy of that knowledge (SPEC-007) calls it.
+* Dictionary-encoded columns are decoded before anything is computed. Arrow's
+  `min_max` and `count_distinct` have no kernel for a dictionary type, and
+  `pq.read_table` does return a column dictionary-encoded when the file
+  stored it that way. An adapter that skipped this would pass every corpus
+  case and fail on real files.
+* Signed zero. Arrow counts `0.0` and `-0.0` as two distinct values and
+  groups them apart; Spark counts them as one (`countDistinct` over
+  `[0.0, -0.0, 1.0, 1.0, 2.0, 2.0]` is 3 in Spark and 4 in Arrow). The
+  adapter normalises signed zeros in floating columns before grouping and
+  counting, and the corpus gains a case that says so. No test could see it
+  before: the corpus holds no signed zero.
+* NaN is absent for a present count and for a range's count and bounds, and
+  is one distinct value in a group -- in Arrow as in Spark, verified on both.
+* Bounds come back from Arrow as the Python types Spark gives: `int`, `float`,
+  `Decimal`, `bool`, `date`, `str`. A `date` is refused with the same
+  "unsupported type" the Spark adapter gives.
+* An error of Arrow's own during a computation becomes a `ConfigurationError`
+  naming the dataset, the column and the metric, so the adapter fails closed
+  instead of surfacing, say, an `ArrowNotImplementedError`.
+* `adapter` on a portable rule is `spark` when absent, or `arrow`. Any other
+  value is refused before data is read. The key itself is not checked by
+  `dq-validate`, which has no rules for the portable payload, and payloads
+  stay open (SPEC-010) -- so a misspelled key means the default. The value
+  being checked is what this spec adds.
+* The run core, `dq.run.run_rules`, takes the rules, two things a runner
+  supplies -- load an engine for a rule at the run key, and resolve a dataset
+  name to a frame -- and the run's collaborators: sink, observer, a notifier
+  to build, the gate policy, the job id, the dataset name and the clock. It
+  returns the outcomes, the gate decision and the gate event. The Spark
+  facade keeps its signature and return type, and what is its own: loading
+  configuration, catalogs, and the Spark application id.
+* `dq-run` names its datasets on the command line, `--dataset name=path`,
+  with the format from the file's extension. It refuses, before reading any
+  dataset, a rule whose engine needs Spark, and a portable rule that does not
+  say `adapter = "arrow"`: it refuses rather than substitute an adapter. It
+  does not persist to a sink -- its evidence is the report -- and its report
+  has `runtime.spark` null and the job id `dq-run`.
+* For G3, `polars` and `datafusion` become development dependencies so the
+  interchange tests run in CI rather than skip: a test that always skips
+  verifies nothing. Both are compatible with the lock's `pyarrow >=16,<27`.
+* For G2, the differential is two-fold: every corpus case on both adapters
+  over the same data, and a randomized differential over generated tables
+  with signed zeros, NaN, nulls and decimals in them, so an edge the corpus
+  lacks is still caught.
+====
 
 Links: ADR-010; ADR-002; ADR-014; SPEC-011; SPEC-016.
