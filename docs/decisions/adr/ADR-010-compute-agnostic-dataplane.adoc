@@ -2,8 +2,8 @@
 :toc:
 :sectlinks.
 
-Status: Proposed (SPEC-007 buildable; Arrow-native engine is a gated
-follow-up) +
+Status: Proposed (SQLAlchemy sink delivered by SPEC-007; Arrow-native
+engine is a gated follow-up) +
 Date: 2026-09-21
 
 == Context
@@ -73,3 +73,23 @@ rule vocabularies.
   shared fixtures (same bar as the Spark adapter — ADR-005/006 pattern).
 * No new mandatory dependency: SQLAlchemy and pyarrow remain optional
   extras; the OSS package imports neither at framework import time.
+
+== Amendment (2026-11-25): SQLAlchemy sink delivered (SPEC-007)
+
+The first half of this decision is implemented as specified. Three things
+were learned doing it, and are recorded here because they shape the rest:
+
+* Classic PySpark 3.5, the version this project pins, has no public Arrow
+  export: `toArrow()` exists only in Spark Connect and PySpark 4. The fast
+  path reads a Spark DataFrame through `_collect_as_arrow()` when that is
+  what the frame offers, and reads the frame's own rows otherwise.
+* Arrow and a frame's own rows do not spell a row the same way. A timestamp
+  arrives with its time zone through Arrow and without one from `collect()`.
+  The sink spells Arrow's rows as the frame's, so that a stored payload does
+  not depend on whether pyarrow is installed.
+* SQLAlchemy's range for this extra (`>=2.0,<2.2`) resolves differently by
+  installation: 2.0 with every extra installed, because the `dqx` extra caps
+  it below 2.1, and 2.1 with this extra alone. The sink is verified on both,
+  and on a real PostgreSQL with the psycopg 3 and psycopg 2 drivers.
+
+The Arrow-native evaluation engine remains a gated follow-up (SPEC-015).

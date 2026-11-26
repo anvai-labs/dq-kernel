@@ -17,7 +17,7 @@ re-report. Then read the referenced artefacts: ADR-004..010
 `docs/error-catalog.adoc`, `docs/product-strategy.adoc`, and the code in
 `dq/plan.py`, `dq/spark_adapter.py`, `dq/portable_config.py`, `dq/sinks.py`,
 `dq/postgres_sink.py`, `dq/dq_framework.py`. Tests live in `dq/tests/`
-(see `test_postgres_sink.py`, `test_spark_adapter_groups.py`,
+(see `test_sqlalchemy_sink.py`, `test_spark_adapter_groups.py`,
 `test_spark_adapter_ranges.py`, `test_groups_differential.py`,
 `test_ranges_differential.py`, `test_error_catalog.py`).
 

@@ -2,8 +2,8 @@
 :toc:
 :sectlinks.
 
-Status: Proposed (deployment co-design open; the driver-neutral port slice is
-implemented and certified on main) +
+Status: Proposed (deployment co-design open; the sink is implemented on
+SQLAlchemy Core since SPEC-007, see the amendment below) +
 Date: 2026-09-21
 
 == Context
@@ -125,3 +125,27 @@ JSONB payloads indexed only where consumers need them. No Spark-side
   storage lanes (file) keep passing end to end.
 * A real-psycopg lane runs against a live database only in deployment
   environments; the framework gains no driver dependency.
+
+== Amendment (2026-11-25): the sink depends on SQLAlchemy Core
+
+SPEC-007, on ADR-010's authority, moves the sink's SQL layer from the DB-API
+protocol to SQLAlchemy Core.
+
+* `SqlAlchemyOutcomeSink` (`dq.sqlalchemy_sink`) takes an injected
+  `sqlalchemy.Engine` or `Connection`. `PostgresOutcomeSink` is that class
+  under its earlier name; a DB-API `connect` callable is refused, with a
+  message that says what to build instead.
+* Driver neutrality holds one level up. SQLAlchemy imports the database
+  driver when the engine is created, so the driver is the deployment's to
+  install and is needed when the sink is built rather than at the first
+  connection. The framework still imports neither SQLAlchemy nor a driver
+  until a SQL sink is configured, and gains no driver dependency.
+* The tests no longer supply a recording fake. The statements run on a real
+  database, and `test_sqlalchemy_sink_postgres.py` runs them against a live
+  PostgreSQL when `DQ_TEST_POSTGRES_URL` names one. That is how the
+  live-database lane described under Consequences is realised; it was run
+  on PostgreSQL 14 with the psycopg 3 and psycopg 2 drivers.
+* Everything else this decision fixed is unchanged: the run scope, the two
+  tables and their keys, first write wins, the reference DDL, and
+  `repository { type = "postgres" }` with the location read from the
+  environment.

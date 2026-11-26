@@ -76,6 +76,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Property-based tests (Hypothesis) for the pure kernel: the sanitizer
   always produces strict JSON, gate decisions partition the failures, exact
   thresholds stay exact where doubles would not, labels stay unique
+- **Durable SQL sink on SQLAlchemy Core** (SPEC-007, ADR-010):
+  `dq.sqlalchemy_sink.SqlAlchemyOutcomeSink` takes an injected SQLAlchemy
+  `Engine` or `Connection`. Statements are `text()` with named binds;
+  schema, table and namespace names are validated by `dq.identifiers` and
+  quoted only where the database's dialect requires it, so a mixed-case
+  schema keeps its case. The DDL is compiled for the engine's own dialect
+  (`JSONB` on PostgreSQL), and `ddl_statements()`, `verify_schema()`,
+  `prune()` and `run_scope()` keep their meaning (ADR-006, SPEC-001, SPEC-006).
+  A `Connection` the caller owns is never closed, and a run started inside
+  the caller's transaction is a savepoint
+- Optional extras `sqlalchemy` (`>=2.0,<2.2`) and `arrow` (`pyarrow`).
+  The durable sink's tests run its statements on a real database;
+  `dq/tests/test_sqlalchemy_sink_postgres.py` runs them against a real
+  PostgreSQL when `DQ_TEST_POSTGRES_URL` names one
+- `examples/durable_evidence.conf`, and a "Durable SQL sink" section in the
+  operator reference
 
 ### Changed
 
@@ -96,9 +112,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one Deequ Check -- the `single_check_mode` flag, and schema validation's
   default -- a passing constraint was reported as failed as soon as a
   sibling failed. Each is now reported by its own status
+- **`PostgresOutcomeSink` takes a SQLAlchemy `Engine` or `Connection`, not
+  a DB-API `connect` callable** (SPEC-007). The name still resolves to the
+  sink; what it is given changes. A callable is refused with a message that
+  says to build an engine with `sqlalchemy.create_engine(url)`. Rule packs
+  need no change: `repository { type = "postgres" ... }` builds the sink
+  from the same `dsn_env` setting as before
+- **The database driver must be installed when the sink is built.** It used
+  to be imported at the first connection; SQLAlchemy imports it when the
+  engine is created. A missing driver, or a URL naming a dialect nothing
+  provides, is a configuration error (exit code 2) that names what to
+  install
+- The value of `DQ_POSTGRES_DSN` is read as a SQLAlchemy URL. One written
+  `postgresql://` means the psycopg 3 driver, as it always did for this
+  sink, and a URL naming another driver (`postgresql+psycopg2://`) keeps it.
+  A libpq keyword/value DSN is still read by psycopg 3
+- **An artifact row is stored as strict JSON.** A NaN becomes `null`, and a
+  decimal or a timestamp its text. The row used to be serialized with
+  `json.dumps` as it was, which wrote `NaN` -- text a `jsonb` column
+  refuses -- and could not store a decimal at all
+- **Artifacts are read through Arrow when pyarrow is installed**: a Spark
+  DataFrame through the Arrow export it has, a pyarrow table or anything
+  that exports the Arrow stream interface directly. Otherwise the frame's
+  own rows are read, as before. The stored payload is the same either way,
+  so evidence does not depend on whether pyarrow is installed. Set
+  `repository { arrow = false }` to turn it off. Classic PySpark 3.5 has no
+  public Arrow export, so its `_collect_as_arrow` is used when present
+- `prune()` deletes a namespace's old artifacts with a correlated `EXISTS`
+  where it used PostgreSQL's `DELETE ... USING`; the decision is the same
+  and the statement is no longer PostgreSQL-only
+- `WriteResult.targets` names the sink's table as `postgresql:dq.artifacts`
+  (it was `postgres:"dq"."artifacts"`)
 - An engine's capability manifest is inherited: a subclass states only what
   differs. An invalid manifest, and an engine that cannot persist handed a
-  repository, are refused when the engine loads, before any work
+  repository, are refused when the engine loads, before any rule
 - The portable engine reports a canonical `criticality` from the kernel's
   severity. Without it a Warning-level portable rule blocked under the
   `error` gate policy

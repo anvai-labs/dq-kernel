@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: Accepted — ADR-010 marks it "build now" +
+Status: Verified — CI run 45662084621 green on PR #61 +
 Date: 2026-09-21 +
 Driven by: ADR-010, TD-PROD-1 +
 Milestone: M2 +
@@ -47,8 +47,70 @@ never imported by the framework.
 
 == Progress
 
-* [ ] G1 — not started
-* [ ] G2 — not started
-* [ ] G3 — not started
+* [x] G1 — evidence: `dq/tests/test_sqlalchemy_sink.py::test_ddl_holds_the_certified_postgresql_shape`,
+  `::test_identifiers_are_quoted_only_where_the_dialect_requires_it`,
+  `::test_one_artifact_is_one_executemany_of_what_the_db_api_sink_bound`,
+  `::test_a_run_is_one_transaction_and_the_scope_s_key_is_authoritative`,
+  `::test_a_failed_run_leaves_nothing_behind`,
+  `::test_a_scope_inside_the_caller_s_transaction_is_a_savepoint`,
+  `::test_prune_deletes_a_namespace_s_old_artifacts_then_its_runs_and_nothing_else`,
+  `::test_prune_across_namespaces_needs_only_the_cutoff`.
+  Also run against a real PostgreSQL 14.25, on the `psycopg` 3 and `psycopg2`
+  drivers, by `dq/tests/test_sqlalchemy_sink_postgres.py` (12 tests), which
+  runs wherever `DQ_TEST_POSTGRES_URL` names a database
+* [x] G2 — evidence: `dq/tests/test_sqlalchemy_sink_arrow.py::test_a_pyarrow_table_is_read_as_it_is`,
+  `::test_the_arrow_exports_are_found_by_what_the_frame_offers`,
+  `::test_without_pyarrow_the_frame_s_own_rows_are_read`,
+  `::test_arrow_switched_off_is_not_even_looked_for`;
+  `dq/tests/test_sqlalchemy_sink_spark.py::test_a_spark_dataframe_is_read_through_its_arrow_export`,
+  `::test_the_two_ways_of_reading_a_spark_frame_store_the_same_payload`
+  (a real Spark session; the frame offered to the sink has nothing but the
+  Arrow export, so the test cannot pass by falling back)
+* [x] G3 — evidence: `dq/tests/test_sqlalchemy_sink.py::test_the_framework_imports_no_database_library_even_when_one_is_installed`,
+  `::test_without_sqlalchemy_the_configuration_names_the_extra`
+
+[NOTE]
+====
+Amended 2026-11-25, during implementation, from what SQLAlchemy 2.0 and
+2.1 and PySpark 3.5.9 actually do.
+
+* The tests do not use a fake SQLAlchemy engine. A recording fake cannot
+  show a statement working; within minutes of meeting a real database, the
+  first draft of this sink failed twice. The statements are now executed by
+  SQLite -- a file-backed database with a `dq` schema attached, where they
+  succeed or fail -- compiled for the PostgreSQL dialect to hold their
+  certified shape, and `test_sqlalchemy_sink_postgres.py` runs them against
+  a real PostgreSQL when `DQ_TEST_POSTGRES_URL` names one. No test had run
+  this sink against a real PostgreSQL before.
+* The database driver is needed when the sink is built. The DB-API sink
+  imported psycopg at the first connection; SQLAlchemy imports the driver
+  when it creates the engine. That is earlier, and it is a configuration
+  fault (exit code 2) that names what to install.
+* `repository { type = "postgres" }` is unchanged for existing rule packs.
+  The value of `DQ_POSTGRES_DSN` is a SQLAlchemy URL. One written
+  `postgresql://` means psycopg 3, as it always did for this sink, and a
+  libpq keyword/value DSN is still read by psycopg 3.
+* The SQL is written in forms other databases also accept: a correlated
+  `EXISTS` replaces PostgreSQL's `DELETE ... USING`, and the DDL is compiled
+  for the engine's own dialect. PostgreSQL remains the only certified lane.
+* An artifact row is made strict JSON before it is stored. The DB-API sink
+  serialized the row as it was, which wrote `NaN` -- text a `jsonb` column
+  refuses, as a test on the real server shows -- and could not store a
+  decimal at all.
+* Classic PySpark 3.5 has no public Arrow export: `toArrow()` exists only
+  in Spark Connect and PySpark 4. The fast path reads a Spark DataFrame
+  through `_collect_as_arrow()` when that is what the frame offers. A first
+  draft called `toArrow()`, and three tests that passed had never run
+  through Arrow: both ways of reading a frame gave the same rows, so no
+  test could tell. The tests now offer the sink a frame that has nothing
+  but the Arrow export.
+* Arrow and a frame's own rows do not spell a row alike: a timestamp
+  arrives with its time zone through Arrow, and without one from
+  `collect()`. The sink spells Arrow's rows as the frame's, so a stored
+  payload does not depend on whether pyarrow is installed.
+* `sqlalchemy >=2.0,<2.2` resolves to 2.0 with every extra installed (the
+  `dqx` extra caps it below 2.1) and to 2.1 with this extra alone. The sink
+  is verified on both.
+====
 
 Links: ADR-010; TD-PROD-1; SPEC-001; SPEC-006.

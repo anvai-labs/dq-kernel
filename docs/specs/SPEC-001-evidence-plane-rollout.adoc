@@ -50,7 +50,18 @@ framework's code.
 
 == Progress
 
-* [x] G1 — evidence: `dq/tests/test_postgres_sink.py::test_prune_is_namespace_scoped_and_deletes_artifacts_first`, `::test_prune_derives_cutoff_from_retention_days`, `::test_verify_schema_reports_counts_and_fails_closed`, `::test_verify_schema_wraps_database_failures`
-* [x] G2 — evidence: `dq/tests/test_postgres_sink.py::test_prune_requires_explicit_retention_configuration`, `::test_retention_days_must_be_positive`
+* [x] G1 — evidence: `dq/tests/test_sqlalchemy_sink.py::test_prune_deletes_a_namespace_s_old_artifacts_then_its_runs_and_nothing_else`,
+  `::test_the_cutoff_follows_from_retention_days`, `::test_provisioning_is_idempotent`,
+  `::test_the_schema_check_names_what_is_missing_and_wraps_failures`
+* [x] G2 — evidence: `dq/tests/test_sqlalchemy_sink.py::test_prune_requires_explicit_retention_configuration`,
+  `::test_retention_days_must_be_positive`
+
+[NOTE]
+====
+Amended 2026-11-25. The durable sink's tests moved with SPEC-007, when the
+sink became `SqlAlchemyOutcomeSink`. The evidence above cites the tests that
+hold the same contracts now, run against a real database instead of a
+recording fake.
+====
 
 Links: TD-PROD-1; ADR-006; ADR-007; SPEC-006; SPEC-007.
