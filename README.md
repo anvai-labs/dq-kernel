@@ -10,7 +10,7 @@ engine-agnostic by design.
 pip install dq-kernel[spark]
 ```
 
-Requires Python 3.12/3.13, Java 17, and a Spark 3.5.9 runtime.
+Requires Python 3.12/3.13. The Spark path needs Java 17 and a Spark 3.5.9 runtime.
 
 Evidence can be kept in a SQL database instead of files. That sink and its Arrow path are
 optional extras: `pip install dq-kernel[sqlalchemy,arrow]`.
@@ -18,6 +18,11 @@ optional extras: `pip install dq-kernel[sqlalchemy,arrow]`.
 Evidence can also come from other tools, without a Spark session: `dq.harvest` imports dbt
 test results, Great Expectations validation results, or a four-column CSV or JSON file, and
 `dq-import` applies the gate to them and writes the same `dq-report/v1`.
+
+Portable rules also run with no Spark session at all, over Parquet, Arrow, CSV or JSON
+files, and write the same report: `pip install 'dq-kernel[arrow]'`, then
+`dq-run arrow_rule.conf --dataset orders=orders.parquet --report report.json`. A rule opts
+in with `adapter = "arrow"`.
 
 ## Quick start
 
@@ -46,7 +51,8 @@ the `otel` extra.
 Plans are single-semantics: compose them with `RulesetEnvelope` for mixed
 rulesets and execute the whole ruleset with one call —
 `dq.spark_adapter.execute_envelope(envelope, datasets)` returns the
-aggregate verdict.
+aggregate verdict, and so does `dq.arrow_adapter.execute_envelope`, with no
+Spark: it takes a pyarrow table or a pandas, Polars or DataFusion frame.
 
 ## Documentation
 
@@ -57,7 +63,7 @@ aggregate verdict.
 - [Writing an engine](docs/writing-an-engine.adoc) — the engine contract, conformance suite, and a worked example
 - [SPECs](docs/specs/)
 - [Modernization plan](docs/modernization-plan.adoc)
-- [Compute engines beyond Spark](docs/compute-engines.adoc)
+- [Compute engines beyond Spark](docs/compute-engines.adoc) — the Arrow adapter and the Spark-free runner
 
 ## License
 

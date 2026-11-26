@@ -13,6 +13,8 @@ This directory contains example configurations and scripts demonstrating how to 
 - `dqx_validation.conf` - Databricks Labs DQX metadata checks through the dqx engine (needs the `dqx` extra; Python <3.13 only)
 - `multi_engine_pipeline.conf` - Multi-engine pipeline combining Deequ and schema validation
 - `gate_policy.conf` - Gate policy (`fail_on`), notifiers, and severity-aware outcomes (ADR-013)
+- `portable_rule.conf` - A portable plan through the `portable` engine on Spark (ADR-010): a completeness check and a size check, each run through `DQFramework`
+- `arrow_rule.conf` - The same rules with no Spark at all (SPEC-015): one rule per semantic version, each naming `adapter = "arrow"`, for the `dq-run` command
 - `observability.conf` - Observing a run (SPEC-014): observers configured like notifiers. With nothing configured a run is logged, one line per notification; `DQ_LOG_FORMAT=json` writes JSON, and `otel` opens OpenTelemetry spans (needs the `otel` extra)
 - `overlays/` - Per-environment overlays: `prod.conf` includes `base.conf` and overrides keys; environment values arrive through `${?VAR}`
 - `unity_catalog.conf` - Configuration using Databricks Unity Catalog
@@ -66,7 +68,23 @@ structure; catalog examples still require the named tables, credentials, and com
 
 CI parses every checked-in `.conf` file with the same structural validator used by
 `dq-validate`. DQDL provides compatibility for existing Deequ rulesets; portable typed
-rules are introduced through the engine-neutral kernel described in ADR-002. The
-portable path currently covers size and completeness only (`dq.plan`,
-`dq.spark_adapter`, and the HOCON subset translator `dq.portable_config`); other
-constraints keep using their existing engines and fail closed on translation.
+rules are introduced through the engine-neutral kernel described in ADR-002. The portable
+translator (`dq.portable_config`) reads `isComplete`, `hasCompleteness`, `hasSize`,
+`DistinctnessByGroup`, `isNonNegative` and `isInRange`, which cover the kernel's three
+semantic versions, counts, groups and ranges; every other constraint keeps using its
+existing engine and fails closed on translation. A size or a completeness threshold is
+written as a one-argument lambda, `assertion = "lambda size: size >= 1"`.
+
+## Running Without Spark
+
+`arrow_rule.conf` needs the `arrow` extra and no Java, no Spark and no cluster:
+
+```bash
+pip install 'dq-kernel[arrow]'
+dq-run examples/arrow_rule.conf --dataset orders=orders.parquet --report report.json
+```
+
+`orders.parquet` needs the columns `id`, `customer_id` and `amount`. The tests build one
+and run the example (`dq/tests/test_runner.py`). The rule pack says which snapshot its
+rules were certified for (`snapshot_sha256`); the runner records it and never works it out
+from the file.

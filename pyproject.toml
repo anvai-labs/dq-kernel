@@ -92,6 +92,8 @@ opentelemetry-sdk = ">=1.25,<2"
 # interchange (SPEC-015). Development dependencies only: the package never
 # imports them. They are installed so that those tests run in CI instead of
 # skipping. The ranges are anchored on the versions the tests were run on.
+# Note that datafusion requires pyarrow, so a development install holds it
+# even without the `arrow` extra.
 polars = "^2.0"
 datafusion = "^55.0"
 

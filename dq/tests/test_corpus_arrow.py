@@ -27,6 +27,8 @@ from dq.sdk.fixtures import (
 )
 from dq.tests.fixture_frames import arrow_table
 
+pytest.importorskip("pyarrow", reason="the Arrow adapter needs the arrow extra")
+
 EVERY_CASE = load_cases()
 DECIDABLE = [case for case in EVERY_CASE if not case.expect_error]
 FAIL_CLOSED = [case for case in EVERY_CASE if case.expect_error]

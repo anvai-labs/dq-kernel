@@ -12,7 +12,8 @@ link:error-catalog.adoc[error catalog].
 pip install 'dq-kernel[spark,deequ]'
 ----
 
-Requires Python 3.12/3.13, Java 17, and a Spark 3.5.9 runtime.
+Requires Python 3.12/3.13, Java 17, and a Spark 3.5.9 runtime. The portable rules can also
+run with no Spark at all: `pip install 'dq-kernel[arrow]'` needs only Python.
 
 == 2. Define rules
 
@@ -58,6 +59,33 @@ Add `repository { type = "postgres", schema = "dq" }` and export
 `DQ_POSTGRES_DSN`. Provision the evidence schema with `ddl_statements()`
 (ADR-006). Gate events reach your notifiers (ADR-008).
 
+== No Spark: the same portable rules over files
+
+A portable rule that names the Arrow adapter runs over a file with no session, no Java and
+no cluster, and writes the same `dq-report/v1`:
+
+[source,hocon]
+----
+{ name = "orders_complete"
+  engine = "portable"
+  dataframes = ["orders"]
+  dataset = "orders"
+  snapshot_sha256 = "<64 hex digits of the snapshot these rules were written for>"
+  adapter = "arrow"
+  plan = [ { constraint = "isComplete", constraint_name = "id_complete", column = "id", level = "Error" } ] }
+----
+
+[source,shell]
+----
+dq-run rules.conf --dataset orders=orders.parquet --report report.json
+----
+
+`dq-run` exits 0 when the gate passed, 1 when it failed, and 2 when the rule pack cannot be
+run as given -- a rule that needs Spark, a portable rule that does not name the Arrow
+adapter -- or pyarrow is missing. Parquet, Arrow IPC, CSV and newline-delimited JSON are
+read by the file's extension. link:index.adoc#running-over-files[The operator reference]
+has the details; `examples/arrow_rule.conf` is a complete rule pack.
+
 == Compatibility matrix
 
 |===
@@ -67,4 +95,5 @@ Add `repository { type = "postgres", schema = "dq" }` and export
 |PyDeequ |1.7.0
 |Deequ JAR |2.0.21-spark-3.5
 |Java |17
+|pyarrow (Arrow adapter, `dq-run`) |16 to 26
 |===

@@ -147,6 +147,7 @@ def test_a_portable_rule_runs_on_spark_unless_it_names_an_adapter(sample_frame):
 
 
 def test_a_portable_rule_names_the_arrow_adapter_and_decides_the_same(sample_frame):
+    pytest.importorskip("pyarrow", reason="the Arrow adapter needs the arrow extra")
     """The same Spark frame, read through Spark's Arrow export: the decisions
     are the kernel's, whichever adapter computed the values."""
     from dq.engine.portable.portable_engine import PortableEngine
@@ -190,6 +191,7 @@ def test_the_refusal_names_the_adapter_after_the_payload_is_checked(sample_frame
 
 
 def test_a_portable_rule_on_the_arrow_adapter_runs_through_dqframework_run(spark):
+    pytest.importorskip("pyarrow", reason="the Arrow adapter needs the arrow extra")
     from dq.dq_framework import DQFramework
 
     config = ConfigFactory.parse_string(f"""

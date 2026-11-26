@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: Accepted +
+Status: In Progress — every gate is met in code and by its tests; CI on the carrying PR is awaited +
 Date: 2026-11-24 +
 Driven by: ADR-010, ADR-002, ADR-014 +
 Milestone: M3 +
@@ -82,43 +82,83 @@ teams outside a lakehouse will ever run this framework.
 
 == Progress
 
-* [ ] G1 — not started
-* [ ] G2 — not started
-* [ ] G3 — not started
-* [ ] G4 — not started
-* [ ] G5 — not started
-* [ ] G6 — not started
+* [x] G1 — evidence: `dq/tests/test_corpus_arrow.py::test_arrow_computes_the_documented_metrics`,
+  `::test_arrow_decides_every_case_as_the_corpus_documents`,
+  `::test_arrow_fails_closed_where_the_corpus_documents_an_error`,
+  `::test_every_shape_keeps_a_signed_zero_signed` (all 24 cases, each also
+  in three chunks and with every column dictionary-encoded; on pyarrow 16,
+  24 and 26)
+* [x] G2 — evidence: `dq/tests/test_arrow_adapter_spark.py::test_both_adapters_compute_the_corpus_metrics_over_one_spark_dataframe`,
+  `::test_both_adapters_decide_the_corpus_the_same_way`,
+  `::test_both_adapters_refuse_in_the_same_words`,
+  `::test_spark_arrow_and_a_plain_reference_agree_on_a_generated_table`
+  (on real Spark, over one DataFrame; and on generated tables against a
+  reference written in plain Python)
+* [x] G3 — evidence: `dq/tests/test_arrow_interchange.py::test_pandas_is_read_through_the_stream_interface`,
+  `::test_polars_is_read_and_its_view_columns_are_measured`,
+  `::test_datafusion_is_read_through_the_stream_interface`,
+  `::test_every_route_works_with_no_library_but_pyarrow_installed`
+* [x] G4 — evidence: `dq/tests/test_spark_free.py::test_dq_run_completes_a_run_and_writes_a_valid_report_where_spark_cannot_be_imported`,
+  `dq/tests/test_runner.py::test_a_run_reads_a_parquet_file_and_writes_a_valid_report`,
+  `::test_the_shipped_arrow_example_runs_over_a_file`
+* [x] G5 — evidence: `dq/tests/test_spark_free.py::test_the_arrow_adapter_the_runner_and_the_run_core_import_with_every_extra_blocked`,
+  `::test_the_blocker_really_blocks_the_control_imports_one`
+* [x] G6 — evidence: `dq/tests/test_framework_contract.py::test_run_emits_gate_event_with_severity_split`,
+  `::test_gate_event_is_emitted_after_the_run_scope_exits`,
+  `dq/tests/test_run_observability.py::test_g1_the_observer_is_told_a_two_rule_run_in_order`
+  (those files are unchanged since `main`)
 
 [NOTE]
 ====
-Amended 2026-11-26, before implementation. The facts below were read from the
-code and from probing pyarrow 24.0.0 and 26.0.1 and Spark 3.5.9, not from
-memory.
+Amended 2026-11-26, before implementation, and again after it. The facts
+below were read from the code and from probing pyarrow 16.0.0, 24.0.0 and
+26.0.1, polars 2.2.0, datafusion 55.0.0 and Spark 3.5.9. Two sentences of
+the first amendment were wrong; they are corrected below rather than left
+to be read.
 
 * The adapter honours all three semantic versions, so its capability sets
-  declare the same metric kinds as the Spark adapter's. "Declared absent so a
-  plan fails closed" is the kernel's own `validate_for`; a test shows a plan
-  that needs a kind the adapter does not declare being refused.
+  declare the same metric kinds as the Spark adapter's. "Declared absent so
+  a plan fails closed" is the kernel's own `validate_for`; a test shows a
+  plan that needs a kind the adapter does not declare being refused.
 * What "exports an Arrow table" means, in order: a pyarrow table; a record
-  batch; an object with `__arrow_c_stream__` or `__arrow_c_dataframe__`
-  (Polars, Spark 4); one with `to_arrow_table()` (DataFusion); a pandas
-  DataFrame, through pyarrow's own conversion; and a classic PySpark
-  DataFrame through `_collect_as_arrow()`, which is private in PySpark 3.5
-  and returns no batch for an empty frame -- an empty frame gives a table
-  with the frame's column names and no rows. This becomes the one place that
-  knows how to get an Arrow table out of a Spark frame; the SQL sink's own
-  copy of that knowledge (SPEC-007) calls it.
-* Dictionary-encoded columns are decoded before anything is computed. Arrow's
-  `min_max` and `count_distinct` have no kernel for a dictionary type, and
-  `pq.read_table` does return a column dictionary-encoded when the file
-  stored it that way. An adapter that skipped this would pass every corpus
-  case and fail on real files.
+  batch, or a reader of them; a Spark DataFrame, through `toArrow()` (Spark
+  Connect, PySpark 4) or `_collect_as_arrow()`, which is private in PySpark
+  3.5 and returns no batch for an empty frame -- an empty frame gives a
+  table with the frame's column names and no rows; an object with
+  `__arrow_c_stream__` (Polars, DataFusion, pandas 2.2 and later); one with
+  `to_arrow_table()` (DataFusion); and a pandas DataFrame through pyarrow's
+  own conversion. This is the one place that knows how to get an Arrow
+  table out of a Spark frame; the SQL sink's (SPEC-007) calls it.
+  Corrected: the first amendment also named `__arrow_c_dataframe__`. No
+  library offers it and pyarrow consumes none; it was written from memory.
+* An Arrow column is not yet a column Arrow can compute on, and the gaps
+  differ by type and by version. Half-float has no `equal`, `add` or
+  `min_max` kernel on any version from 16 to 26; `decimal32` and
+  `decimal64` have no `min_max`; a null-typed column has no `count_distinct`
+  and reports one distinct value where Spark reports none; `string_view`,
+  which is how Polars hands over its strings, has no `min_max`,
+  `count_distinct` or `filter` kernel, and no grouping on pyarrow 24. So a
+  column is brought to the form every kernel is written for before it is
+  measured, each step lossless: narrow floats are widened to double, narrow
+  decimals to `decimal128`, a view becomes a string, a null-typed column is
+  given a type.
+* Dictionary-encoded columns are decoded first. Corrected: the first
+  amendment said an adapter that skipped this would pass every corpus case.
+  It would not. An encoded column's type says `dictionary`, not `double`, so
+  a present count that has not decoded it cannot tell that a NaN is in it,
+  and counts the NaN as present -- with no error; nor has it a bound.
+  `pq.read_table` returns a column that way when the file stored it so. The
+  corpus is therefore also run with every column encoded.
 * Signed zero. Arrow counts `0.0` and `-0.0` as two distinct values and
   groups them apart; Spark counts them as one (`countDistinct` over
   `[0.0, -0.0, 1.0, 1.0, 2.0, 2.0]` is 3 in Spark and 4 in Arrow). The
-  adapter normalises signed zeros in floating columns before grouping and
-  counting, and the corpus gains a case that says so. No test could see it
-  before: the corpus holds no signed zero.
+  adapter adds `0.0` to every float column, as a double: IEEE arithmetic
+  turns `-0.0` into `0.0` by that and leaves every other value alone. It has
+  to be done that way, because half-float has no `equal` kernel to find the
+  zeros by; and it is done to grouping keys as well as to measured columns.
+  The corpus gained five cases, each verified on a real Spark session before
+  it was written: the two signed-zero ones, an empty ranges input, a `-0.0`
+  bound that is zero, and boolean bounds.
 * NaN is absent for a present count and for a range's count and bounds, and
   is one distinct value in a group -- in Arrow as in Spark, verified on both.
 * Bounds come back from Arrow as the Python types Spark gives: `int`, `float`,
@@ -126,7 +166,11 @@ memory.
   "unsupported type" the Spark adapter gives.
 * An error of Arrow's own during a computation becomes a `ConfigurationError`
   naming the dataset, the column and the metric, so the adapter fails closed
-  instead of surfacing, say, an `ArrowNotImplementedError`.
+  instead of surfacing, say, an `ArrowNotImplementedError`. A list or a
+  struct is neither countable distinct nor a bound, and is refused that way.
+  For a groups plan the keys are grouped and each measured column counted in
+  a step of its own, because Arrow counts distinct values in a hash table
+  and reports a list it cannot count as a key it cannot group on.
 * `adapter` on a portable rule is `spark` when absent, or `arrow`. Any other
   value is refused before data is read. The key itself is not checked by
   `dq-validate`, which has no rules for the portable payload, and payloads
@@ -138,20 +182,44 @@ memory.
   to build, the gate policy, the job id, the dataset name and the clock. It
   returns the outcomes, the gate decision and the gate event. The Spark
   facade keeps its signature and return type, and what is its own: loading
-  configuration, catalogs, and the Spark application id.
+  configuration, catalogs, and the Spark application id. The plan's
+  execution itself -- validate against the adapter's capabilities, check the
+  bindings, compute, evaluate -- lives once in `dq.compute_support`, with
+  what the Spark, Arrow and SQL adapters share.
 * `dq-run` names its datasets on the command line, `--dataset name=path`,
-  with the format from the file's extension. It refuses, before reading any
-  dataset, a rule whose engine needs Spark, and a portable rule that does not
-  say `adapter = "arrow"`: it refuses rather than substitute an adapter. It
-  does not persist to a sink -- its evidence is the report -- and its report
-  has `runtime.spark` null and the job id `dq-run`.
+  with the format from the file's extension: Parquet, Arrow IPC, CSV and
+  newline-delimited JSON; a directory is read as the dataset pyarrow finds
+  in it. Parquet and IPC keep every type; a CSV keeps none (a decimal becomes
+  a double, a NaN reads back as null), and JSON's types are told. It refuses,
+  before reading any dataset and all at once, a rule whose engine needs
+  Spark, a portable rule that does not say `adapter = "arrow"` (it refuses
+  rather than substitute an adapter), a configured sink (its evidence is the
+  report), and a dataset that is missing, unused, remote, absent or of a
+  format no reader knows. Two refusals come in reading: a file pyarrow
+  cannot read, and one with no column in it -- pyarrow reads a directory
+  holding nothing it recognises as no file and no column, and says nothing.
+  Its report has `runtime.spark` null and the job id `dq-run`, and names the
+  dataset it is about by what the rule pack says: `dqframework.dataset`, or
+  the one dataset the rules run on, digested by the `snapshot_sha256` the
+  rules certify, which must agree. The digest is never worked out from the
+  files.
 * For G3, `polars` and `datafusion` become development dependencies so the
   interchange tests run in CI rather than skip: a test that always skips
-  verifies nothing. Both are compatible with the lock's `pyarrow >=16,<27`.
+  verifies nothing. pyarrow itself imports pandas when pandas is installed,
+  so "nothing but pyarrow is imported" is tested by making the libraries
+  absent, not by forbidding their import. datafusion requires pyarrow, so
+  a development install now holds pyarrow without the `arrow` extra; which
+  modules need none of it is therefore shown by blocking it, as G5 does.
 * For G2, the differential is two-fold: every corpus case on both adapters
   over the same data, and a randomized differential over generated tables
   with signed zeros, NaN, nulls and decimals in them, so an edge the corpus
-  lacks is still caught.
+  lacks is still caught. The generated rules put every threshold on a
+  boundary the data makes, and the table is measured a third way, by a
+  reference in plain Python, so the two adapters cannot agree on a shared
+  mistake. Two deliberate mutations were used to see it fail.
+* `examples/portable_rule.conf`, the Spark example, had gone stale -- a size
+  check written as `min = 1`, which the translator refuses -- and nothing
+  ran it. It is repaired, and a test now runs each example.
 ====
 
 Links: ADR-010; ADR-002; ADR-014; SPEC-011; SPEC-016.

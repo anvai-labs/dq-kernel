@@ -16,6 +16,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = ROOT / "examples" / "arrow_rule.conf"
 REPORT_KEYS = {
@@ -173,6 +175,7 @@ def write_orders(path):
 def test_dq_run_completes_a_run_and_writes_a_valid_report_where_spark_cannot_be_imported(
     tmp_path,
 ):
+    pytest.importorskip("pyarrow", reason="the runner needs the arrow extra")
     blocked = spark_cannot_be_imported(tmp_path / "blocked")
     env = child_env(PYTHONPATH=blocked)
 
@@ -230,6 +233,7 @@ def test_dq_run_completes_a_run_and_writes_a_valid_report_where_spark_cannot_be_
 
 def test_dq_run_passes_a_clean_file_where_spark_cannot_be_imported(tmp_path):
     """Every check passes on a file where each customer has two ids."""
+    pytest.importorskip("pyarrow", reason="the runner needs the arrow extra")
     import pyarrow as pa
     import pyarrow.parquet as pq
 
