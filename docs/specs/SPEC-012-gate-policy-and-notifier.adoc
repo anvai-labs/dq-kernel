@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: In Progress — all gates met; awaiting CI on the carrying pull request +
+Status: Verified — CI run 45515048406 green on PR #58 +
 Date: 2026-11-24 +
 Amended: 2026-11-24 (see the note under Progress) +
 Driven by: ADR-008, ADR-013, SPEC-002 +
@@ -75,25 +75,12 @@ recording notifier into a run.
 
 == Progress
 
-* [x] G1 — evidence: `dq/tests/test_gate.py::test_policy_matrix`,
-  `::test_a_missing_or_unknown_severity_counts_as_error`,
-  `::test_anything_but_true_is_a_failure`
-* [x] G2 — evidence: `dq/tests/test_cli.py::test_cli_exit_code_follows_the_gate_policy`,
-  `::test_cli_defers_remote_config_loading_to_framework`,
-  `::test_cli_writes_failed_evidence_and_returns_failure`; the report differs
-  from before only by the two additive keys
-  (`dq/tests/test_report.py::test_report_binds_dataset_rule_set_and_all_outcomes`)
-* [x] G3 — evidence: `dq/tests/test_notifier.py::test_webhook_retries_three_times_with_backoff_then_gives_up`,
-  `::test_webhook_stops_retrying_once_a_later_attempt_succeeds`,
-  `::test_webhook_backoff_is_capped`
-* [x] G4 — evidence: `dq/tests/test_framework_contract.py::test_recording_notifier_receives_exactly_one_event_per_run`,
-  `::test_event_carries_the_configured_report_reference`,
-  `::test_gate_event_is_emitted_after_the_run_scope_exits`
-* [x] G5 — evidence: `dq/tests/test_notifier.py::test_slack_payload_is_shaped_from_the_event`,
-  `::test_teams_payload_is_an_adaptive_card_with_the_summary`,
-  `::test_chat_adapters_are_fail_open`
-* [x] G6 — evidence: `dq/tests/test_report.py::test_report_counts_blocking_and_warn_failures_independently_of_any_policy`,
-  `::test_report_binds_dataset_rule_set_and_all_outcomes`
+* [x] G1 — evidence: `dq/tests/test_gate.py::test_policy_matrix`, `::test_a_missing_or_unknown_severity_counts_as_error`
+* [x] G2 — evidence: `dq/tests/test_cli.py::test_cli_exit_code_follows_the_gate_policy`, `::test_cli_defers_remote_config_loading_to_framework`; the report differs from before only by the two additive keys (`dq/tests/test_report.py::test_report_binds_dataset_rule_set_and_all_outcomes`)
+* [x] G3 — evidence: `dq/tests/test_notifier.py::test_webhook_retries_three_times_with_backoff_then_gives_up`, `::test_webhook_stops_retrying_once_a_later_attempt_succeeds`, `::test_webhook_backoff_is_capped`
+* [x] G4 — evidence: `dq/tests/test_framework_contract.py::test_recording_notifier_receives_exactly_one_event_per_run`, `::test_event_carries_the_configured_report_reference`, `::test_gate_event_is_emitted_after_the_run_scope_exits`
+* [x] G5 — evidence: `dq/tests/test_notifier.py::test_slack_payload_is_shaped_from_the_event`, `::test_teams_payload_is_an_adaptive_card_with_the_summary`, `::test_chat_adapters_are_fail_open`
+* [x] G6 — evidence: `dq/tests/test_report.py::test_report_counts_blocking_and_warn_failures_independently_of_any_policy`
 
 [NOTE]
 ====
@@ -106,6 +93,9 @@ identity apart from those keys. The original G6 said the existing report
 tests would be unchanged; one of them asserts exact equality on `summary`
 and has to be extended. The original scope did not mention that the gate
 event is emitted inside the run scope today, which ADR-008 forbids.
+The HTTP adapters also accept only `http` and `https` URLs: the URL arrives
+through the environment, and without the allow-list a mis-set variable could
+point an adapter at a local file.
 ====
 
 Links: ADR-008; ADR-013; SPEC-002; SPEC-014.

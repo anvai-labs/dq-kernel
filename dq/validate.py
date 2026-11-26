@@ -1,14 +1,29 @@
 # Copyright 2024 Data Quality Framework Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Validation utilities for Data Quality Framework."""
+"""Validation utilities for the Data Quality Framework (the `dq-validate` command).
+
+A rule pack is validated before any Spark work: its syntax, its envelope
+against the published schema, its rules against the typed snapshot, and
+each built-in engine's required payload against the registry. Every
+supported format (HOCON, YAML, JSON) validates here without loading an
+engine or a vendor library.
+"""
 
 import argparse
-import sys
 import json
 import logging
+import sys
+from dataclasses import dataclass
+from typing import List, Tuple
+from urllib.parse import urlparse
 
+from dq.config import RulePack, parse_rule_pack, rule_pack_problems
 from dq.engine.registry import payload_key_for, payload_type_for, renamed_target
+from dq.exceptions import ConfigurationError
+from dq.schema import rule_pack_schema_errors
+from dq.utils.config_utils import config_format, load_config
+from dq.utils.config_utils import config_format, load_config
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -16,113 +31,139 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class ConfigValidation:
+    """The result of validating one rule pack."""
+
+    reference: str
+    format: str
+    errors: Tuple[str, ...]
+
+    @property
+    def valid(self) -> bool:
+        return not self.errors
+
+
 def is_local_config_reference(config_path: str) -> bool:
     """Return whether a configuration can be validated without Spark or I/O."""
-    from urllib.parse import urlparse
-
     return urlparse(config_path).scheme in ("", "file")
 
 
-def validate_config(config_path: str) -> bool:
-    """Validate a HOCON configuration file.
+def _engine_payload_errors(pack: RulePack) -> List[str]:
+    """Check each built-in engine's required payload against the registry."""
+    errors: List[str] = []
+    for rule in pack.rules:
+        engine_key = rule.engine.lower()
+        renamed = renamed_target(engine_key)
+        if renamed:
+            errors.append(
+                f"Rule {rule.index}: Engine '{rule.engine}' was renamed to "
+                f"'{renamed}'; update the configuration"
+            )
+            continue
+        payload_key = payload_key_for(engine_key)
+        if not payload_key:
+            continue  # an extension engine owns its own payload contract
+        payload = rule.definition.get(payload_key, None)
+        if not payload:
+            errors.append(
+                f"Rule {rule.index}: Engine '{rule.engine}' requires a non-empty "
+                f"'{payload_key}' payload"
+            )
+        elif payload_type_for(engine_key) == "string" and (
+            not isinstance(payload, str) or not payload.strip()
+        ):
+            errors.append(
+                f"Rule {rule.index}: Engine '{rule.engine}' payload '{payload_key}' "
+                "must be a non-empty string"
+            )
+    return errors
+
+
+def validate_config_document(config_path: str) -> ConfigValidation:
+    """Validate a rule pack and report every problem found.
 
     Args:
-        config_path: Path to the configuration file.
+        config_path: A local path (with or without ``file://``) or inline
+            HOCON text, in any supported format.
+
+    Validation proceeds in stages -- syntax, the envelope against the
+    schema, the shape of each rule, then each built-in engine's payload --
+    and reports every problem of the first failing stage.
 
     Returns:
-        True if configuration is valid, False otherwise.
+        The :class:`ConfigValidation`; ``errors`` is empty when the pack is
+        valid.
     """
-    try:
-        from pyhocon import ConfigFactory
-        from urllib.parse import urlparse
+    errors: List[str] = []
+    parsed = urlparse(config_path)
+    if is_local_config_reference(config_path):
+        fmt = config_format(config_path)
+    else:
+        # Treat an unvalidated remote rule set as unknown, never valid. A
+        # caller that needs a remote source must first materialize and
+        # validate an immutable local copy.
+        fmt = parsed.scheme
+        errors.append(
+            f"Remote config validation is not supported for scheme: {parsed.scheme}"
+        )
 
-        parsed = urlparse(config_path)
-
-        if is_local_config_reference(config_path):
-            # Local file
-            file_path = (
-                config_path.replace("file://", "")
-                if parsed.scheme == "file"
-                else config_path
-            )
-            config = ConfigFactory.parse_file(file_path)
+    if not errors:
+        try:
+            config = load_config(config_path)
+        except ConfigurationError as error:
+            errors.append(str(error))
         else:
-            # Treat an unvalidated remote rule set as unknown, never valid.  A
-            # caller that needs a remote source must first materialize and
-            # validate an immutable local copy.
-            logger.error(
-                "Remote config validation is not supported for scheme: %s",
-                parsed.scheme,
+            # Stages, each reported only when the previous one is clean, so
+            # one problem never produces two messages: syntax (above), the
+            # envelope against the schema, the shape of each rule, and each
+            # built-in engine's payload. Every problem of the first failing
+            # stage is reported.
+            errors.extend(
+                f"Schema: {problem}" for problem in rule_pack_schema_errors(config)
             )
-            return False
+            if not errors:
+                shape_problems = rule_pack_problems(config)
+                errors.extend(shape_problems)
+                if not shape_problems:
+                    errors.extend(_engine_payload_errors(parse_rule_pack(config)))
 
-        # Check required keys
-        if not config.get("dqframework"):
-            logger.error("Missing required key: 'dqframework'")
-            return False
-
-        dqrules = config.get("dqframework.dqrules", [])
-        if not dqrules:
-            logger.error("No dqrules defined in configuration")
-            return False
-
-        for i, rule in enumerate(dqrules):
-            engine = rule.get("engine", None)
-            if not engine:
-                logger.error(f"Rule {i}: Missing required key 'engine'")
-                return False
-            engine_key = str(engine).lower()
-            renamed = renamed_target(engine_key)
-            if renamed:
-                logger.error(
-                    "Rule %s: Engine '%s' was renamed to '%s'; "
-                    "update the configuration",
-                    i,
-                    engine,
-                    renamed,
-                )
-                return False
-            payload_key = payload_key_for(engine_key)
-            if payload_key and not rule.get(payload_key):
-                logger.error(
-                    "Rule %s: Engine '%s' requires a non-empty '%s' payload",
-                    i,
-                    engine,
-                    payload_key,
-                )
-                return False
-            if payload_key and payload_type_for(engine_key) == "string":
-                ruleset = rule.get(payload_key)
-                if not isinstance(ruleset, str) or not ruleset.strip():
-                    logger.error(
-                        "Rule %s: Engine '%s' payload '%s' must be a non-empty string",
-                        i,
-                        engine,
-                        payload_key,
-                    )
-                    return False
-
+    for error in errors:
+        logger.error(error)
+    if not errors:
         logger.info("Configuration is valid")
-        return True
+    return ConfigValidation(reference=config_path, format=fmt, errors=tuple(errors))
 
-    except Exception as e:
-        logger.error(f"Configuration validation failed: {e}")
-        return False
+
+def validate_config(config_path: str) -> bool:
+    """Return whether a rule pack is valid (see validate_config_document)."""
+    return validate_config_document(config_path).valid
 
 
 def main():
-    """Main entry point for dq-validate CLI."""
+    """Main entry point for the `dq-validate` command."""
     parser = argparse.ArgumentParser(
-        description="Validate Data Quality Framework configuration files",
+        description="Validate a dq-kernel rule pack without running Spark",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Exit codes:
+  0  the rule pack is valid
+  1  it is not; every problem is reported
+
+Formats follow the file extension: .conf/.hocon (default), .yaml/.yml, .json.
+Engine payloads are validated for built-in engines only; an extension engine
+owns its own payload contract.
+
 Examples:
   dq-validate config.conf
   dq-validate file://path/to/config.conf
-  dq-validate --format json config.conf
+  dq-validate rules.yaml --format json
         """,
     )
-    parser.add_argument("config", help="Path to HOCON configuration file to validate")
+    parser.add_argument(
+        "config",
+        help="Rule pack to validate: a HOCON, YAML or JSON file path, or inline HOCON",
+    )
     parser.add_argument(
         "--format",
         choices=["text", "json"],
@@ -138,18 +179,26 @@ Examples:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    is_valid = validate_config(args.config)
+    result = validate_config_document(args.config)
 
     if args.format == "json":
-        result = {"config": args.config, "valid": is_valid}
-        print(json.dumps(result, indent=2))
+        print(
+            json.dumps(
+                {
+                    "config": result.reference,
+                    "format": result.format,
+                    "valid": result.valid,
+                    "errors": list(result.errors),
+                },
+                indent=2,
+            )
+        )
+    elif result.valid:
+        print(f"Configuration '{args.config}' is valid.")
     else:
-        if is_valid:
-            print(f"Configuration '{args.config}' is valid.")
-        else:
-            print(f"Configuration '{args.config}' is invalid.")
+        print(f"Configuration '{args.config}' is invalid.")
 
-    return 0 if is_valid else 1
+    return 0 if result.valid else 1
 
 
 if __name__ == "__main__":

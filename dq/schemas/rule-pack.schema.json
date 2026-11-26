@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/anvai-labs/dq-kernel/blob/main/dq/schemas/rule-pack.schema.json",
+  "title": "dq-kernel rule pack",
+  "description": "Envelope of a dq-kernel rule pack. Valid for HOCON, YAML and JSON packs alike (convert HOCON to JSON to use it). Engine payloads are intentionally open: each engine defines its own vocabulary, and the required payload key for each engine is declared in dq/engine/registry.py.",
+  "type": "object",
+  "required": ["dqframework"],
+  "properties": {
+    "dqframework": {
+      "type": "object",
+      "required": ["dqrules"],
+      "properties": {
+        "catalog_type": {
+          "type": "string",
+          "enum": ["spark", "unity", "glue", "hive"],
+          "description": "How table references resolve. Default: spark."
+        },
+        "dataframes": {
+          "type": "object",
+          "description": "Logical dataframe name -> table name, or a structured reference.",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string", "minLength": 1 },
+              { "type": "object" }
+            ]
+          }
+        },
+        "dataset": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Dataset identity carried on evidence and gate events."
+        },
+        "dqrules": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Rules, executed in order.",
+          "items": { "$ref": "#/$defs/rule" }
+        },
+        "gate": {
+          "type": "object",
+          "description": "Which failed checks stop a pipeline (ADR-013).",
+          "properties": {
+            "fail_on": {
+              "type": "string",
+              "enum": ["any", "error", "never"],
+              "description": "any (default): every failed check blocks. error: warn-level failures do not block. never: report only."
+            }
+          },
+          "additionalProperties": false
+        },
+        "notifiers": {
+          "type": "array",
+          "description": "Gate-event notifiers (ADR-008). Default: logging.",
+          "items": { "$ref": "#/$defs/notifier" }
+        },
+        "repository": {
+          "type": "object",
+          "description": "Where engines persist metric and verification artifacts."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "required": ["engine"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "engine": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Engine identifier; built-ins are declared in dq/engine/registry.py."
+        },
+        "dataframes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Logical dataframes the rule validates. Default: [\"default\"]."
+        }
+      }
+    },
+    "notifier": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["logging", "memory", "webhook", "slack", "teams"]
+        },
+        "url_env": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the environment variable holding the webhook URL. Required by webhook, slack and teams."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

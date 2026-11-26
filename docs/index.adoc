@@ -85,16 +85,54 @@ Extension compatibility is explicit:
 
 == Configuration loading
 
+A rule pack may be written in HOCON (`.conf`, `.hocon`), YAML (`.yaml`, `.yml`) or JSON
+(`.json`); the format follows the file extension. Every format and every source normalizes to the
+same configuration, and `dq-validate` validates all of them without loading an engine.
+
 `DQFramework(spark, config, default_dataframe=None)` accepts:
 
 * an inline HOCON string;
-* `file://` for a local HOCON file;
+* a path to a rule-pack file, with or without `file://`;
 * `s3://` when the AWS extra and credentials are available;
 * `abfss://` in a Spark environment configured for ADLS Gen2; or
 * `http://` or `https://` (the HTTP helper applies a request timeout).
 
-Unknown URI schemes raise `ConfigurationError`. `dq-validate` fully parses local and `file://`
-configuration; remote schemes fail validation. Materialize an immutable local copy first.
+Unknown URI schemes raise `ConfigurationError`. `dq-validate` fully parses local, `file://` and
+inline configuration; remote schemes fail validation. Materialize an immutable local copy first.
+
+Validation proceeds in stages and reports every problem of the first failing stage: the syntax,
+the envelope against the published schema, the shape of each rule, then each built-in engine's
+required payload (declared in `dq/engine/registry.py`; an extension engine owns its own). The whole
+rule pack is validated before any engine runs, so a broken rule never costs the earlier rules'
+Spark work.
+
+The rule-pack envelope is described by `dq/schemas/rule-pack.schema.json`, which ships in the wheel
+and can be wired into an editor. Engine payloads are intentionally left open there.
+
+[source,shell]
+----
+dq-validate rules.yaml --format json
+----
+
+The JSON output carries `config`, `format`, `valid` and `errors`, so a pre-flight check can be
+scripted.
+
+Writing HOCON: pyhocon reads one `key = value` per line inside `{ ... }`. Several keys on one line
+is a parse error, and the loader names the line and the file to fix.
+
+Overlays: use one entry file per environment that includes a shared pack and overrides keys.
+
+[source,hocon]
+----
+include "base.conf"
+dqframework.dataset = "orders-prod"
+# Unset -> the base value stands; set -> that policy.
+dqframework.gate.fail_on = ${?DQ_GATE_FAIL_ON}
+----
+
+Variables are not substituted inside `include` paths: `include "env/${ENV}.conf"` silently includes
+nothing. Secrets never appear in a rule pack; they arrive through `${?VAR}` or an `url_env`
+reference. See `examples/overlays/`.
 
 A minimal Deequ configuration is:
 

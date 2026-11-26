@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: Accepted +
+Status: Verified — CI run 45519809624 green on PR #59 +
 Date: 2026-11-24 +
 Driven by: ADR-001, SPEC-004 +
 Milestone: M1 +
@@ -68,11 +68,35 @@ as a core dependency but never imported, and the framework and
 
 == Progress
 
-* [ ] G1 — not started
-* [ ] G2 — not started
-* [ ] G3 — not started
-* [ ] G4 — not started
-* [ ] G5 — not started
-* [ ] G6 — not started
+* [x] G1 — evidence: `dq/tests/test_config_loader.py::test_hocon_yaml_and_json_load_to_equal_trees`, `dq/tests/test_config_formats_spark.py::test_the_three_formats_produce_identical_run_outcomes`
+* [x] G2 — evidence: `dq/tests/test_config_loader.py::test_remote_sources_load_in_every_format_through_the_existing_seams`
+* [x] G3 — evidence: `dq/tests/test_rule_pack.py::test_a_broken_rule_names_its_index_and_key`, `dq/tests/test_framework_contract.py::test_the_whole_rule_pack_is_validated_before_any_engine_runs`
+* [x] G4 — evidence: `dq/tests/test_schema.py::test_every_checked_in_example_validates_against_the_schema`, `::test_every_example_is_also_valid_for_the_reference_validator`
+* [x] G5 — evidence: `dq/tests/test_config_loader.py::test_checked_in_overlay_example_reads_the_environment`, `::test_examples_name_secrets_by_reference_never_by_value`
+* [x] G6 — evidence: `dq/tests/test_package_contract.py::test_rule_pack_plumbing_imports_without_any_optional_dependency`, `::test_a_yaml_rule_pack_validates_with_every_optional_dependency_blocked`
+
+[NOTE]
+====
+Amended 2026-11-24, during implementation, from what the code and pyhocon
+0.3.63 actually do.
+
+* Environment overlays were specified as "HOCON `include` and environment
+  substitution". pyhocon does not substitute variables inside `include`
+  paths (`include "env/${ENV}.conf"` silently includes nothing), so the
+  pattern is one entry file per environment that includes the shared pack,
+  with environment-specific values supplied by `${?VAR}`.
+* pyhocon reads one `key = value` per line inside `{ ... }`. Several keys
+  on one line is a parse error that pyhocon reports as a type error about
+  internal tokens; the loader now names the line and the file instead.
+* Two defects found while unifying the loader are fixed here: a bare file
+  path was parsed as HOCON text (so `dq-kernel rules.conf` failed with a
+  parser dump while `dq-validate rules.conf` worked), and every parse
+  failure showed thousands of characters of parser internals.
+* The schema validator is written in the package rather than pulled in as a
+  dependency, and is cross-checked against the reference `jsonschema`
+  implementation whenever that library is installed.
+* `dq-validate` validates in stages and reports every problem of the first
+  failing stage. In parallel, one problem produced two messages.
+====
 
 Links: ADR-001; ADR-012; SPEC-004; SPEC-011.

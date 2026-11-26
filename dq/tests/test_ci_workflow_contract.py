@@ -198,3 +198,13 @@ def test_lint_lane_validates_workflow_syntax():
     assert re.search(
         r"[0-9a-f]{64}\s+actionlint\.tar\.gz", actionlint
     ), "the actionlint download must be verified against a pinned sha256"
+
+
+def test_build_job_verifies_the_published_schema_is_in_the_wheel():
+    """The rule-pack schema is a published artifact (SPEC-010)."""
+    runs = [step.get("run", "") for step in _load("ci.yml")["jobs"]["build"]["steps"]]
+    check = next((run for run in runs if "rule-pack.schema.json" in run), "")
+    assert (
+        check
+    ), "the build job must verify dq/schemas/rule-pack.schema.json is in the wheel"
+    assert "assert" in check and "dist" in check

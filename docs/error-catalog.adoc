@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 190 raise sites across the modules below; the contract
+The framework raises 199 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -19,15 +19,16 @@ the evidence store refused an unsafe write.
 
 == dq/notifier.py
 
-*Content:* 4 `ConfigurationError` sites.
+*Content:* 5 `ConfigurationError` sites.
 
 * Cause: an HTTP notifier (`webhook`, `slack`, `teams`) is missing a
   `url_env` key naming the environment variable that holds its URL, that
-  environment variable is absent at construction time, an HTTP notifier is
-  configured with fewer than one attempt, or the notifier `type` is not one
-  of `logging`, `memory`, `webhook`, `slack` or `teams`.
-* Fix: set the environment variable and ensure the configuration names
-  it via `url_env`; use a supported notifier type.
+  environment variable is absent at construction time or does not hold an
+  `http` or `https` URL, an HTTP notifier is configured with fewer than one
+  attempt, or the notifier `type` is not one of `logging`, `memory`,
+  `webhook`, `slack` or `teams`.
+* Fix: set the environment variable to an `http` or `https` URL and ensure
+  the configuration names it via `url_env`; use a supported notifier type.
 
 == dq/plan.py
 
@@ -328,3 +329,38 @@ Gate policy resolution: which failed checks block a pipeline (ADR-013).
   `error` or `never`, or is not a string. Fix the policy in the rule pack;
   omit the key to use the default, `any`, under which every failed check
   blocks.
+
+== dq/config.py
+
+Typed rule-pack snapshot: the whole pack is validated before any engine
+runs (SPEC-010).
+
+*Content:* 1 `ConfigurationError` site.
+
+* Cause: `dqframework.dqrules` is missing, empty, or not a list; a rule is
+  not a mapping, lacks an `engine`, or its `engine` or `name` is blank; or a
+  rule's `dataframes` is not a non-empty list of non-empty names.
+* Fix: correct the key the message names -- it always gives the rule index
+  (`Rule 0`, `Rule 1`, ...) and the offending key.
+
+== dq/utils/config_utils.py
+
+The format-neutral rule-pack loader (SPEC-010).
+
+*Content:* 11 `ConfigurationError` sites.
+
+* Cause: the configuration is empty or not a string, mapping, or tree; an
+  unsupported URI scheme; a local file that does not exist or cannot be
+  read; a remote source that cannot be fetched; or text that is not valid
+  HOCON, YAML or JSON (a YAML or JSON pack must be a mapping).
+* Fix: the message names the source and, for a parse error, the line and
+  column. A bare path must name an existing file; inline HOCON must contain
+  a key separator, braces, or a line break.
+
+== dq/schema.py
+
+The bundled JSON Schema validator for the rule-pack envelope (SPEC-010).
+
+* `ValueError` - the bundled schema uses a type or a reference the validator
+  does not support. This is a development error, not a configuration one: a
+  contract test checks the schema against the validator's keyword set.

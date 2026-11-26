@@ -38,9 +38,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before any engine runs
 - `examples/gate_policy.conf`, and a "Gate policy" section in the operator
   reference
+- **Rule packs in YAML and JSON** (SPEC-010), alongside HOCON. The format
+  follows the file extension (`.conf`/`.hocon`, `.yaml`/`.yml`, `.json`)
+  for local files and for `s3://`, `abfss://` and `http(s)://` sources.
+  The same rule pack loads to the same configuration and produces the same
+  run outcomes in all three formats. YAML is loaded with `safe_load` only
+- A published JSON Schema for the rule-pack envelope,
+  `dq/schemas/rule-pack.schema.json`, shipped in the wheel (CI verifies it
+  is there) for editor validation. Engine payloads stay open; each built-in
+  engine's required payload key is declared in the registry
+- A typed, validated `RulePack` snapshot (`dq.config`). The whole rule
+  pack is checked before any engine runs, so a broken rule no longer costs
+  the earlier rules' Spark work. Messages name the rule index and the key
+- `dq-validate` validates every format, and in stages: syntax, the
+  envelope against the schema, the shape of each rule, then each built-in
+  engine's payload. It reports every problem of the first failing stage.
+  Its `--format json` output gains `format` and `errors`
+- `examples/basic_deequ_validation.yaml` and `.json` (twins of the HOCON
+  example) and `examples/overlays/` (per-environment overlays)
 
 ### Changed
 
+- **Fixed: `dq-kernel rules.conf` failed on a bare file path.** The
+  framework parsed any string without a URI scheme as inline HOCON text, so
+  the most natural invocation died with a parser dump, while
+  `dq-validate rules.conf` accepted the same path. A scheme-less reference
+  that is not inline HOCON is now read as a file; `file://` still works
+- **Configuration errors are readable.** A HOCON parse failure showed
+  thousands of characters of parser internals. It now states the file, the
+  line and column, and -- when the cause is known, such as several keys on
+  one line -- what to change
+- One rule-pack loader serves the framework and `dq-validate`, replacing
+  two copies of the source-dispatch logic. `load_from_uri` raises
+  `ConfigurationError` on a non-200 response instead of returning `None`
+- A rule with `dataframes = []` fails closed before any engine runs. It
+  used to validate nothing and return no outcomes
+- Ten tests that used the Spark session without the `spark` marker are
+  marked now; they had been starting a JVM inside the unit lane, which is
+  documented to run without one
 - **`dq-kernel` exit codes**: 0 when the quality gate passed, 1 when it
   failed or the run errored, and 2 when the configuration is invalid or a
   dependency is missing. Every failure used to return 1, so a caller could

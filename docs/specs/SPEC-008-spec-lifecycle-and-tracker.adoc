@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: In Progress — awaiting CI on the carrying pull request +
+Status: Verified — CI run 45512787185 green on PR #57 +
 Date: 2026-11-24 +
 Driven by: owner directive of 2026-11-24, ADR-012 +
 Milestone: M0 +
@@ -79,6 +79,6 @@ claim of done to evidence.
 * [x] G2 — evidence: `dq/tests/test_specs_contract.py::test_tracker_detects_a_stale_table` and the `test_validator_rejects_*` cases
 * [x] G3 — evidence: `dq/tests/test_specs_contract.py::test_evidence_citations_name_real_tests`
 * [x] G4 — evidence: `dq/tests/test_specs_contract.py::test_historical_docs_point_at_the_tracker`
-* [ ] G5 — carried by the `specs/roadmap` pull request; checked when its CI run is green
+* [x] G5 — evidence: CI run 45512787185 on PR #57 completed `success`
 
 Links: ADR-012; SPEC-009; docs/roadmap.adoc.

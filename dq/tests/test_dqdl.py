@@ -55,6 +55,7 @@ def test_ambiguous_or_excessive_results_fail_closed(details, message):
     result.limit.assert_called_once_with(3)
 
 
+@pytest.mark.spark
 def test_failed_dqdl_rule_returns_false(spark):
     dataframe = spark.createDataFrame([(1,)], ["id"])
     outcomes = DqdlEngine({"ruleset": "Rules=[RowCount >= 2]"}).apply(dataframe)
@@ -62,6 +63,7 @@ def test_failed_dqdl_rule_returns_false(spark):
     assert outcomes[0]["success"] is False
 
 
+@pytest.mark.spark
 def test_dqdl_engine_runs_supported_rules(spark):
     dataframe = spark.createDataFrame([(1, "ready"), (2, "ready")], ["id", "state"])
     config = ConfigFactory.parse_string('''

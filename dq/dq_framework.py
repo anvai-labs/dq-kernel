@@ -5,13 +5,12 @@
 
 import logging
 import time
-from urllib.parse import urlparse
 
-from pyhocon import ConfigFactory
 
+from dq.config import parse_rule_pack
 from dq.engine.engine_loader import EngineLoader
-from dq.utils import config_utils, keys
 from dq.catalog.catalog_factory import CatalogFactory
+from dq.utils.config_utils import load_config
 from dq.exceptions import ConfigurationError, DataFrameNotFoundError, ValidationError
 from dq.gate import evaluate_gate, policy_from_config
 from dq.identifiers import IdentifierError, TableName
@@ -109,41 +108,22 @@ class DQFramework:
         return policy_from_config(self._config)
 
     def _load_config(self, config):
-        """Load HOCON configuration from various sources.
+        """Load a rule pack from inline text, a path, or a URI.
+
+        Accepts HOCON, YAML and JSON; see
+        :func:`dq.utils.config_utils.load_config`.
 
         Args:
-            config: Config string or URI.
+            config: Rule-pack text, a path (with or without ``file://``),
+                a supported URI, a mapping, or an already parsed tree.
 
         Returns:
             Parsed ConfigTree.
 
         Raises:
-            ConfigurationError: If config cannot be parsed.
+            ConfigurationError: If the rule pack cannot be read or parsed.
         """
-        parsed_url = urlparse(config)
-        try:
-            if parsed_url.scheme == "":
-                return ConfigFactory.parse_string(config)
-            elif parsed_url.scheme == "s3":
-                return ConfigFactory.parse_string(
-                    config_utils.load_from_s3(
-                        bucket=parsed_url.netloc, key=parsed_url.path
-                    )
-                )
-            elif parsed_url.scheme == "abfss":
-                return ConfigFactory.parse_string(config_utils.load_from_adls(config))
-            elif parsed_url.scheme == "file":
-                return ConfigFactory.parse_file(config.replace("file://", ""))
-            elif parsed_url.scheme in ["http", "https"]:
-                return ConfigFactory.parse_string(config_utils.load_from_uri(config))
-            else:
-                raise ConfigurationError(
-                    f"Unsupported config scheme: {parsed_url.scheme}"
-                )
-        except ConfigurationError:
-            raise
-        except Exception as e:
-            raise ConfigurationError(f"Failed to load configuration: {e}") from e
+        return load_config(config)
 
     def _load_dataframes(self):
         """Load DataFrames from configuration.
@@ -231,9 +211,9 @@ class DQFramework:
         cumulative_bytes = 0
         sink = sink_from_config(self._config.get("dqframework.repository", {}))
 
-        rule_configs = self._config.get("dqframework.dqrules", [])
-        if not rule_configs:
-            raise ConfigurationError("No dqrules defined in configuration")
+        # Validate the whole rule pack before any engine runs, so a broken
+        # rule is reported before the earlier rules' work is done (ADR-001).
+        pack = parse_rule_pack(self._config)
         # Resolve the gate policy before any engine runs: an invalid policy
         # is a configuration error, and must not cost a run's Spark work.
         policy = self.gate_policy
@@ -244,20 +224,14 @@ class DQFramework:
             else nullcontext()
         )
         with scope:
-            for rule_index, rule_config in enumerate(rule_configs):
-                df_names = rule_config.get("dataframes", ["default"])
-                engine_name = rule_config.get(keys.DQ_ENGINE_NAME, None)
-
-                if engine_name is None:
-                    raise ConfigurationError(
-                        f"Rule {rule_index} is missing required key 'engine'"
-                    )
+            for rule in pack.rules:
+                rule_config = rule.definition
 
                 engine = EngineLoader().load_engine(
-                    engine_name, rule_config, current_time_in_millis
+                    rule.engine, rule_config, current_time_in_millis
                 )
 
-                for df_name in df_names:
+                for df_name in rule.dataframes:
                     dataframe = self.get_dataframe(df_name)
                     summary_metrics = engine.apply(dataframe, repository=sink)
                     for outcome in normalize_outcomes(summary_metrics):

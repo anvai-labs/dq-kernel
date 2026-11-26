@@ -412,3 +412,23 @@ def test_unknown_notifier_types_list_the_supported_ones():
 def test_gate_event_json_carries_the_report_reference():
     assert make_event().to_dict()["report"] is None
     assert make_event(**RICH).to_dict()["report"] == "s3://evidence/run-7.json"
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["file:///etc/passwd", "ftp://host/x", "gopher://host/x", "hooks.example.com/x"],
+    ids=["file", "ftp", "gopher", "no-scheme"],
+)
+def test_http_adapters_refuse_urls_outside_http_and_https(url):
+    """The URL arrives through the environment; a allow-list bounds it."""
+    for adapter in (WebhookNotifier, SlackNotifier, TeamsNotifier):
+        with pytest.raises(ConfigurationError, match="must use http or https"):
+            adapter(url, sleep=NO_SLEEP)
+
+
+@pytest.mark.parametrize(
+    "url", ["https://hooks.example.com/x", "http://127.0.0.1:8000/hook"]
+)
+def test_http_adapters_accept_http_and_https_urls(url):
+    with patch("urllib.request.urlopen"):
+        WebhookNotifier(url, sleep=NO_SLEEP).notify(make_event())
