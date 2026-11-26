@@ -63,9 +63,9 @@ def test_build_checks_defaults_criticality_and_injects_names():
             ]
         )
     ).build_checks()
-    assert checks[0]["name"] == "is_not_null_0"
+    assert checks[0]["name"] == "is_not_null_id"
     assert checks[0]["criticality"] == "error"
-    assert checks[1]["name"] == "is_unique_1"
+    assert checks[1]["name"] == "is_unique_a_b"
     # for_each_column passes through untouched for DQX to expand.
     assert checks[1]["check"]["for_each_column"] == ["a", "b"]
     assert "arguments" not in checks[1]["check"]
@@ -374,14 +374,103 @@ def test_dqx_validation_pass_builds_index(fake_dqx):
     assert engine._check_index == {"a": ("f_a", "warn")}
 
 
-def test_an_explicit_name_equal_to_a_derived_label_is_refused():
-    """`is_not_null_1` is what the second check would derive; naming the
-    first one that would make the two indistinguishable."""
-    config = check_config(
-        [
-            {"name": "is_not_null_1", "check": {"function": "is_not_null"}},
-            {"check": {"function": "is_not_null"}},
-        ]
-    )
-    with pytest.raises(ValueError, match="Duplicate check label 'is_not_null_1'"):
+@pytest.mark.parametrize(
+    "entries, label",
+    [
+        (
+            [
+                {"name": "is_not_null_id", "check": {"function": "is_not_null"}},
+                {"check": {"function": "is_not_null", "arguments": {"column": "id"}}},
+            ],
+            "is_not_null_id",
+        ),
+        (
+            [
+                {"check": {"function": "is_not_null"}},
+                {"check": {"function": "is_not_null"}},
+                {"name": "is_not_null_1", "check": {"function": "is_not_null"}},
+            ],
+            "is_not_null_1",
+        ),
+    ],
+    ids=["derived_from_a_column", "derived_from_a_position"],
+)
+def test_an_explicit_name_equal_to_a_derived_label_is_refused(entries, label):
+    """Naming a check what another one derives makes the two
+    indistinguishable -- whether that name comes from the other check's
+    column, or from its position among checks with no columns."""
+    config = check_config(entries)
+    with pytest.raises(ValueError, match=f"Duplicate check label '{label}'"):
         DqxCheck(config).build_checks()
+
+
+def test_a_missing_name_is_the_function_and_its_columns():
+    """The labelling rule every engine follows, read from a DQX entry."""
+    checks = DqxCheck(
+        check_config(
+            [
+                {
+                    "check": {
+                        "function": "is_unique",
+                        "arguments": {"columns": ["a", "b"]},
+                    }
+                },
+                {
+                    "check": {
+                        "function": "foreign_key",
+                        "arguments": {"columns": ["o"], "drop_invalid": True},
+                    }
+                },
+                {"check": {"function": "row_count", "arguments": {"min_count": 1}}},
+                {
+                    "check": {
+                        "function": "sql_expression",
+                        "arguments": {"expression": "1 = 1"},
+                    }
+                },
+            ]
+        )
+    ).build_checks()
+    assert [check["name"] for check in checks] == [
+        "is_unique_a_b",
+        "foreign_key_o",
+        "row_count",
+        "sql_expression",
+    ]
+
+
+def test_a_check_with_no_columns_is_named_by_its_position_only_when_it_repeats():
+    checks = DqxCheck(
+        check_config(
+            [
+                {"check": {"function": "row_count", "arguments": {"min_count": 1}}},
+                {
+                    "name": "no_duplicates",
+                    "check": {"function": "row_count", "arguments": {"max_count": 1}},
+                },
+                {"check": {"function": "row_count", "arguments": {"min_count": 2}}},
+            ]
+        )
+    ).build_checks()
+    assert [check["name"] for check in checks] == [
+        "row_count",
+        "no_duplicates",
+        "row_count_2",
+    ]
+
+
+def test_a_name_does_not_change_when_the_checks_are_reordered():
+    """A name that followed position would be another check's after a
+    reorder, and evidence recorded under it would change meaning."""
+    entries = [
+        {"check": {"function": "is_not_null", "arguments": {"column": "id"}}},
+        {"check": {"function": "is_unique", "for_each_column": ["a", "b"]}},
+    ]
+    forward = [
+        check["name"] for check in DqxCheck(check_config(entries)).build_checks()
+    ]
+    backward = [
+        check["name"] for check in DqxCheck(check_config(entries[::-1])).build_checks()
+    ]
+    assert forward == ["is_not_null_id", "is_unique_a_b"]
+    assert backward == ["is_unique_a_b", "is_not_null_id"]

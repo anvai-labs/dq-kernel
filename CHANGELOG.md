@@ -202,6 +202,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its control plane moved to a closed repository
 - The historical planning documents state that they are proposals and
   point at the tracker; every proposal they make has a recorded disposition
+- A DQX check without a `name` is labelled by its function and its columns
+  (`is_not_null_id`, `is_unique_a_b` for `for_each_column`), as every other
+  engine labels a check. It was `is_not_null_0`: a name that changed
+  whenever the checks were reordered, so evidence recorded under it changed
+  meaning
 - `docs/index.adoc` links the tracker instead of a hand-maintained list of
   specs, lists ADR-011 through ADR-015, and no longer links two review
   files in a `docs/reviews/` directory that does not exist
