@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: In Progress — all gates met; awaiting CI on the carrying pull request +
+Status: Verified — CI run 45748743753 green on PR #63 +
 Date: 2026-11-24 +
 Driven by: ADR-011 +
 Milestone: M2 +
