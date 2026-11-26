@@ -40,8 +40,40 @@ def test_report_binds_dataset_rule_set_and_all_outcomes():
     assert evidence["rule_set"]["sha256"] == "b" * 64
     assert evidence["dataset"]["sha256"] == DATASET_SHA
     assert evidence["runtime"]["framework"]
-    assert evidence["summary"] == {"total": 2, "passed": 1, "failed": 1}
+    # The two severity counts are additive (ADR-013); a failure with no
+    # reported severity counts as blocking.
+    assert evidence["summary"] == {
+        "total": 2,
+        "passed": 1,
+        "failed": 1,
+        "blocked": 1,
+        "warned": 0,
+    }
     assert len(evidence["checks"]) == 2
+
+
+def test_report_counts_blocking_and_warn_failures_independently_of_any_policy():
+    evidence = report(
+        [
+            {"check": "unique", "success": True},
+            {"check": "stale", "success": False, "details": {"criticality": "warn"}},
+            {
+                "check": "complete",
+                "success": False,
+                "details": {"criticality": "error"},
+            },
+            {"check": "legacy", "success": False, "details": "one gap"},
+        ]
+    )
+    assert evidence["summary"] == {
+        "total": 4,
+        "passed": 1,
+        "failed": 3,
+        "blocked": 2,
+        "warned": 1,
+    }
+    # `status` is a fact about the data and never follows a gate policy.
+    assert evidence["status"] == "failed"
 
 
 @pytest.mark.parametrize(

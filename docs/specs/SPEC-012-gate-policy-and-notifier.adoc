@@ -2,8 +2,9 @@
 :toc:
 :sectlinks.
 
-Status: Accepted +
+Status: In Progress — all gates met; awaiting CI on the carrying pull request +
 Date: 2026-11-24 +
+Amended: 2026-11-24 (see the note under Progress) +
 Driven by: ADR-008, ADR-013, SPEC-002 +
 Milestone: M1 +
 
@@ -13,22 +14,26 @@ Give severity operational meaning, and bring the notifier up to the decision
 its ADR records. Since ADR-012 every engine reports a canonical
 `criticality`, yet a warn-only failure still exits the pipeline with code 1
 and marks the report failed. The webhook notifier makes one attempt where
-ADR-008 specifies three, and nothing can inject a recording notifier into a
-run.
+ADR-008 specifies three, the gate event is emitted inside the run scope
+where ADR-008 requires it after the scope commits, and nothing can inject a
+recording notifier into a run.
 
 == In scope
 
-* `dq.gate`: `GatePolicy` (`any`, `error`, `warn`, `never`), `GateDecision`,
-  and the pure function `evaluate_gate(outcomes, policy)`. Configuration key:
+* `dq.gate`: `GatePolicy` (`any`, `error`, `never`), `GateDecision`, and
+  the pure function `evaluate_gate(outcomes, policy)`. Configuration key:
   `dqframework.gate.fail_on`.
-* Exit codes for `dq-kernel`: 0 when the gate passes, 1 when it fails, 2 when
-  the configuration is invalid and that is detected before any data is read.
+* Exit codes for `dq-kernel`: 0 when the gate passes, 1 when it fails, 2
+  when the run fails because the configuration is invalid or an optional
+  dependency is missing. Today every failure returns 1, so a caller cannot
+  tell a data problem from a typo.
 * `dq-report/v1`: additive `summary.blocked` and `summary.warned` counts.
-  `status` keeps its meaning — any failed check.
+  `status` keeps its meaning: any failed check.
 * Notifier conformance with ADR-008 and SPEC-002: the `notifiers` key (it
   supersedes `notify`), three webhook attempts with capped exponential
   backoff and an injectable sleep, a `report` reference on `GateEvent`, an
-  `InMemoryNotifier`, and `slack` and `teams` adapters.
+  `InMemoryNotifier`, `slack` and `teams` adapters, the event emitted after
+  the run scope commits, and constructor injection of a notifier.
 
 == Out of scope
 
@@ -40,37 +45,67 @@ run.
 == Contracts
 
 * The default policy is `any`, which preserves today's exit behaviour
-  exactly. `error` makes warn-only failures non-gating.
+  exactly. `error` makes warn-only failures non-gating. `never` reports but
+  never fails.
 * `evaluate_gate` is pure and is the one place the decision is made; the
-  CLI, the report, and the notifier all read from it.
+  CLI reads from it.
 * An outcome with no `criticality` counts as `error`.
-* `dq-report/v1` gains keys only. Existing consumers reading known keys see
-  no change.
+* `dq-report/v1` and the gate event gain keys only.
+* A notifier that raises is logged and swallowed by the framework, whatever
+  the adapter does.
 
 == Acceptance gates
 
 * G1 — For every policy and outcome mix (error failure, warn failure, both,
   none) the decision and the exit code are as specified.
-* G2 — Under the default policy the CLI exit code and the report bytes are
-  identical to before for rule packs without warn failures.
+* G2 — Under the default policy the CLI exit codes are identical to before
+  for rule packs without warn failures, and the report is identical apart
+  from the two additive summary keys.
 * G3 — The webhook adapter makes three attempts with backoff on transport
   failure and then gives up without raising; a success on a later attempt
   stops the retries; tests inject the sleep and touch no network.
 * G4 — A recording notifier receives exactly one event per run, for passing
-  and failing runs, carrying the report reference when `--report-json` is
-  given.
+  and failing runs, carrying the report reference when one is configured;
+  the event is emitted after the run scope has exited.
 * G5 — The Slack and Teams adapters post their shaped payloads and are
   fail-open.
-* G6 — The report with the additive summary fields still validates, and the
-  existing report tests are unchanged.
+* G6 — The report with the additive summary fields still validates; the
+  existing report tests pass with only their exact-equality assertion on
+  `summary` extended for the two new keys.
 
 == Progress
 
-* [ ] G1 — not started
-* [ ] G2 — not started
-* [ ] G3 — not started
-* [ ] G4 — not started
-* [ ] G5 — not started
-* [ ] G6 — not started
+* [x] G1 — evidence: `dq/tests/test_gate.py::test_policy_matrix`,
+  `::test_a_missing_or_unknown_severity_counts_as_error`,
+  `::test_anything_but_true_is_a_failure`
+* [x] G2 — evidence: `dq/tests/test_cli.py::test_cli_exit_code_follows_the_gate_policy`,
+  `::test_cli_defers_remote_config_loading_to_framework`,
+  `::test_cli_writes_failed_evidence_and_returns_failure`; the report differs
+  from before only by the two additive keys
+  (`dq/tests/test_report.py::test_report_binds_dataset_rule_set_and_all_outcomes`)
+* [x] G3 — evidence: `dq/tests/test_notifier.py::test_webhook_retries_three_times_with_backoff_then_gives_up`,
+  `::test_webhook_stops_retrying_once_a_later_attempt_succeeds`,
+  `::test_webhook_backoff_is_capped`
+* [x] G4 — evidence: `dq/tests/test_framework_contract.py::test_recording_notifier_receives_exactly_one_event_per_run`,
+  `::test_event_carries_the_configured_report_reference`,
+  `::test_gate_event_is_emitted_after_the_run_scope_exits`
+* [x] G5 — evidence: `dq/tests/test_notifier.py::test_slack_payload_is_shaped_from_the_event`,
+  `::test_teams_payload_is_an_adaptive_card_with_the_summary`,
+  `::test_chat_adapters_are_fail_open`
+* [x] G6 — evidence: `dq/tests/test_report.py::test_report_counts_blocking_and_warn_failures_independently_of_any_policy`,
+  `::test_report_binds_dataset_rule_set_and_all_outcomes`
+
+[NOTE]
+====
+Amended 2026-11-24, before implementation started and after reading the
+code. The original text listed a fourth policy, `warn`, which would have
+been an alias for `any` (a warn failure and an error failure both block),
+so it is removed. The original G2 required the report bytes to be identical
+to before, which contradicted the additive summary keys; it now requires
+identity apart from those keys. The original G6 said the existing report
+tests would be unchanged; one of them asserts exact equality on `summary`
+and has to be extended. The original scope did not mention that the gate
+event is emitted inside the run scope today, which ADR-008 forbids.
+====
 
 Links: ADR-008; ADR-013; SPEC-002; SPEC-014.

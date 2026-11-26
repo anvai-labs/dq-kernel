@@ -25,17 +25,18 @@ separate, operator-owned decision.
   "any check failed" and gains only the additive counts `summary.blocked`
   and `summary.warned`.
 * Policy `dqframework.gate.fail_on`: `any` (a failed check of any severity
-  fails the gate), `error` (only `error` failures fail it), `warn` (a warn
-  failure fails it; an error-only failure does not — useful for canary
-  rules), `never`.
+  fails the gate), `error` (only `error` failures fail it), `never` (report
+  but never fail). There is no `warn` policy: "a warn failure fails the
+  gate" is already true of `any`, so it would only be a second name.
 * The default is `any`. It preserves today's exit behaviour exactly;
   existing rule packs that use Warning-level checks keep gating as they do
   now. Making warnings non-gating is an explicit opt-in.
 * An outcome with no `criticality` counts as `error`.
-* Exit codes: 0 the gate passed, 1 the gate failed, 2 the configuration is
-  invalid and that was detected before any data was read. Today every
-  failure returns 1, so a caller cannot tell a data problem from a typo.
-  Code 2 for configuration is a deliberate, documented change.
+* Exit codes: 0 the gate passed, 1 the gate failed, 2 the run failed because
+  the configuration is invalid or an optional dependency is missing. Today
+  every failure returns 1, so a caller cannot tell a data problem from a
+  typo. Code 2 for configuration is a deliberate, documented change, and it
+  matches the usage-error code argparse already returns for bad arguments.
 
 == Consequences
 

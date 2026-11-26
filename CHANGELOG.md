@@ -25,14 +25,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ADR-013 (gate policy and severity), ADR-014 (one run core, many
   runners) and ADR-015 (row outcomes and the data-plane sink) as proposals
   recording the decisions those specs depend on
+- **Gate policy** (SPEC-012, ADR-013): `dqframework.gate.fail_on` decides
+  which failed checks block a pipeline -- `any` (the default, which keeps
+  today's behaviour), `error` (checks whose `criticality` is `warn` are
+  reported but do not block) or `never`. `dq.gate.evaluate_gate` is the one
+  place the decision is made, and `DQFramework.last_gate_decision` records
+  it for each run
+- Notifier adapters `slack` and `teams`, and a recording `memory` notifier
+  (`InMemoryNotifier`); a `report` reference on `GateEvent`; and
+  `DQFramework(..., notifier=..., report_reference=...)` for injecting a
+  notifier and naming the run's report. An unknown gate policy now fails
+  before any engine runs
+- `examples/gate_policy.conf`, and a "Gate policy" section in the operator
+  reference
 
 ### Changed
 
+- **`dq-kernel` exit codes**: 0 when the quality gate passed, 1 when it
+  failed or the run errored, and 2 when the configuration is invalid or a
+  dependency is missing. Every failure used to return 1, so a caller could
+  not tell a data problem from a typo; scripts that test specifically for
+  exit code 1 on a configuration error will see 2
+- The notifier configuration key is `dqframework.notifiers` (it was
+  `dqframework.notify`); the webhook adapter makes three attempts with
+  capped exponential backoff (it made one); and the gate event is emitted
+  after the run scope has exited, as ADR-008 requires. The first wiring
+  emitted it inside the scope, so notification joined the durability
+  transaction
+- `dq-report/v1.summary` gains the additive counts `blocked` and `warned`.
+  `status` is unchanged and never follows a gate policy
 - SPEC-001 through SPEC-007 are reconciled against the code: 001, 004 and
-  006 are `Released — 0.2.0` with a test cited for every gate; SPEC-002 is
-  in progress (two gates remain, delivered by SPEC-012); SPEC-003 and
-  SPEC-007 are accepted and unbuilt in part or whole; SPEC-005 is deferred
-  because its control plane moved to a closed repository
+  006 are `Released — 0.2.0` with a test cited for every gate; the two
+  gates SPEC-002 lacked are delivered by SPEC-012; SPEC-003 and SPEC-007
+  are accepted and unbuilt in part or whole; SPEC-005 is deferred because
+  its control plane moved to a closed repository
 - The historical planning documents state that they are proposals and
   point at the tracker; every proposal they make has a recorded disposition
 - `docs/index.adoc` links the tracker instead of a hand-maintained list of

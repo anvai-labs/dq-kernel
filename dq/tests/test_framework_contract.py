@@ -7,15 +7,27 @@ import pytest
 
 from dq.dq_framework import DQFramework
 from dq.exceptions import ConfigurationError, DataFrameNotFoundError, ValidationError
+from dq.notifier import InMemoryNotifier
 
 
-def framework_with_rules(rules):
+def framework_with_rules(rules, notifier=None, **extra_config):
     framework = DQFramework.__new__(DQFramework)
-    framework._config = {"dqframework.dqrules": rules}
+    framework._config = {"dqframework.dqrules": rules, **extra_config}
     framework._spark = MagicMock()
     framework._spark.sparkContext.applicationId = "local-test"
     framework.get_dataframe = MagicMock(return_value=MagicMock())
+    framework._notifier = notifier
+    framework._report_reference = None
+    framework.last_gate_decision = None
     return framework
+
+
+def engine_returning(loader_patch, outcomes):
+    """Patch EngineLoader so every rule gets an engine yielding ``outcomes``."""
+    engine = MagicMock()
+    engine.apply.return_value = outcomes
+    loader_patch.return_value.load_engine.return_value = engine
+    return engine
 
 
 def test_library_rejects_empty_rule_set():
@@ -169,3 +181,149 @@ def test_run_gate_event_absent_criticality_blocks(caplog):
             framework.run()
     gate_records = [r for r in caplog.records if "gate_event" in r.getMessage()]
     assert gate_records and "blocked=1" in gate_records[0].getMessage()
+
+
+# ---------------------------------------- gate policy and notifier conformance
+
+
+def _outcome(check, success, criticality=None):
+    details = {"criticality": criticality} if criticality else {}
+    return {"check": check, "success": success, "details": details}
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "status"),
+    [
+        ([_outcome("a", True, "error"), _outcome("b", True, "warn")], "passed"),
+        ([_outcome("a", True, "error"), _outcome("b", False, "warn")], "failed"),
+    ],
+    ids=["passing-run", "failing-run"],
+)
+def test_recording_notifier_receives_exactly_one_event_per_run(outcomes, status):
+    recorder = InMemoryNotifier()
+    framework = framework_with_rules(
+        [{"engine": "deequ", "checks": [{"constraint": "isComplete"}]}],
+        notifier=recorder,
+    )
+    with patch("dq.dq_framework.EngineLoader") as loader:
+        engine_returning(loader, outcomes)
+        results = framework.run()
+    assert len(recorder.events) == 1
+    event = recorder.events[0]
+    assert event.status == status
+    assert event.failed == tuple(o["check"] for o in outcomes if not o["success"])
+    assert event.total == len(outcomes)
+    assert event.report is None
+    assert results == results  # the run returns its outcomes regardless of notification
+
+
+def test_event_carries_the_configured_report_reference():
+    recorder = InMemoryNotifier()
+    framework = framework_with_rules(
+        [{"engine": "deequ", "checks": [{"constraint": "isComplete"}]}],
+        notifier=recorder,
+    )
+    framework._report_reference = "s3://evidence/run-7.json"
+    with patch("dq.dq_framework.EngineLoader") as loader:
+        engine_returning(loader, [_outcome("a", True, "error")])
+        framework.run()
+    assert recorder.events[0].report == "s3://evidence/run-7.json"
+    assert recorder.events[0].to_dict()["report"] == "s3://evidence/run-7.json"
+
+
+def test_memory_notifier_is_built_from_config_and_reachable():
+    framework = framework_with_rules(
+        [{"engine": "deequ", "checks": [{"constraint": "isComplete"}]}],
+        **{"dqframework.notifiers": [{"type": "memory"}]},
+    )
+    with patch("dq.dq_framework.EngineLoader") as loader:
+        engine_returning(loader, [_outcome("a", True, "error")])
+        framework.run()
+    assert len(framework._notifier.events) == 1
+
+
+def test_gate_event_is_emitted_after_the_run_scope_exits():
+    """ADR-008: notification never joins the durability transaction."""
+    events = []
+    recorder = InMemoryNotifier()
+    original = recorder.notify
+
+    def notifying(event):
+        events.append(scope.state)
+        original(event)
+
+    recorder.notify = notifying
+    sink = MagicMock()
+
+    class Scope:
+        state = "open"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.state = "committed"
+
+    scope = Scope()
+    sink.run_scope.return_value = scope
+    framework = framework_with_rules(
+        [{"engine": "deequ", "checks": [{"constraint": "isComplete"}]}],
+        notifier=recorder,
+    )
+    framework._config = {
+        "dqframework.dqrules": framework._config["dqframework.dqrules"],
+        "dqframework.repository": {"dataset": "orders"},
+    }
+    with (
+        patch("dq.dq_framework.EngineLoader") as loader,
+        patch("dq.dq_framework.sink_from_config", return_value=sink),
+    ):
+        engine_returning(loader, [_outcome("a", False, "error")])
+        framework.run()
+    assert events == ["committed"]
+
+
+class ExplodingNotifier:
+    def notify(self, event):
+        raise RuntimeError("delivery exploded")
+
+
+def test_a_raising_notifier_never_alters_the_run():
+    framework = framework_with_rules(
+        [{"engine": "deequ", "checks": [{"constraint": "isComplete"}]}],
+        notifier=ExplodingNotifier(),
+    )
+    with patch("dq.dq_framework.EngineLoader") as loader:
+        engine_returning(loader, [_outcome("a", False, "error")])
+        results = framework.run()
+    assert [r["check"] for r in results] == ["a"]
+    assert results[0]["success"] is False
+
+
+@pytest.mark.parametrize(
+    ("policy", "passed"),
+    [("any", False), ("error", True), ("never", True)],
+)
+def test_run_records_the_gate_decision_under_the_configured_policy(policy, passed):
+    framework = framework_with_rules(
+        [{"engine": "deequ", "checks": [{"constraint": "isComplete"}]}],
+        notifier=InMemoryNotifier(),
+        **{"dqframework.gate.fail_on": policy},
+    )
+    with patch("dq.dq_framework.EngineLoader") as loader:
+        engine_returning(loader, [_outcome("warn_only", False, "warn")])
+        framework.run()
+    assert framework.gate_policy == policy
+    assert framework.last_gate_decision.passed is passed
+
+
+def test_unknown_gate_policy_fails_closed_before_any_engine_runs():
+    framework = framework_with_rules(
+        [{"engine": "deequ", "checks": [{"constraint": "isComplete"}]}],
+        notifier=InMemoryNotifier(),
+        **{"dqframework.gate.fail_on": "sometimes"},
+    )
+    with patch("dq.dq_framework.EngineLoader") as loader:
+        with pytest.raises(ConfigurationError, match="dqframework.gate.fail_on"):
+            framework.run()
+    loader.return_value.load_engine.assert_not_called()

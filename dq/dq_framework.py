@@ -13,8 +13,9 @@ from dq.engine.engine_loader import EngineLoader
 from dq.utils import config_utils, keys
 from dq.catalog.catalog_factory import CatalogFactory
 from dq.exceptions import ConfigurationError, DataFrameNotFoundError, ValidationError
+from dq.gate import evaluate_gate, policy_from_config
 from dq.identifiers import IdentifierError, TableName
-from dq.notifier import GateEvent, notifier_from_config
+from dq.notifier import GateEvent, GateNotifier, notifier_from_config
 from dq.outcomes import MAX_BATCH_BYTES, MAX_OUTCOMES, CheckOutcome, normalize_outcomes
 from dq.sinks import sink_from_config
 
@@ -30,6 +31,10 @@ class DQFramework:
         config: Configuration string (HOCON), or URI (file://, s3://, abfss://, http://).
         default_dataframe: Optional default DataFrame for rules that don't
             specify explicit dataframe references.
+        notifier: Optional :class:`GateNotifier` to inject in place of the
+            configured one (``dqframework.notifiers``).
+        report_reference: Optional reference to the run's ``dq-report/v1``
+            document, carried on the gate event.
 
     Configuration supports a ``catalog_type`` key to control how table
     references are resolved:
@@ -68,15 +73,40 @@ class DQFramework:
         }
     """
 
-    def __init__(self, spark, config, default_dataframe=None):
+    # Class-level defaults: tests and embedders sometimes assemble a
+    # framework by hand (``__new__`` plus attributes) instead of loading a
+    # rule pack, and such an instance must still run.
+    _notifier = None
+    _report_reference = None
+    last_gate_decision = None
+
+    def __init__(
+        self,
+        spark,
+        config,
+        default_dataframe=None,
+        *,
+        notifier: GateNotifier = None,
+        report_reference: str = None,
+    ):
         self._spark = spark
         self._config = self._load_config(config)
         self.default_dataframe = default_dataframe
+        self._notifier = notifier
+        self._report_reference = report_reference
+        #: The :class:`GateDecision` of the last ``run()``, or ``None``
+        #: before the first run.
+        self.last_gate_decision = None
         self._catalog_type = self._config.get("dqframework.catalog_type", None)
         self._catalog_provider = CatalogFactory.get_provider(
             spark, catalog_type=self._catalog_type
         )
         self.dataframes = self._load_dataframes()
+
+    @property
+    def gate_policy(self) -> str:
+        """The configured gate policy (``dqframework.gate.fail_on``)."""
+        return policy_from_config(self._config)
 
     def _load_config(self, config):
         """Load HOCON configuration from various sources.
@@ -187,10 +217,12 @@ class DQFramework:
                 - ``ts``: Timestamp in milliseconds
                 - ``jobid``: Spark application ID
 
-        When ``dqframework.notify`` is configured, one :class:`GateEvent`
-        is announced per run after the rules complete (severity split into
-        ``blocked``/``warned`` per ``details.criticality``); notification
-        failures never alter the run's outcome.
+        After the rules complete, the gate policy (``dqframework.gate``,
+        ADR-013) is applied to the outcomes and recorded as
+        ``last_gate_decision``. One :class:`GateEvent` per run is then
+        announced -- after the run scope has exited, so notification never
+        joins the durability transaction (ADR-008). A notifier that raises
+        is logged and swallowed; it can never alter the run's outcome.
         """
         from contextlib import nullcontext
 
@@ -198,11 +230,13 @@ class DQFramework:
         cumulative_metrics = []
         cumulative_bytes = 0
         sink = sink_from_config(self._config.get("dqframework.repository", {}))
-        notifier = notifier_from_config(self._config.get("dqframework.notify", None))
 
         rule_configs = self._config.get("dqframework.dqrules", [])
         if not rule_configs:
             raise ConfigurationError("No dqrules defined in configuration")
+        # Resolve the gate policy before any engine runs: an invalid policy
+        # is a configuration error, and must not cost a run's Spark work.
+        policy = self.gate_policy
 
         scope = (
             sink.run_scope(current_time_in_millis)
@@ -245,20 +279,37 @@ class DQFramework:
                             )
                         cumulative_metrics.append(metric)
 
-            notifier.notify(
-                GateEvent.from_outcomes(
-                    run_key=current_time_in_millis,
-                    dataset=self._config.get("dqframework.dataset", None)
-                    or getattr(sink, "dataset", None)
-                    or "unknown",
-                    outcomes=cumulative_metrics,
-                    ts=current_time_in_millis,
-                    job_id=self._spark.sparkContext.applicationId,
-                )
-            )
-            return cumulative_metrics
-
+        self.last_gate_decision = evaluate_gate(cumulative_metrics, policy)
+        self._announce(cumulative_metrics, current_time_in_millis, sink)
         return cumulative_metrics
+
+    def _announce(self, outcomes, run_key, sink) -> None:
+        """Emit the run's gate event; never raises (ADR-008)."""
+        notifier = self._notifier
+        if notifier is None:
+            notifier = notifier_from_config(
+                self._config.get("dqframework.notifiers", None)
+            )
+            self._notifier = notifier
+        event = GateEvent.from_outcomes(
+            run_key=run_key,
+            dataset=self._config.get("dqframework.dataset", None)
+            or getattr(sink, "dataset", None)
+            or "unknown",
+            outcomes=outcomes,
+            ts=run_key,
+            job_id=self._spark.sparkContext.applicationId,
+            report=self._report_reference,
+        )
+        try:
+            notifier.notify(event)
+        except Exception as error:  # noqa: BLE001 - notification is fail-open
+            logger.warning(
+                "gate-event notifier %s failed for run_key=%d: %s",
+                type(notifier).__name__,
+                run_key,
+                error,
+            )
 
     def get_dataframe(self, df_name):
         """Retrieve a DataFrame by logical name.

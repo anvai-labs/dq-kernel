@@ -11,6 +11,7 @@ This directory contains example configurations and scripts demonstrating how to 
 - `greatexpectations_validation.conf` - GX Core expectations (snake-case `type` entries) through the greatexpectations engine
 - `dqx_validation.conf` - Databricks Labs DQX metadata checks through the dqx engine (needs the `dqx` extra; Python <3.13 only)
 - `multi_engine_pipeline.conf` - Multi-engine pipeline combining Deequ and schema validation
+- `gate_policy.conf` - Gate policy (`fail_on`), notifiers, and severity-aware outcomes (ADR-013)
 - `unity_catalog.conf` - Configuration using Databricks Unity Catalog
 - `glue_catalog.conf` - Configuration using AWS Glue Data Catalog
 
