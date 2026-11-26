@@ -20,6 +20,8 @@ from collections.abc import Mapping
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
+from dq.compute_support import as_exact_fraction as _as_exact_fraction
+from dq.compute_support import require_exact_column
 from dq.exceptions import ConfigurationError
 from dq.outcomes import CheckOutcome
 from dq.plan import (
@@ -64,8 +66,6 @@ RANGES_CAPABILITIES = CapabilitySet(
     ),
     SEMANTIC_RANGES_VERSION,
 )
-
-_MAX_LISTED_COLUMNS = 8
 
 
 def capabilities_for(plan: ExecutionPlan) -> CapabilitySet:
@@ -161,25 +161,14 @@ def _validated_bindings(plan: ExecutionPlan, datasets) -> dict[str, DataFrame]:
 
 
 def _require_exact_column(dataframe, name: str, column: str):
-    """Resolve one column by exact name, rejecting ambiguity, and return it."""
+    """Resolve one column by exact name, rejecting ambiguity, and return its field."""
     fields = dataframe.schema.fields
-    fields_by_name = {field.name: field for field in fields}
-    field = fields_by_name.get(column)
-    if field is None:
-        available = ", ".join(sorted(fields_by_name)[:_MAX_LISTED_COLUMNS])
-        raise ConfigurationError(
-            f"column {column!r} in dataset {name!r} requires an exact "
-            f"case-sensitive match; available columns: {available}"
-        )
-    duplicates = any(other is not field and other.name == column for other in fields)
-    if duplicates or any(
-        other.lower() == column.lower() for other in fields_by_name if other != column
-    ):
-        raise ConfigurationError(
-            f"column {column!r} in dataset {name!r} is ambiguous: duplicate or "
-            "case-insensitive colliding fields cannot be resolved"
-        )
-    return field
+    return require_exact_column(
+        name,
+        column,
+        [field.name for field in fields],
+        {field.name: field for field in fields},
+    )
 
 
 def _dataset_counts(name: str, dataframe, plan: ExecutionPlan) -> dict:
@@ -271,31 +260,6 @@ def _dataset_group_metrics(name: str, dataframe, plan: ExecutionPlan) -> dict:
                     summary[f"dq_max_{column_index[metric.column.name]}"]
                 )
     return values
-
-
-def _as_exact_fraction(value, name: str, column: str):
-    """Convert a Spark bound to an exact Fraction; refuse infinite bounds."""
-    import decimal
-
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return Fraction(value)
-    if isinstance(value, decimal.Decimal):
-        return Fraction(value)
-    if isinstance(value, float):
-        import math
-
-        if math.isinf(value):
-            raise ConfigurationError(
-                f"column {column!r} in dataset {name!r} has an infinite "
-                "bound; ranges/v1 bounds must be finite"
-            )
-        return Fraction(decimal.Decimal(str(value)))
-    raise ConfigurationError(
-        f"column {column!r} in dataset {name!r} produced a bound of an "
-        f"unsupported type: {type(value).__name__}"
-    )
 
 
 def _dataset_range_metrics(name: str, dataframe, plan: ExecutionPlan) -> dict:

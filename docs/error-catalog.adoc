@@ -90,16 +90,42 @@ the evidence store refused an unsafe write; `HarvestError` is a
 
 == dq/spark_adapter.py
 
-*Content:* 8 `ConfigurationError` sites.
+*Content:* 4 `ConfigurationError` sites.
 
 * Cause: bindings do not exactly match plan datasets, bound objects are not
-  Spark DataFrames, or columns fail exact case-sensitive resolution
-  (including duplicates and case-insensitive collisions); infinite range
-  bounds fail closed; `execute_envelope` is handed a bare plan instead of a
-  `RulesetEnvelope`.
-* Fix: align binding names with the plan, pass DataFrames, and use the
-  exact column casing listed in the error; execute single-semantics plans
-  with `execute_plan`.
+  Spark DataFrames, or `execute_envelope` is handed a bare plan instead of a
+  `RulesetEnvelope`. A column that is missing or ambiguous, and an
+  infinite bound, are refused by `dq/compute_support.py`, which this adapter
+  shares with every other.
+* Fix: align binding names with the plan and pass DataFrames; execute
+  single-semantics plans with `execute_plan`.
+
+== dq/compute_support.py
+
+*Content:* 4 `ConfigurationError` sites.
+
+What every compute adapter shares: resolving a column by exact name, and
+converting a bound to an exact fraction (ADR-010).
+
+* Cause: a plan names a column that the dataset does not have exactly -- and
+  the message lists the columns it does have -- or that is ambiguous: a
+  duplicate, or one of two columns whose names differ only in case. Or a
+  range bound is infinite: there is no exact fraction for it.
+* Fix: use the column's exact casing; give one of two colliding columns a
+  distinct name in the dataset; and keep `Infinity` out of a column a
+  ranges/v1 rule measures.
+
+== dq/run.py
+
+*Content:* 1 `ValidationError` site.
+
+The one run core (ADR-014).
+
+* Cause: a run produced more outcomes, or a larger serialized batch, than it
+  is allowed to (`dq.outcomes.MAX_OUTCOMES`, `MAX_BATCH_BYTES`). Evidence
+  that cannot be bounded cannot be certified, so the run is refused.
+* Fix: split the rule pack, or the dataset, so that one run stays within the
+  bounds.
 
 == dq/cdf_adapter.py
 
