@@ -886,18 +886,19 @@ pii = ["numpy (>=1.20,<2.0)", "presidio-analyzer (>=2.2.359,<2.3.0)", "spacy (>=
 
 [[package]]
 name = "databricks-sdk"
-version = "0.154.0"
+version = "0.170.0"
 description = "Databricks SDK for Python (Beta)"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
 markers = "python_version == \"3.13\" and extra == \"databricks\" or python_version == \"3.12\" and (extra == \"dqx\" or extra == \"databricks\")"
 files = [
-    {file = "databricks_sdk-0.154.0-py3-none-any.whl", hash = "sha256:a87413ec9469c278104999b1a9f644d52aa97f2307be8f70252eaae3e6e74931"},
-    {file = "databricks_sdk-0.154.0.tar.gz", hash = "sha256:70af90c889e76ecc0ab62d5df5b2d7c9dca4f4e7bc2caddec3701c47c1719d79"},
+    {file = "databricks_sdk-0.170.0-py3-none-any.whl", hash = "sha256:e64dbeb663cd46b6e3bf396e59e910393a3447ebf14d8cfdaa19bf7de5bf06d5"},
+    {file = "databricks_sdk-0.170.0.tar.gz", hash = "sha256:256ff31fc6ad12dbdd11cfef474c81e9cfcbe018cce35ea460f2cbe9bc6fe0dd"},
 ]
 
 [package.dependencies]
+certifi = ">=2026.10.19"
 google-auth = ">=2.0,<3.0"
 protobuf = ">=4.25.8,<5.26 || >=5.29.dev0,!=5.29.0,!=5.29.1,!=5.29.2,!=5.29.3,!=5.29.4,!=6.30.0,!=6.30.1,!=6.31.0,<8.0"
 requests = ">=2.28.1,<3"
@@ -3439,4 +3440,4 @@ sqlalchemy = ["sqlalchemy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "0f302cdefeb93dc5adf72a9dc2085798b686edeb5b10c1e42a5591214ef0abb2"
+content-hash = "ba6168c9b97c7ea822fb5bbef4bb7cb2b25c05d25cd1c52ebf2088c0759e894f"
