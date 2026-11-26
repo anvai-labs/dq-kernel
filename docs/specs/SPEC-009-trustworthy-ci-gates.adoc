@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: In Progress — one gate remains: the lock hotfix needs merging +
+Status: In Progress — all gates met; awaiting CI on the carrying pull request +
 Date: 2026-11-24 +
 Driven by: ADR-009 (CI proves the open repo), SPEC-008 +
 Milestone: M0 +
@@ -83,8 +83,11 @@ failing test or collection error printed a traceback.
 
 == Progress
 
-* [ ] G1 — the hotfix is ready: PR #56 regenerated the lock with Poetry
-  2.4.2 and its CI run succeeded; `main` turns green when it merges
+* [x] G1 — observed: PR #56 merged to `main` as `f596114` on 2026-11-26. The
+  push run on it, CI run 45752024958, is green -- lint, with dependencies
+  installed from the lock file; 550 passed in each test lane; `build` -- and
+  `poetry check --lock` passes on that tree with Poetry 2.4.2. It is `main`'s
+  first green run since 2026-10-23
 * [x] G2 — evidence: `dq/tests/test_pytest_output_contract.py::test_collection_error_prints_its_traceback`, `::test_failing_test_prints_its_traceback`, `::test_repository_addopts_never_silence_the_summary`
 * [x] G3 — evidence: `dq/tests/test_ci_workflow_contract.py::test_gate_passes_when_every_lane_succeeds`, `::test_gate_fails_when_any_lane_fails`, `::test_gate_fails_on_every_non_success_result`, `::test_merge_gate_lists_every_other_lane`
 * [x] G4 — observed: CI run 45510661749 on PR #55, whose base is a feature
@@ -131,6 +134,11 @@ Known gaps, recorded rather than hidden: the `delta` extra has no live test
 in CI (the Change Data Feed tests run on fakes); the `cron` package is
 exercised only through the `databricks` extra; and `main` has no branch
 protection, so a red `build` does not by itself stop a merge.
+* G1 waited on the lock hotfix from 2026-11-24 to 2026-11-26, when it was
+  merged. One thing about reading `main` for it: `main`'s workflow is still
+  the one from before this spec, and has no `poetry check --lock` step. There
+  the mismatch showed as `poetry install` refusing to read the lock, so the
+  gate's second clause was checked by running `poetry check --lock` on
+  `main`'s tree itself.
 ====
-
 Links: ADR-009; ADR-012; SPEC-008; SPEC-003.
