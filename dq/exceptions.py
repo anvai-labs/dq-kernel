@@ -50,3 +50,25 @@ class RepositoryError(DQFrameworkError):
     """Raised when there's an error with the metrics repository."""
 
     pass
+
+
+class HarvestError(ConfigurationError):
+    """Raised when an external result source cannot be imported.
+
+    Deliberately also a ``ConfigurationError``: the source is to be fixed
+    or exported again, not the data, so it means what that means -- the
+    importer's command exits 2, as it does for a rule pack it cannot load.
+
+    Attributes:
+        system: The source system the harvester was reading, if known.
+        position: Index of the offending record in the source, from 0, when
+            one record is at fault.
+        record: What the source calls the offending record, when it has a
+            name.
+    """
+
+    def __init__(self, message, *, system=None, position=None, record=None):
+        super().__init__(message)
+        self.system = system
+        self.position = position
+        self.record = record

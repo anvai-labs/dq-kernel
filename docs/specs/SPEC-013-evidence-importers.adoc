@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: Accepted +
+Status: In Progress — all gates met; awaiting CI on the carrying pull request +
 Date: 2026-11-24 +
 Driven by: ADR-011 +
 Milestone: M2 +
@@ -32,7 +32,9 @@ this framework's reports, sinks, or gate.
    can federate through a trivial format.
 * `dq-import`: writes a `dq-report/v1` document from an imported source and
   applies the gate policy to it. Imported outcomes are ordinary outcome
-  dictionaries, so they reach the same report, gate and sinks as any other.
+  dictionaries, so they reach the same report, gate and sinks as any other
+  -- framed for a sink as the framework frames its own, through
+  `dq.engine.dq_engine.outcome_frames`, which is now public for that.
 * A checked-in example of each source, which the tests import.
 
 == Out of scope
@@ -144,8 +146,11 @@ writes it. One outcome per entry of `results`, in the document's order.
 The label follows the rule every engine follows, and the one the
 `greatexpectations` engine gives the same expectation: the expectation type
 and its column, `expect_column_values_to_not_be_null_id`, or the type alone
-for a table-level expectation. Great Expectations 1.24 and 1.25 have no name
-of their own for an expectation.
+for a table-level expectation. A label that repeats -- two expectations of
+one type with no column, or two of one type on one column -- takes its
+position in the document, as it does in the engine. Great Expectations 1.24
+and 1.25 have no name of their own for an expectation, so where the engine
+asks for one, the importer has only the position to go by.
 
 * `success` must be a JSON boolean; anything else is rejected.
 * `criticality` is `warn` when the expectation's `severity` is `warning`, and
@@ -221,11 +226,25 @@ was rejected or the arguments are invalid.
 
 == Progress
 
-* [ ] G1 — not started
-* [ ] G2 — not started
-* [ ] G3 — not started
-* [ ] G4 — not started
-* [ ] G5 — not started
+* [x] G1 — evidence: `dq/tests/test_harvest_dbt.py::test_each_status_maps_as_the_specification_table_says`,
+  `::test_a_status_that_is_not_a_data_test_status_is_rejected`,
+  `::test_only_data_tests_are_imported`,
+  `::test_the_example_dbt_wrote_imports`
+* [x] G2 — evidence: `dq/tests/test_harvest_greatexpectations.py::test_each_result_becomes_one_outcome_with_its_type_and_measurements`,
+  `::test_row_values_row_locators_and_tracebacks_are_never_copied`,
+  `::test_a_raised_expectation_is_a_failed_check_with_no_verdict`,
+  `::test_the_example_gx_wrote_imports`
+* [x] G3 — evidence: `dq/tests/test_harvest_columnar.py::test_the_csv_and_json_examples_import_to_the_same_outcomes`,
+  `::test_a_record_without_a_boolean_success_is_rejected`,
+  `::test_a_csv_cell_that_does_not_read_true_or_false_is_rejected`,
+  `::test_an_unknown_column_is_rejected_so_nothing_is_dropped_silently`
+* [x] G4 — evidence: `dq/tests/test_import_cli.py::test_each_importer_writes_the_report_the_builder_writes`,
+  `::test_a_passing_source_exits_0`,
+  `::test_a_failing_source_exits_1_and_names_what_blocks`,
+  `::test_a_rejected_source_exits_2`
+* [x] G5 — evidence: `dq/tests/test_harvest.py::test_every_imported_outcome_carries_where_it_came_from`,
+  `::test_the_package_imports_and_harvests_with_every_vendor_library_blocked`,
+  `dq/tests/test_harvest_sinks_spark.py::test_imported_outcomes_are_written_by_the_sql_sink`
 
 [NOTE]
 ====
@@ -264,6 +283,34 @@ by Great Expectations 1.24.1 and 1.25.0.
 * The gate gained an exit-code clause (G4). The CLI had none, and SPEC-012's
   exit codes are what let a pipeline tell a rejected source from a failed
   dataset.
+====
+
+[NOTE]
+====
+Amended 2026-11-25, during implementation.
+
+* "The same sinks" needed a condition, and a test found it. Framed with
+  `spark.createDataFrame(outcomes)`, imported outcomes lost their shape
+  before any sink saw them: their `details` differ from one check to the
+  next, and Spark's inference then makes the field a map of strings and
+  writes every nested value as its `str()`. The provenance arrived in the
+  database as `{reference=..., run=...}`. The engine base has always framed
+  its own outcomes with a stated schema (`_artifact_frames`); that framing is
+  now a public function, `outcome_frames`, and the engine method calls it.
+  A test pins both the loss and the way round it.
+* Two expectations of one type on one column take their position in the
+  document. The engine asks for a name there, and a Great Expectations
+  document has none to give, so the unique-label rule would have made such a
+  suite impossible to import.
+* An errored dbt test keeps its execution time. It ran: its query is what
+  failed. Only a skipped test reports a time it did not take.
+* A refusal carries the record's position as an attribute as well as in its
+  message (`HarvestError.position`, `.record`). The columnar importer reported
+  the row in prose and left the attribute empty until a test asked for it.
+* The formats were re-read from the tools during implementation, and two more
+  assumptions fell: a dbt `message` for a failing test does not list the
+  offending values (it is a stock sentence), and a raised Great Expectations
+  expectation reports `success: false`, which a test double had wrong.
 ====
 
 Links: ADR-011; ADR-012; SPEC-012; SPEC-020.

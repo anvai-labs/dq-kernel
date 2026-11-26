@@ -211,6 +211,7 @@ SparkSession.builder \
     .getOrCreate()
 ----
 
+[[outcome-contract]]
 === Outcome contract
 
 The facade and evidence reporter use an immutable `CheckOutcome` compatibility
@@ -334,6 +335,7 @@ The `businessrules` engine currently implements `DistinctnessByGroup`, `RateOfCh
 `LookupBasedOnColumnNameList`, and `WideTablesNegativeValuesCheck`. See
 `examples/businessrules_constraints.conf`.
 
+[[great-expectations]]
 === Great Expectations
 
 The `greatexpectations` engine is a first-class engine on GX Core (`great_expectations
@@ -430,6 +432,185 @@ same. `arrow = false` turns it off.
 
 Install with `pip install dq-kernel[sqlalchemy]`, adding `[arrow]` for the Arrow path.
 
+[[importing-evidence]]
+== Importing evidence
+
+Quality results produced by other tools join the same evidence stream: the
+same outcome contract, report, gate and sinks as the framework's own. ADR-011
+federates rather than competes with platform-native checks -- a signal's
+origin is metadata, not a silo.
+
+`dq.harvest` reads three kinds of source. It imports no vendor library to do
+it: a harvester parses bytes.
+
+* dbt's `run_results.json`: the data tests, by their `unique_id`;
+* a Great Expectations validation result, as `to_json_dict()` writes it;
+* a columnar file -- CSV, or a JSON array of records -- with the columns
+  `check`, `success`, an optional `criticality` and an optional `details`
+  object, so any tool can federate through a trivial format.
+
+[source,python]
+----
+from pathlib import Path
+
+from dq.gate import evaluate_gate
+from dq.harvest import harvest
+
+source = Path("target/run_results.json").read_bytes()
+outcomes = harvest(source, reference="target/run_results.json")
+decision = evaluate_gate(outcomes, "error")
+----
+
+The system is told from the document, or stated with `harvest(source,
+reference=..., system="dbt")`. A source is read once: the digest in its
+evidence is of exactly the bytes that were parsed.
+
+Each outcome is an ordinary outcome dictionary
+(xref:#outcome-contract[Outcome contract]), and
+carries where it came from in `details.origin`:
+
+[source,json]
+----
+{
+  "check": "test.analytics.not_null_orders_order_id.cf6c17daed",
+  "success": false,
+  "details": {
+    "criticality": "error",
+    "status": "fail",
+    "observed": {"failures": 3, "execution_time": 0.1875},
+    "origin": {
+      "system": "dbt",
+      "reference": "target/run_results.json",
+      "sha256": "<64 hex digits>",
+      "run": "11cfc1e8-98df-4b89-9570-fc85ee756525"
+    }
+  }
+}
+----
+
+`status` is the source's own word for the outcome. `observed` holds counts
+and measurements, never a row of data. `run` is there when the source names
+the run that produced it.
+
+=== What a dbt artifact becomes
+
+Only data tests are imported: records whose `unique_id` begins `test.`. A
+model, seed or snapshot is not a quality result, and a unit test judges a
+model's logic on fixed inputs. The `unique_id` is the label.
+
+[cols="1,1,1,3",options="header"]
+|===
+| dbt status | `success` | `criticality` | Why
+
+| `pass`
+| true
+| error
+| Evaluated. Neither threshold was met.
+
+| `fail`
+| false
+| error
+| Evaluated. The `error_if` threshold was met.
+
+| `warn`
+| false
+| warn
+| Evaluated. Only the `warn_if` threshold was met.
+
+| `error`
+| false
+| error
+| The test's own query failed. Nothing was judged.
+
+| `skipped`
+| false
+| error
+| `dbt build` skips every test that follows a failed one. Nothing was judged.
+|===
+
+The artifact does not record a test's configured severity, so a test that
+was not evaluated cannot be read as advisory: no verdict is not a pass.
+
+=== What a Great Expectations result becomes
+
+One outcome per expectation result, labelled as the
+xref:#great-expectations[greatexpectations engine] labels the same
+expectation: its type and column, `expect_column_values_to_not_be_null_id`.
+A `severity` of `warning` makes the check advisory.
+
+`observed` keeps the numbers at the top level of a result: `unexpected_count`,
+`element_count`, an `observed_value` where it is a number. Lists, strings and
+nested objects are not copied, which leaves out `partial_unexpected_list`
+and `partial_unexpected_counts` (row values), `partial_unexpected_index_list`
+(row locators) and the traceback a raised expectation carries. A raised
+expectation comes back as `success: false` with an empty `result`, and is a
+failed check.
+
+=== The columnar format
+
+One record per check:
+
+[source,csv]
+----
+include::../examples/import/checks.csv[]
+----
+
+`check` is the label and must be unique in the file. `success` is required:
+a JSON boolean, or a CSV cell reading `true` or `false`. `criticality` takes
+the spellings every engine takes and is `error` when absent. `details` is an
+object (in CSV, that object as JSON in one cell) and becomes `observed`. Any
+other column is refused, so that nothing is dropped without a word. What a
+tool writes in `details` is the tool's to judge: this format cannot recognise
+a row of data.
+
+=== A source that cannot be imported
+
+A record either normalizes into the outcome contract or the source is
+rejected. Importing never widens the contract. The refusal is a
+`HarvestError`, which is a `ConfigurationError`, and its message names the
+record and its position:
+
+[source]
+----
+columnar source 'checks.csv': row 4: 'orders_id_unique' has success 'yes', which is not true or false
+dbt source 'target/run_results.json': record 7: 'test.proj.x' has status 'skip', which is not a dbt data-test status
+----
+
+A source is also refused when it holds no check at all -- an empty Great
+Expectations suite validates with `success: true`, and the artifact of a
+`dbt run` holds models and no tests -- when two checks share a name, when it
+is not UTF-8, or when it is over 64 MiB. Only the fields a harvester reads
+are required; others are ignored, since dbt writes fields its own published
+schema does not list.
+
+=== Sending imported outcomes to a sink
+
+Frame them as the framework frames its own, with
+`dq.engine.dq_engine.outcome_frames(spark, outcomes)`. Do not hand the
+outcome dictionaries to `spark.createDataFrame` and let it infer a schema:
+their `details` differ in shape from one check to the next, and Spark then
+infers a map of strings and writes every nested value as its `str()` -- no
+error, the structure gone. `outcome_frames` states the schema.
+
+=== dq-import
+
+[source,shell]
+----
+dq-import target/run_results.json --dataset-id orders \
+    --dataset-sha256 <64 hex digits> --report-json evidence.json
+dq-import examples/import/checks.csv --fail-on error
+----
+
+`dq-import` reads a source once, applies the gate policy, and writes a
+`dq-report/v1` document in which `rule_set` names the imported document with
+the digest of the bytes that were parsed. `runtime.spark` is `null`.
+`--report-json` needs `--dataset-id` and `--dataset-sha256`, as it does for
+`dq-kernel`; without a report the command still applies the gate and prints
+its verdict. It exits 0 when the gate passed, 1 when it failed, and 2 when
+the source was rejected.
+
+The checked-in examples under `examples/import/` are imported by the tests.
+
 == Command-line tools
 
 [source,shell]
@@ -437,6 +618,8 @@ Install with `pip install dq-kernel[sqlalchemy]`, adding `[arrow]` for the Arrow
 dq-kernel file:///absolute/path/config.conf --spark-master 'local[*]'
 dq-validate file:///absolute/path/config.conf --format json
 dq-engines --format json
+dq-import examples/import/run_results.json --dataset-id orders \
+    --dataset-sha256 <64 hex digits> --report-json evidence.json
 ----
 
 `dq-kernel` creates a Spark session, runs the configured checks, prints a summary, and exits
@@ -449,7 +632,9 @@ Every checked-in example is validated in CI.
 
 `dq-engines` lists the engines this installation can resolve, built-in and
 entry-point, with each engine's capability manifest and, for an engine whose
-optional dependency is missing, how to install it.
+optional dependency is missing, how to install it. `dq-import` reads another
+tool's results as evidence and needs no Spark session: see
+xref:#importing-evidence[Importing evidence].
 
 === Gate policy
 

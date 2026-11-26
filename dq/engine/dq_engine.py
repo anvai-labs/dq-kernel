@@ -59,6 +59,58 @@ def capability_problems(capabilities) -> list:
     return problems
 
 
+def outcome_frames(spark, outcomes):
+    """Return the ``(metrics, verifications)`` frames outcomes persist as.
+
+    The metrics frame is ``(check, success)``; the verifications frame adds
+    ``details`` as JSON text. The schema is stated, never inferred, and that
+    is the point. Outcome dictionaries differ in the shape of their
+    ``details`` from one check to the next, and ``spark.createDataFrame``
+    given a list of such dictionaries infers a map of strings and writes
+    every nested value as its ``str()`` -- no error, the structure gone.
+    An engine's own outcomes and an imported source's (``dq.harvest``) are
+    framed here alike, so they reach the same sinks in the same shape.
+
+    Args:
+        spark: The Spark session the frames belong to.
+        outcomes: Legacy outcome dictionaries: ``check``, ``success`` and
+            ``details``, as :func:`dq.engine.checkspec.build_result` and
+            every harvester return them.
+
+    Returns:
+        ``(metrics, verifications)`` DataFrames.
+    """
+    from pyspark.sql.types import BooleanType, StringType, StructField, StructType
+
+    metrics_df = spark.createDataFrame(
+        [(outcome["check"], outcome["success"]) for outcome in outcomes],
+        StructType(
+            [
+                StructField("check", StringType()),
+                StructField("success", BooleanType()),
+            ]
+        ),
+    )
+    verifications_df = spark.createDataFrame(
+        [
+            (
+                outcome["check"],
+                outcome["success"],
+                json.dumps(outcome["details"], sort_keys=True),
+            )
+            for outcome in outcomes
+        ],
+        StructType(
+            [
+                StructField("check", StringType()),
+                StructField("success", BooleanType()),
+                StructField("details", StringType()),
+            ]
+        ),
+    )
+    return metrics_df, verifications_df
+
+
 class DQEngine(ABC):
     """Contract for all data quality engines (ADR-012).
 
@@ -242,37 +294,7 @@ class DQEngine(ABC):
     def _artifact_frames(metrics, dataframe):
         """Build the run's metrics and verifications artifact DataFrames.
 
-        Shared by engines that persist a run as one (check, success,
-        details-JSON) pair of frames under a single repository key. Pyspark
-        is imported lazily so this contract module stays import-light.
+        The standard (check, success) and (check, success, details-JSON)
+        pair of frames; see :func:`outcome_frames`.
         """
-        from pyspark.sql.types import BooleanType, StringType, StructField, StructType
-
-        spark = dataframe.sparkSession
-        metrics_df = spark.createDataFrame(
-            [(metric["check"], metric["success"]) for metric in metrics],
-            StructType(
-                [
-                    StructField("check", StringType()),
-                    StructField("success", BooleanType()),
-                ]
-            ),
-        )
-        verifications_df = spark.createDataFrame(
-            [
-                (
-                    metric["check"],
-                    metric["success"],
-                    json.dumps(metric["details"], sort_keys=True),
-                )
-                for metric in metrics
-            ],
-            StructType(
-                [
-                    StructField("check", StringType()),
-                    StructField("success", BooleanType()),
-                    StructField("details", StringType()),
-                ]
-            ),
-        )
-        return metrics_df, verifications_df
+        return outcome_frames(dataframe.sparkSession, metrics)

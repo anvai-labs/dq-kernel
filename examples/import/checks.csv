@@ -1,0 +1,4 @@
+check,success,criticality,details
+orders_id_unique,false,error,"{""failed_rows"": 3}"
+orders_status_in_set,false,warn,"{""unexpected_percent"": 12.5}"
+orders_row_count,true,,

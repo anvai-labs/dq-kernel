@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 212 raise sites across the modules below; the contract
+The framework raises 218 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -15,7 +15,8 @@ Every error derives from `DQFrameworkError`. `ConfigurationError` and
 "the data or evidence failed validation — this is a quality signal, not a
 bug"; `ValueError` marks legacy engine boundaries; `DataFrameNotFoundError`
 means the referenced table could not be resolved; `RepositoryError` means
-the evidence store refused an unsafe write.
+the evidence store refused an unsafe write; `HarvestError` is a
+`ConfigurationError` raised when another tool's results cannot be imported.
 
 == dq/notifier.py
 
@@ -414,3 +415,37 @@ The shared semantic corpus that every compute adapter is checked against.
   that are not exactly the ones the plan requires. This is a defect in the
   checked-in corpus, not in user configuration: fix the case, or add the
   documented metric.
+
+== dq/harvest/__init__.py
+
+*Content:* 2 `HarvestError` sites.
+
+Telling an imported source's system apart, and reading it (SPEC-013).
+
+* Cause: no importer recognises the source -- it is not a dbt
+  `run_results.json`, a Great Expectations validation result, or a columnar
+  file -- or the `system` it was stated to be is not one of `dbt`,
+  `greatexpectations` and `columnar`.
+* Fix: state the system (`harvest(..., system="dbt")`, or `dq-import
+  --system dbt`) to be told what the source lacks, or export the results in
+  one of the three formats (`docs/index.adoc`, "Importing evidence").
+
+== dq/harvest/base.py
+
+*Content:* 2 `HarvestError` + 2 `ValueError` sites.
+
+The contract every importer goes through (SPEC-013).
+
+* Cause (`HarvestError`): a source is imported under an empty reference; it
+  is larger than 64 MiB; or one of the contract's checks refused it -- a
+  record holds a status the importer does not know, the source holds no
+  check, two checks share a name, or a batch will not cross the outcome
+  gate. Every importer refuses through the one function here, so every
+  message names the source, the record and its position.
+* Fix: read the message; it says which record of which source is at fault. A
+  status the importer does not know means the vendor wrote something this
+  version does not read: report it with the vendor's version.
+* Cause (`ValueError`): internal to parsing JSON -- `NaN`, `Infinity`, or a
+  key that repeats in one object. It is caught here and raised as the
+  `HarvestError` above; a caller never sees it.
+* Fix: none beyond the `HarvestError` it becomes.
