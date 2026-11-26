@@ -83,7 +83,7 @@ black = "26.10.1"                  # Formatting (lint runs on 3.13)
 flake8 = ">=6,<8"               # Linting only
 bandit = "^1.7.5"               # Security scanning only
 pip-audit = "^2.10.1"             # Audit lane runs on 3.13
-diff-cover = "10.6.0"
+diff-cover = "11.0.4"
 hypothesis = ">=6.100,<7"      # Property-based tests for the pure kernel
 # The OpenTelemetry observer is also tested through the real API, with the
 # SDK's in-memory providers: nothing is exported off the process.
