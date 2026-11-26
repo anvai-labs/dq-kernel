@@ -19,13 +19,8 @@ port. Engines pass their native payloads through untouched; only the axes
 that are truly common cross the seam.
 """
 
-import logging
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from types import MappingProxyType
-from typing import Any, Dict, Iterable, Optional
-
-logger = logging.getLogger(__name__)
+from typing import Any, Dict, Iterable, List, Optional
 
 #: Canonical severity spellings accepted across all engines.
 CRITICALITIES = ("error", "warn")
@@ -123,71 +118,91 @@ def build_result(
     return {"check": check, "success": bool(success), "details": merged}
 
 
-def require_unique_names(names: Iterable[str]) -> None:
-    """Fail closed when explicitly configured rule names repeat.
+def require_unique_labels(labels: Iterable[str]) -> None:
+    """Fail closed when two checks would report the same label.
 
-    Duplicate names would make evidence ambiguous (two rules, one label);
-    derived names are exempt -- callers validate only names the author
-    wrote, so legacy payloads with repeated engine-native labels keep
-    working.
+    Evidence is attributed by a result's ``check`` label. Two checks with
+    one label cannot be told apart -- in a report, a sink, or a gate event
+    that names failing checks -- so an engine refuses such a configuration
+    and says which checks collide.
 
     Args:
-        names: Explicitly configured names.
+        labels: The labels of a rule's checks, in configuration order.
 
     Raises:
-        ValueError: On the first duplicate.
+        ValueError: Naming the label and the two checks that share it.
     """
-    seen = set()
-    for name in names:
-        if name in seen:
+    seen: Dict[str, int] = {}
+    for index, label in enumerate(labels):
+        if label in seen:
             raise ValueError(
-                f"Duplicate check name {name!r}: explicitly configured "
-                "check names must be unique so evidence maps unambiguously "
-                "to rules"
+                f"Duplicate check label {label!r}: checks {seen[label]} and "
+                f"{index} would report the same name and their evidence could "
+                "not be told apart; give each check a distinct name"
             )
-        seen.add(name)
+        seen[label] = index
 
 
-@dataclass(frozen=True)
-class CheckSpec:
-    """One rule as seen across the plugin seam.
+def _explicit_name(check: Mapping[str, Any], name_keys) -> Optional[str]:
+    for key in name_keys:
+        value = check.get(key, None)
+        if value:
+            return str(value)
+    return None
 
-    Attributes:
-        name: Rule identity (explicit or :func:`derive_name`).
-        criticality: Canonical severity (:data:`CRITICALITIES`).
-        function: Engine-native check identifier (passthrough -- the
-            engine's vocabulary is not interpreted here).
-        native: The engine-native rule definition, frozen for safety.
-            Engines build their runtime objects from this.
-        columns: Target columns, informational (engines resolve targets
-            from ``native`` themselves).
-        filter: Optional row-scope expression; only meaningful for
-            engines whose capabilities include ``row_filter``.
+
+def _target_columns(check: Mapping[str, Any], column_keys) -> List[str]:
+    columns: List[str] = []
+    for key in column_keys:
+        value = check.get(key, None)
+        if isinstance(value, str):
+            columns.append(value)
+        elif value:
+            columns.extend(str(column) for column in value)
+    return columns
+
+
+def labels_for_checks(
+    checks: Iterable[Mapping[str, Any]], name_keys, kind_key: str, column_keys
+) -> List[str]:
+    """Return the labels of a rule's checks, in configuration order.
+
+    The labelling rule every engine follows. A check is named by:
+
+    * its configured name (the first of ``name_keys`` that is set);
+    * else its kind and the columns it targets, ``isComplete_id``;
+    * else its kind alone -- a check with no columns, such as a row count
+      or a table-level expectation -- unless the rule has an earlier check
+      of the same kind, in which case by its kind and position.
+
+    Args:
+        checks: The rule's check mappings.
+        name_keys: Keys that hold an explicit name, in precedence order.
+        kind_key: The key holding the check's kind.
+        column_keys: Keys holding the columns the check targets.
+
+    Returns:
+        One label per check. Two may still coincide; the caller refuses
+        such a rule with :func:`require_unique_labels`.
     """
+    labels: List[str] = []
+    for check in checks:
+        explicit = _explicit_name(check, name_keys)
+        if explicit is not None:
+            labels.append(explicit)
+            continue
+        kind = str(check.get(kind_key, None) or "check")
+        columns = _target_columns(check, column_keys)
+        labels.append(f"{kind}_{'_'.join(columns)}" if columns else kind)
 
-    name: str
-    criticality: str
-    function: str
-    native: Mapping[str, Any] = field(default_factory=dict)
-    columns: tuple = ()
-    filter: Optional[str] = None
-
-    def __post_init__(self):
-        if self.criticality not in CRITICALITIES:
-            raise ValueError(
-                f"CheckSpec criticality must be one of {CRITICALITIES}, "
-                f"got {self.criticality!r}; normalize with "
-                "normalize_criticality() first"
-            )
-        object.__setattr__(self, "native", MappingProxyType(dict(self.native)))
-
-    def as_detail(self) -> Dict[str, Any]:
-        """Severity fragment engines embed in metric ``details``.
-
-        Returns:
-            ``{"criticality": ...}`` plus the target columns when known.
-        """
-        detail: Dict[str, Any] = {"criticality": self.criticality}
-        if self.columns:
-            detail["columns"] = list(self.columns)
-        return detail
+    bare_kinds_seen: Dict[str, int] = {}
+    for index, (check, label) in enumerate(zip(checks, labels)):
+        if _explicit_name(check, name_keys) is not None or _target_columns(
+            check, column_keys
+        ):
+            continue
+        if label in bare_kinds_seen:
+            labels[index] = derive_name(label, index)
+        else:
+            bare_kinds_seen[label] = index
+    return labels

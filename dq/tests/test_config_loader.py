@@ -386,7 +386,7 @@ def test_an_invalid_included_file_is_reported_by_name(tmp_path):
         'dqframework { dataset = "d" gate { fail_on = "error" } dqrules = [{ engine = deequ }] }\n',
     )
     write(tmp_path, "prod.conf", 'include "base.conf"\ndqframework.dataset = "prod"\n')
-    with pytest.raises(ConfigurationError, match="included file\(s\) 'base.conf'"):
+    with pytest.raises(ConfigurationError, match=r"included file\(s\) 'base.conf'"):
         load_config(str(tmp_path / "prod.conf"))
 
 

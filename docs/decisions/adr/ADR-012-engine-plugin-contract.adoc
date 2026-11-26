@@ -85,6 +85,26 @@ translator rejects anything outside the supported subset; no automatic
 translation (ADR-002), and new compute engines land behind kernel semantic
 versions (ADR-010).
 
+**8. Evidence is attributable (SPEC-011).** Running the contract against
+the built-in engines for the first time found that four of them reported
+several checks under one name, and that a passing constraint was reported
+as failed whenever it shared a Deequ Check with a failing one. Two rules
+follow. A result's `check` is its check's label: the configured name, else
+the kind and columns, else the kind and position -- unique within a rule,
+which is refused otherwise. And a constraint's verdict is its own
+(`constraint_status`), never its parent Check's.
+
+**9. The contract is executable (SPEC-011).** `dq.sdk.conformance` is the
+contract as a test suite any engine author can run; every built-in engine
+passes it. `dq.sdk.fixtures` holds one semantic corpus, with the metrics an
+adapter must compute and the decisions that follow from them, so a new
+compute adapter is measured against the same cases as Spark.
+
+**10. A manifest is inherited and checked early.** A subclass states only
+the capabilities that differ from its parent; the rest are inherited, so a
+new capability reaches every engine. An invalid manifest fails when the
+class is defined, not at first use.
+
 ## Consequences
 
 * New-engine integration drops to: create the directory (hooks + capabilities

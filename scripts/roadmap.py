@@ -32,6 +32,7 @@ from dq.tests.spec_support import (  # noqa: E402
     write_tracker,
 )
 
+
 def print_progress(specs) -> None:
     progress = milestone_progress(specs)
     for milestone in sorted(progress):
@@ -39,14 +40,20 @@ def print_progress(specs) -> None:
         print(f"{milestone}: {verified}/{count} specs verified, {done}/{total} gates")
     for spec in specs:
         marks = "".join("x" if checked else "." for checked, _, _ in spec.progress)
-        print(f"  {spec.id}  {spec.status:<11} {spec.milestone:<8} [{marks}] {spec.title}")
+        print(
+            f"  {spec.id}  {spec.status:<11} {spec.milestone:<8} [{marks}] {spec.title}"
+        )
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--check", action="store_true", help="fail if the tracker is stale")
-    group.add_argument("--write", action="store_true", help="rewrite the generated blocks")
+    group.add_argument(
+        "--check", action="store_true", help="fail if the tracker is stale"
+    )
+    group.add_argument(
+        "--write", action="store_true", help="rewrite the generated blocks"
+    )
     args = parser.parse_args(argv)
 
     specs = load_specs()
@@ -74,7 +81,9 @@ def main(argv=None) -> int:
     for problem in problems:
         print(f"PROBLEM: {problem}")
     for name in stale:
-        print(f"STALE: the {name} block differs; run `python scripts/roadmap.py --write`")
+        print(
+            f"STALE: the {name} block differs; run `python scripts/roadmap.py --write`"
+        )
     return 1 if args.check and (problems or stale) else (1 if problems else 0)
 
 

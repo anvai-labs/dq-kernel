@@ -145,3 +145,30 @@ def test_notdefined_engine_load_exception(dqrule_notdefined_config):
     finally:
         assert True == exceptionOccured
         assert True == (importerror or attributeerror)
+
+
+def test_an_engine_whose_manifest_is_broken_after_definition_is_refused_at_load(
+    monkeypatch,
+):
+    """The manifest is checked when its class is defined. This is the second
+    lock, for one edited afterwards: it never reaches a frame."""
+    from dq.engine.registry import BUILT_IN_ENGINES, EngineSpec
+    from dq.exceptions import ConfigurationError
+
+    class LateBreakage(DQEngine):
+        CAPABILITIES = {"criticality": "native"}
+
+    LateBreakage.CAPABILITIES = {"criticality": "often"}
+    monkeypatch.setitem(globals(), "LateBreakage", LateBreakage)
+    monkeypatch.setitem(
+        BUILT_IN_ENGINES,
+        "latebreakage",
+        EngineSpec("latebreakage", __name__, "LateBreakage", None),
+    )
+    with pytest.raises(
+        ConfigurationError,
+        match="declares an invalid CAPABILITIES manifest: criticality",
+    ):
+        EngineLoader().load_engine(
+            "latebreakage", ConfigFactory.from_dict({"name": "x"})
+        )

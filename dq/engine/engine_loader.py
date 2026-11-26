@@ -8,9 +8,9 @@ import importlib
 import re
 import logging
 
-from dq.engine.registry import BUILT_IN_ENGINES, find_entry_point, find_spec
-from dq.engine.dq_engine import DQEngine
-from dq.exceptions import EngineNotFoundError
+from dq.engine.registry import find_entry_point, find_spec
+from dq.engine.dq_engine import DQEngine, capability_problems
+from dq.exceptions import ConfigurationError, EngineNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,15 @@ class EngineLoader:
                 raise AttributeError(
                     f"Engine class '{class_name}' not found in module "
                     f"'{module_path}': {module_path}"
+                )
+            problems = capability_problems(getattr(engine_class, "CAPABILITIES", None))
+            if problems:
+                # Refuse the engine before it runs: an invalid manifest
+                # would make every capability-based decision downstream a
+                # guess.
+                raise ConfigurationError(
+                    f"Engine '{name}' declares an invalid CAPABILITIES manifest: "
+                    + "; ".join(problems)
                 )
             logger.debug("Loaded engine %s from %s", class_name, module_path)
             return engine_class(*args, **kwargs)

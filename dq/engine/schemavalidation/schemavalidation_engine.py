@@ -42,6 +42,7 @@ class SchemavalidationEngine(DQEngine):
     def __init__(self, config: ConfigTree, dqts: Optional[int] = None):
         self._sparkSession = None
         self._last_verification_artifacts = None
+        self._last_schema_check = None
         super().__init__(config, dqts)
 
     def _prepare(self, dataframe) -> None:
@@ -55,7 +56,9 @@ class SchemavalidationEngine(DQEngine):
         # Raw pydeequ frames stashed for _persist_outcomes (deequ-family
         # artifact schema, deliberately unchanged).
         self._last_verification_artifacts = (successMetrics, checkVerifications)
-        return metrics_from_check_results(checkVerifications.collect())
+        return metrics_from_check_results(
+            checkVerifications.collect(), self._last_schema_check.labels_by_check()
+        )
 
     def validate_dataframe(self, df: DataFrame):
         """Validate the DataFrame against schema and additional constraints.
@@ -70,7 +73,7 @@ class SchemavalidationEngine(DQEngine):
             f"{keys.SCHEMA_VALIDATION_SCHEMA}.catalog_type", None
         )
         single_check_mode = self._config.get(keys.DQ_SINGLE_CHECK_MODE, True)
-        schema_validation_check = SchemavalidationCheck(
+        schema_validation_check = self._last_schema_check = SchemavalidationCheck(
             schema_config=self._config.get(keys.SCHEMA_VALIDATION_SCHEMA, {}),
             single_check_mode=single_check_mode,
         )

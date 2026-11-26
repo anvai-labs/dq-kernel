@@ -104,9 +104,9 @@ jobs:
       matrix:
         include:
           - python-version: "3.12"
-            coverage_min: "55"
+            coverage_min: "90"
           - python-version: "3.13"
-            coverage_min: "55"
+            coverage_min: "90"
     steps:
       - name: Verify trusted PR identity
         env:
@@ -139,8 +139,16 @@ jobs:
       - name: Install Poetry
         run: pip install poetry==2.4.2
 
+      # Every extra with tests installs here, as in the public lane: the lock
+      # resolves one version per package for the union of extras, so they are
+      # co-installable. The dqx extra carries a Python <3.13 marker; Poetry
+      # skips it on the 3.13 job and its live tests skip with it. This lane
+      # runs instead of the public one on the owner's own pull requests, so
+      # without the extra the DQX engine is not tested on them.
       - name: Install dependencies
-        run: poetry install --with dev -E spark -E deequ -E aws -E databricks -E greatexpectations
+        run: >-
+          poetry install --with dev
+          -E spark -E deequ -E aws -E databricks -E greatexpectations -E dqx
 
       - name: Download Deequ JAR
         run: |
@@ -163,7 +171,7 @@ jobs:
         if: matrix.python-version == '3.13'
         run: >-
           poetry run python scripts/check_coverage.py coverage.json
-          --min-line 57 --min-branch 46
+          --min-line 90 --min-branch 88
       - name: Enforce changed-code coverage
         if: matrix.python-version == '3.13'
         run: >-

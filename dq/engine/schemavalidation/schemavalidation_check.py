@@ -23,6 +23,8 @@ from pyspark.sql.types import (
 )
 import json, re
 from dq.identifiers import ColumnName, TableName
+from dq.engine import checkspec
+from dq.engine.deequ.verification import RecordingCheck, recording_check
 from dq.engine.schemavalidation import datatypes
 from dq.utils import keys
 
@@ -62,6 +64,9 @@ class SchemavalidationCheck:
         """
         self._schema_config = schema_config
         self._single_check_mode = single_check_mode
+        # {Check description: [constraint label, ...]} in definition order.
+        self._labels_by_check = {}
+        self._description_uses = {}
         self._ref_cache = {}
         self._spark_session = None
 
@@ -145,6 +150,30 @@ class SchemavalidationCheck:
                 )
 
         return joined_df
+
+    def _new_check(self, description: str, level=CheckLevel.Error):
+        """Return a new Check whose constraints are labelled as they are added.
+
+        Results are matched to labels by a Check's description and the
+        position of a row among that Check's rows. In multi-check mode
+        several Checks share a base description (one per column), so each
+        after the first gets a distinct one: the base, then " [2]", " [3]".
+        """
+        uses = self._description_uses.get(description, 0) + 1
+        self._description_uses[description] = uses
+        if uses > 1:
+            description = f"{description} [{uses}]"
+        check = Check(
+            spark_session=self._spark_session, level=level, description=description
+        )
+        return recording_check(check, self._labels_by_check)
+
+    def labels_by_check(self) -> dict:
+        """Return ``{Check description: [label, ...]}`` for the built checks.
+
+        Empty before :meth:`apply_checks` has run.
+        """
+        return {d: list(l) for d, l in self._labels_by_check.items()}
 
     def create_foreign_key_checks(self, check: Check, df: DataFrame):
         """
@@ -283,11 +312,7 @@ class SchemavalidationCheck:
                 if not nullable:
                     checks = checks.isComplete(column=column_name)
             else:
-                check = Check(
-                    spark_session=self._spark_session,
-                    level=CheckLevel.Error,
-                    description="Schema Validation",
-                )
+                check = self._new_check("Schema Validation")
                 check = self._apply_datatype_constraints(
                     check,
                     column_name,
@@ -302,10 +327,8 @@ class SchemavalidationCheck:
                 if parameters:
                     if data_type in ["CharType", "VarcharType"]:
                         checks.append(
-                            Check(
-                                spark_session=self._spark_session,
-                                level=CheckLevel.Error,
-                                description="Schema Validation Max Length Check",
+                            self._new_check(
+                                "Schema Validation Max Length Check"
                             ).hasMaxLength(
                                 column=column_name,
                                 assertion=lambda l: l <= parameters[0],
@@ -318,10 +341,8 @@ class SchemavalidationCheck:
                         if not nullable:
                             cast_decimal_expr = f"CAST({column_name} AS DECIMAL({precision},{scale})) IS NOT NULL"
                         checks.append(
-                            Check(
-                                spark_session=self._spark_session,
-                                level=CheckLevel.Error,
-                                description="Schema Validation Decimal Type Precision, Scale Check",
+                            self._new_check(
+                                "Schema Validation Decimal Type Precision, Scale Check"
                             ).satisfies(
                                 columnCondition=cast_decimal_expr,
                                 constraintName=f"field[{column_name}] constaint for specific[DECIMAL({precision},{scale})] AND nullable[{nullable}]",
@@ -331,11 +352,9 @@ class SchemavalidationCheck:
                         )
                 if not nullable:
                     checks.append(
-                        Check(
-                            spark_session=self._spark_session,
-                            level=CheckLevel.Error,
-                            description="Schema Validation Null Check",
-                        ).isComplete(column=column_name)
+                        self._new_check("Schema Validation Null Check").isComplete(
+                            column=column_name
+                        )
                     )
 
         return checks
@@ -513,11 +532,7 @@ class SchemavalidationCheck:
         self._spark_session = df.sparkSession
         if self._single_check_mode:
             # All constraints will be part of a single Check object
-            checks = Check(
-                spark_session=self._spark_session,
-                level=CheckLevel.Error,
-                description="Schema Validation",
-            )
+            checks = self._new_check("Schema Validation")
         else:
             # Each constraint will have its own Check object
             checks = []
@@ -556,11 +571,7 @@ class SchemavalidationCheck:
                     )
                 else:
                     checks.append(
-                        Check(
-                            spark_session=self._spark_session,
-                            level=CheckLevel.Error,
-                            description="Schema Validation Unique Check",
-                        ).hasUniqueness(
+                        self._new_check("Schema Validation Unique Check").hasUniqueness(
                             unique_set,
                             _fraction_is_one,
                             "Error: Unique Constraint Check failure",
@@ -575,12 +586,19 @@ class SchemavalidationCheck:
             else:
                 checks.append(
                     self.create_foreign_key_checks(
-                        Check(
-                            spark_session=self._spark_session,
-                            level=CheckLevel.Error,
-                            description="Schema Validation Foregin Key Check",
-                        ),
+                        self._new_check("Schema Validation Foregin Key Check"),
                         df,
                     )
                 )
-        return checks
+
+        # Every label must be distinct: evidence is attributed by it.
+        checkspec.require_unique_labels(
+            [label for labels in self._labels_by_check.values() for label in labels]
+        )
+        # Hand pydeequ the real Checks, not the recording proxies.
+        if isinstance(checks, RecordingCheck):
+            return checks.unwrap()
+        return [
+            check.unwrap() if isinstance(check, RecordingCheck) else check
+            for check in checks
+        ]

@@ -15,7 +15,7 @@ import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict
 from urllib.parse import urlparse
 
 import requests

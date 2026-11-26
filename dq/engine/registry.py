@@ -21,7 +21,7 @@ any vendor dependency installed.
 import logging
 from dataclasses import dataclass
 import importlib.metadata
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,10 @@ class EngineSpec:
         extra: Poetry/pip extra providing the vendor dependency, for
             messages; ``None`` for extra-free engines.
         renamed_from: Deprecated aliases that must be migrated to ``name``.
+        vendor_imports: Modules that must be importable for the engine to
+            run. Engines import their vendor library lazily, so a missing
+            one shows at run time, not at import; this lets a caller tell
+            in advance whether an engine can run here.
     """
 
     name: str
@@ -52,6 +56,7 @@ class EngineSpec:
     payload_type: str = "list"
     extra: Optional[str] = None
     renamed_from: Tuple[str, ...] = ()
+    vendor_imports: Tuple[str, ...] = ()
 
 
 BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
@@ -70,6 +75,7 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "DeequEngine",
             "checks",
             extra="deequ",
+            vendor_imports=("pydeequ",),
         ),
         EngineSpec(
             "dqdl",
@@ -78,6 +84,7 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "ruleset",
             payload_type="string",
             extra="deequ",
+            vendor_imports=("pydeequ.dqdl",),
         ),
         EngineSpec(
             "dqx",
@@ -85,6 +92,7 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "DqxEngine",
             "checks",
             extra="dqx",
+            vendor_imports=("databricks.labs.dqx",),
         ),
         EngineSpec(
             "portable",
@@ -99,6 +107,7 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "GreatexpectationsEngine",
             "expectations",
             extra="greatexpectations",
+            vendor_imports=("great_expectations",),
         ),
         EngineSpec(
             "schemavalidation",
@@ -117,9 +126,57 @@ _RENAMED_TO: Dict[str, str] = {
 }
 
 
+def importable(module: str) -> bool:
+    """Return whether ``module`` can be imported, without importing it.
+
+    ``find_spec`` raises when a parent package is missing
+    (``databricks.labs.dqx`` without ``databricks``), which also means the
+    module cannot be imported.
+    """
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):  # noqa: BLE001 - a missing parent package
+        return False
+
+
+def missing_vendor_imports(spec: EngineSpec) -> Tuple[str, ...]:
+    """Return the vendor modules ``spec`` needs that are not importable."""
+    return tuple(module for module in spec.vendor_imports if not importable(module))
+
+
 def find_spec(name: str) -> Optional[EngineSpec]:
     """Return the built-in spec for ``name`` (exact match), or ``None``."""
     return BUILT_IN_ENGINES.get(name.lower())
+
+
+def entry_point_engines() -> List[Tuple[str, str, str]]:
+    """Return every third-party engine registered in the entry-point group.
+
+    An entry point's value is ``module:Class`` (or ``module.Class``). A
+    group no distribution registers is not an error, and neither is a
+    metadata backend that cannot be enumerated: both yield no engines.
+
+    Returns:
+        ``(name, module, class_name)`` triples, by name.
+    """
+    try:
+        group = importlib.metadata.entry_points().select(group=ENTRY_POINT_GROUP)
+    except Exception:  # noqa: BLE001 - metadata must never block engine use
+        logger.debug("entry-point group %s unavailable", ENTRY_POINT_GROUP)
+        return []
+    found: Dict[str, Tuple[str, str, str]] = {}
+    for entry_point in group:
+        target = entry_point.value
+        module, _, class_name = target.partition(":")
+        if not class_name:
+            module, _, class_name = module.rpartition(".")
+        if module and class_name:
+            found[entry_point.name.lower()] = (
+                entry_point.name.lower(),
+                module,
+                class_name,
+            )
+    return [found[name] for name in sorted(found)]
 
 
 def find_entry_point(name: str) -> Optional[Tuple[str, str]]:
@@ -129,23 +186,10 @@ def find_entry_point(name: str) -> Optional[Tuple[str, str]]:
         name: Lowercased engine name.
 
     Returns:
-        ``(module, class_name)`` for the first matching entry point, or
-        ``None`` when the group has no such engine (including when no
-        distribution registers the group at all).
+        ``(module, class_name)`` for the registered engine, or ``None``.
     """
-    lowered = name.lower()
-    try:
-        group = importlib.metadata.entry_points().select(group=ENTRY_POINT_GROUP)
-    except Exception:  # noqa: BLE001 - metadata enumeration must never block loads
-        logger.debug("entry-point group %s unavailable", ENTRY_POINT_GROUP)
-        return None
-    for entry_point in group:
-        if entry_point.name.lower() == lowered:
-            target = entry_point.value
-            module, _, class_name = target.partition(":")
-            if class_name:
-                return module, class_name
-            module, _, class_name = module.rpartition(".")
+    for registered, module, class_name in entry_point_engines():
+        if registered == name.lower():
             return module, class_name
     return None
 

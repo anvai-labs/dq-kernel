@@ -42,6 +42,7 @@ aggregate verdict.
 - [Error catalog](docs/error-catalog.adoc)
 - [ADRs](docs/decisions/adr/)
 - [Roadmap and spec tracker](docs/roadmap.adoc) — every spec with status and evidence
+- [Writing an engine](docs/writing-an-engine.adoc) — the engine contract, conformance suite, and a worked example
 - [SPECs](docs/specs/)
 - [Modernization plan](docs/modernization-plan.adoc)
 - [Compute engines beyond Spark](docs/compute-engines.adoc)

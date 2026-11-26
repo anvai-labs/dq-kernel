@@ -71,9 +71,9 @@ jobs:
       matrix:
         include:
           - python-version: "3.12"
-            coverage_min: "55"
+            coverage_min: "90"
           - python-version: "3.13"
-            coverage_min: "55"
+            coverage_min: "90"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -116,7 +116,7 @@ jobs:
         if: matrix.python-version == '3.13'
         run: >-
           poetry run python scripts/check_coverage.py coverage.json
-          --min-line 57 --min-branch 46
+          --min-line 90 --min-branch 88
       - name: Enforce changed-code coverage
         if: matrix.python-version == '3.13' && github.event_name == 'pull_request'
         run: poetry run diff-cover coverage.xml --compare-branch=origin/${{ github.base_ref }} --fail-under=90
