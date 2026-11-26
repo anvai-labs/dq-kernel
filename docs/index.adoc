@@ -432,6 +432,128 @@ same. `arrow = false` turns it off.
 
 Install with `pip install dq-kernel[sqlalchemy]`, adding `[arrow]` for the Arrow path.
 
+[[observing-a-run]]
+== Observing a run
+
+A run explains itself through one port. `DQFramework.run()` tells an
+observer five things, in this order: that it started, that a rule started,
+that the rule finished, that the run finished, and what the gate decided.
+What an observer does with that is its own affair -- write log lines, open
+tracing spans, keep the events -- and none of it can change the run. Every
+notification is an immutable record, and an observer that raises is logged
+and swallowed, as a notifier is.
+
+[cols="1,3",options="header"]
+|===
+| Notification | What it carries
+
+| `run_started`
+| The run key, the job id, the dataset, and how many rule applications are to
+  come.
+
+| `rule_started`
+| The run key, the rule's name, the engine, and the dataset.
+
+| `rule_finished`
+| The same, and how long the application took in milliseconds, how many
+  checks it produced and which of them failed; and, when it raised, the
+  error.
+
+| `run_finished`
+| The run key, the job id, the dataset, the run's duration, how many rule
+  applications it made, how many checks it produced and how many failed, how
+  many failures block and how many are advisory; and, when it raised, the
+  error.
+
+| `gate_event`
+| The `GateEvent` the notifier receives.
+|===
+
+A rule event is one application of a rule to one dataset: a rule that names
+several datasets gets a pair per dataset. A rule with no name is `rule N`.
+
+A run that goes wrong is still explained. A rule that raises is announced as
+finished, with the error and the time it took, and the exception then
+propagates as it always did. A run that raises is still announced as
+finished, with the error; no gate event follows, because no decision was
+reached.
+
+=== The logging observer
+
+With nothing configured, the run is logged: one line per notification, under
+the `dq.run_events` logger. Every line names the run, and a line about a rule
+names the rule and the engine.
+
+[source]
+----
+run_started run_key=1700000000000 job_id=local-abc dataset=orders rules=2
+rule_started run_key=1700000000000 rule=orders_id_complete engine=deequ dataset=default
+rule_finished run_key=1700000000000 rule=orders_id_complete engine=deequ dataset=default duration_ms=842.1 outcomes=3 failed=1
+run_finished run_key=1700000000000 job_id=local-abc dataset=orders duration_ms=900.0 rules=2 outcomes=4 failed=1 blocking=1 advisory=0
+gate_event run_key=1700000000000 dataset=orders status=failed failed=1/4 blocking=1 advisory=0
+----
+
+[source,shell]
+----
+DQ_LOG_FORMAT=json dq-kernel config.conf
+----
+
+With `DQ_LOG_FORMAT=json` each line is one JSON object with the same fields
+and an `event` naming the notification, for a log pipeline that parses lines.
+The variable is read when the run starts.
+
+=== Configuring observers
+
+`dqframework.observers` is read the way `dqframework.notifiers` is:
+
+[source,hocon]
+----
+include::../examples/observability.conf[]
+----
+
+* `logging` is the default when nothing is configured. A configured list
+  replaces it, as a configured `dqframework.notifiers` replaces the default
+  notifier; list `logging` to keep it.
+* `memory` keeps every notification in order, for a platform that wants the
+  events themselves.
+* `otel` is the OpenTelemetry adapter.
+* Anything else is refused before any rule runs, so the mistake costs no
+  engine work.
+
+`DQFramework(spark, config, observer=...)` injects one observer in place of
+the configured ones.
+
+=== The OpenTelemetry adapter
+
+With the `otel` extra (`pip install dq-kernel[otel]`), an `otel` observer
+opens one span per run and one per rule application, and keeps one counter:
+
+* The spans `dq.run` and `dq.rule` carry `dq.run_key`, `dq.rule`, `dq.engine`
+  and `dq.dataset`, and `dq.duration_ms` once they end. The run span also
+  carries `dq.gate_passed`, `dq.blocking` and `dq.advisory`. A rule or run
+  that raised ends its span in the error status, with the error as its
+  description.
+* The counter `dq.outcomes` counts outcomes by `dq.status` (`passed` or
+  `failed`) and `dq.criticality` (`error` or `warn` for a failed check; `n/a`
+  for a passed one, which the gate event does not say).
+
+The extra provides `opentelemetry-api` and nothing else. The application
+brings its own SDK, exporter and providers, as OpenTelemetry instrumentation
+is meant to compose:
+
+[source,python]
+----
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+
+trace.set_tracer_provider(TracerProvider())  # and your exporter
+----
+
+[IMPORTANT]
+Until providers are configured, OpenTelemetry's own proxies accept every
+call and record nothing. An `otel` observer with no SDK behind it is silent,
+not failing.
+
 [[importing-evidence]]
 == Importing evidence
 
@@ -634,7 +756,8 @@ Every checked-in example is validated in CI.
 entry-point, with each engine's capability manifest and, for an engine whose
 optional dependency is missing, how to install it. `dq-import` reads another
 tool's results as evidence and needs no Spark session: see
-xref:#importing-evidence[Importing evidence].
+xref:#importing-evidence[Importing evidence]. `DQ_LOG_FORMAT=json` makes a run
+log JSON lines: see xref:#observing-a-run[Observing a run].
 
 === Gate policy
 

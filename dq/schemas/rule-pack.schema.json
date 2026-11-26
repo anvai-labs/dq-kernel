@@ -53,6 +53,11 @@
           "description": "Gate-event notifiers (ADR-008). Default: logging.",
           "items": { "$ref": "#/$defs/notifier" }
         },
+        "observers": {
+          "type": "array",
+          "description": "Run observers (SPEC-014): what a run tells about itself. Default: logging.",
+          "items": { "$ref": "#/$defs/observer" }
+        },
         "repository": {
           "type": "object",
           "description": "Where engines persist metric and verification artifacts."
@@ -91,6 +96,18 @@
           "type": "string",
           "minLength": 1,
           "description": "Name of the environment variable holding the webhook URL. Required by webhook, slack and teams."
+        }
+      },
+      "additionalProperties": false
+    },
+    "observer": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["logging", "memory", "otel"],
+          "description": "logging writes a line per notification; memory keeps the notifications; otel needs the otel extra and an OpenTelemetry SDK configured by the application."
         }
       },
       "additionalProperties": false

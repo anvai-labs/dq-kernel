@@ -149,7 +149,7 @@ jobs:
         run: >-
           poetry install --with dev
           -E spark -E deequ -E aws -E databricks -E greatexpectations -E dqx
-          -E sqlalchemy -E arrow
+          -E sqlalchemy -E arrow -E otel
 
       - name: Download Deequ JAR
         run: |

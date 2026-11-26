@@ -229,6 +229,15 @@ def _mutations(document):
     m["dqframework"]["notifiers"] = [{"type": "slack", "extra": 1}]
     out.append(("unknown-notifier-key", m))
     m = clone()
+    m["dqframework"]["observers"] = [{"type": "otell"}]
+    out.append(("unknown-observer", m))
+    m = clone()
+    m["dqframework"]["observers"] = [{"url_env": "X"}]
+    out.append(("observer-without-type", m))
+    m = clone()
+    m["dqframework"]["observers"] = [{"type": "otel", "extra": 1}]
+    out.append(("unknown-observer-key", m))
+    m = clone()
     m["dqframework"]["catalog_type"] = "nope"
     out.append(("unknown-catalog", m))
     out.append(("not-an-object", [document]))

@@ -57,6 +57,10 @@ databricks-labs-dqx = {version = ">=0.17.2,<0.18", optional = true, python = ">=
 # resolves a 2.0 release and one with only this extra a 2.1 release.
 sqlalchemy = {version = ">=2.0,<2.2", optional = true}
 pyarrow = {version = ">=16,<27", optional = true}
+# The OpenTelemetry observer (SPEC-014). The API only: an application brings
+# its own SDK, exporter and providers, as OpenTelemetry instrumentation is
+# meant to compose.
+opentelemetry-api = {version = ">=1.25,<2", optional = true}
 
 [tool.poetry.extras]
 spark = ["pyspark"]
@@ -69,6 +73,7 @@ delta = ["delta-spark", "pyspark"]
 dqx = ["databricks-labs-dqx"]
 sqlalchemy = ["sqlalchemy"]
 arrow = ["pyarrow"]
+otel = ["opentelemetry-api"]
 
 # Minimal development dependencies (only for CI)
 [tool.poetry.group.dev.dependencies]
@@ -80,6 +85,9 @@ bandit = "^1.7.5"               # Security scanning only
 pip-audit = "^2.10.1"             # Audit lane runs on 3.13
 diff-cover = "10.6.0"
 hypothesis = ">=6.100,<7"      # Property-based tests for the pure kernel
+# The OpenTelemetry observer is also tested through the real API, with the
+# SDK's in-memory providers: nothing is exported off the process.
+opentelemetry-sdk = ">=1.25,<2"
 
 [tool.poetry.scripts]
 dq-kernel = "dq.cli:main"

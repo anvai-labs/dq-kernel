@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 218 raise sites across the modules below; the contract
+The framework raises 219 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -449,3 +449,16 @@ The contract every importer goes through (SPEC-013).
   key that repeats in one object. It is caught here and raised as the
   `HarvestError` above; a caller never sees it.
 * Fix: none beyond the `HarvestError` it becomes.
+
+== dq/observability.py
+
+*Content:* 1 `ConfigurationError` site.
+
+The port a run announces itself through (SPEC-014).
+
+* Cause: an entry of `dqframework.observers` has no `type`, or names one that
+  is neither `logging`, `memory` nor `otel`. The run is refused before any
+  rule runs, so the mistake costs no engine work.
+* Fix: give the entry one of those types. The `otel` observer also needs the
+  `otel` extra (`pip install dq-kernel[otel]`); without it the run is refused
+  the same way, before any rule runs, with a message that names the extra.

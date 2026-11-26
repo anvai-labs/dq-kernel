@@ -15,10 +15,25 @@ from dq.exceptions import ConfigurationError, DataFrameNotFoundError, Validation
 from dq.gate import evaluate_gate, policy_from_config
 from dq.identifiers import IdentifierError, TableName
 from dq.notifier import GateEvent, GateNotifier, notifier_from_config
+from dq.observability import (
+    RunFinished,
+    RunObserver,
+    RunStarted,
+    RuleFinished,
+    RuleStarted,
+    describe,
+    elapsed_ms,
+    observer_from_config,
+)
 from dq.outcomes import MAX_BATCH_BYTES, MAX_OUTCOMES, CheckOutcome, normalize_outcomes
 from dq.sinks import sink_from_config
 
 logger = logging.getLogger(__name__)
+
+
+def _count_failed(metrics) -> int:
+    """Return how many of a run's outcomes failed."""
+    return sum(1 for metric in metrics if metric.get("success") is not True)
 
 
 class DQFramework:
@@ -34,6 +49,9 @@ class DQFramework:
             configured one (``dqframework.notifiers``).
         report_reference: Optional reference to the run's ``dq-report/v1``
             document, carried on the gate event.
+        observer: Optional :class:`dq.observer.RunObserver` to inject in
+            place of the configured ones (``dqframework.observers``); see
+            :mod:`dq.observability`.
 
     Configuration supports a ``catalog_type`` key to control how table
     references are resolved:
@@ -76,8 +94,11 @@ class DQFramework:
     # framework by hand (``__new__`` plus attributes) instead of loading a
     # rule pack, and such an instance must still run.
     _notifier = None
+    _observer = None
     _report_reference = None
     last_gate_decision = None
+    #: The clock the run measures rule durations by; a test may set another.
+    _clock = staticmethod(time.perf_counter)
 
     def __init__(
         self,
@@ -87,11 +108,13 @@ class DQFramework:
         *,
         notifier: GateNotifier = None,
         report_reference: str = None,
+        observer: RunObserver = None,
     ):
         self._spark = spark
         self._config = self._load_config(config)
         self.default_dataframe = default_dataframe
         self._notifier = notifier
+        self._observer = observer
         self._report_reference = report_reference
         #: The :class:`GateDecision` of the last ``run()``, or ``None``
         #: before the first run.
@@ -197,12 +220,20 @@ class DQFramework:
                 - ``ts``: Timestamp in milliseconds
                 - ``jobid``: Spark application ID
 
+        The run tells an observer what it is doing (SPEC-014,
+        :mod:`dq.observability`): that it started, when each rule starts and
+        finishes against each dataset and how long that took, and that it
+        finished. A run that raises is still announced as finished, with the
+        error; the exception then propagates as before.
+
         After the rules complete, the gate policy (``dqframework.gate``,
         ADR-013) is applied to the outcomes and recorded as
-        ``last_gate_decision``. One :class:`GateEvent` per run is then
-        announced -- after the run scope has exited, so notification never
+        ``last_gate_decision``. The decision is announced to the observer,
+        and one :class:`GateEvent` per run is then announced to the
+        notifier -- after the run scope has exited, so notification never
         joins the durability transaction (ADR-008). A notifier that raises
-        is logged and swallowed; it can never alter the run's outcome.
+        is logged and swallowed; it can never alter the run's outcome. So is
+        an observer.
         """
         from contextlib import nullcontext
 
@@ -217,47 +248,185 @@ class DQFramework:
         # Resolve the gate policy before any engine runs: an invalid policy
         # is a configuration error, and must not cost a run's Spark work.
         policy = self.gate_policy
+        # The observer too: a configuration it cannot read is the same kind
+        # of error, and must cost no engine work either.
+        observer = self._observer_for_run()
+        job_id = self._spark.sparkContext.applicationId
+        dataset = self._dataset_name(sink)
+        applications = sum(len(rule.dataframes) for rule in pack.rules)
+        made = 0
 
-        scope = (
-            sink.run_scope(current_time_in_millis)
-            if sink is not None
-            else nullcontext()
-        )
-        with scope:
-            for rule in pack.rules:
-                rule_config = rule.definition
-
-                engine = EngineLoader().load_engine(
-                    rule.engine, rule_config, current_time_in_millis
+        def observed(notification: str, event) -> None:
+            """Tell the observer. Observation never alters the run."""
+            try:
+                getattr(observer, notification)(event)
+            except Exception as error:  # noqa: BLE001 - observation is fail-open
+                logger.warning(
+                    "observer %s failed on %s for run_key=%d: %s",
+                    type(observer).__name__,
+                    notification,
+                    current_time_in_millis,
+                    error,
                 )
 
-                for df_name in rule.dataframes:
-                    dataframe = self.get_dataframe(df_name)
-                    summary_metrics = engine.apply(dataframe, repository=sink)
-                    for outcome in normalize_outcomes(summary_metrics):
-                        metric = outcome.to_legacy()
-                        metric["ts"] = current_time_in_millis
-                        metric["jobid"] = self._spark.sparkContext.applicationId
-                        enriched = CheckOutcome.from_legacy(metric)
-                        cumulative_bytes += enriched.serialized_size
-                        if (
-                            len(cumulative_metrics) >= MAX_OUTCOMES
-                            or cumulative_bytes > MAX_BATCH_BYTES
-                        ):
-                            raise ValidationError(
-                                "Execution outcomes exceed summary limits"
+        started = self._clock()
+        observed(
+            "run_started",
+            RunStarted(
+                run_key=current_time_in_millis,
+                job_id=job_id,
+                dataset=dataset,
+                rules=applications,
+            ),
+        )
+        try:
+            scope = (
+                sink.run_scope(current_time_in_millis)
+                if sink is not None
+                else nullcontext()
+            )
+            with scope:
+                for rule in pack.rules:
+                    engine = EngineLoader().load_engine(
+                        rule.engine, rule.definition, current_time_in_millis
+                    )
+                    name = rule.name or f"rule {rule.index}"
+                    for df_name in rule.dataframes:
+                        dataframe = self.get_dataframe(df_name)
+                        observed(
+                            "rule_started",
+                            RuleStarted(
+                                run_key=current_time_in_millis,
+                                rule=name,
+                                engine=rule.engine,
+                                dataset=df_name,
+                            ),
+                        )
+                        rule_started = self._clock()
+                        try:
+                            summary_metrics = engine.apply(dataframe, repository=sink)
+                            produced = len(cumulative_metrics)
+                            for outcome in normalize_outcomes(summary_metrics):
+                                metric = outcome.to_legacy()
+                                metric["ts"] = current_time_in_millis
+                                metric["jobid"] = job_id
+                                enriched = CheckOutcome.from_legacy(metric)
+                                cumulative_bytes += enriched.serialized_size
+                                if (
+                                    len(cumulative_metrics) >= MAX_OUTCOMES
+                                    or cumulative_bytes > MAX_BATCH_BYTES
+                                ):
+                                    raise ValidationError(
+                                        "Execution outcomes exceed summary limits"
+                                    )
+                                if not outcome.success:
+                                    logger.warning(
+                                        "Check failed: %s",
+                                        metric.get("check", "unnamed"),
+                                    )
+                                cumulative_metrics.append(metric)
+                        except BaseException as error:
+                            # Anything at all, an interrupt included: the rule
+                            # ended, and that is what the observer is told.
+                            made += 1
+                            observed(
+                                "rule_finished",
+                                RuleFinished(
+                                    run_key=current_time_in_millis,
+                                    rule=name,
+                                    engine=rule.engine,
+                                    dataset=df_name,
+                                    duration_ms=elapsed_ms(rule_started, self._clock()),
+                                    error=describe(error),
+                                ),
                             )
-                        if not outcome.success:
-                            logger.warning(
-                                "Check failed: %s", metric.get("check", "unnamed")
-                            )
-                        cumulative_metrics.append(metric)
-
-        self.last_gate_decision = evaluate_gate(cumulative_metrics, policy)
-        self._announce(cumulative_metrics, current_time_in_millis, sink)
+                            raise
+                        made += 1
+                        checks = cumulative_metrics[produced:]
+                        observed(
+                            "rule_finished",
+                            RuleFinished(
+                                run_key=current_time_in_millis,
+                                rule=name,
+                                engine=rule.engine,
+                                dataset=df_name,
+                                duration_ms=elapsed_ms(rule_started, self._clock()),
+                                outcomes=len(checks),
+                                failed=tuple(
+                                    check["check"]
+                                    for check in checks
+                                    if check.get("success") is not True
+                                ),
+                            ),
+                        )
+            decision = evaluate_gate(cumulative_metrics, policy)
+            self.last_gate_decision = decision
+        except BaseException as error:
+            # The run ended, badly. It is still announced as ended, with the
+            # error: a run that died is the one most in need of explaining.
+            observed(
+                "run_finished",
+                RunFinished(
+                    run_key=current_time_in_millis,
+                    job_id=job_id,
+                    dataset=dataset,
+                    duration_ms=elapsed_ms(started, self._clock()),
+                    rules=made,
+                    outcomes=len(cumulative_metrics),
+                    failed=_count_failed(cumulative_metrics),
+                    error=describe(error),
+                ),
+            )
+            raise
+        observed(
+            "run_finished",
+            RunFinished(
+                run_key=current_time_in_millis,
+                job_id=job_id,
+                dataset=dataset,
+                duration_ms=elapsed_ms(started, self._clock()),
+                rules=made,
+                outcomes=len(cumulative_metrics),
+                failed=_count_failed(cumulative_metrics),
+                blocking=len(decision.blocking),
+                advisory=len(decision.advisory),
+            ),
+        )
+        event = self._gate_event(cumulative_metrics, current_time_in_millis, dataset)
+        observed("gate_event", event)
+        self._announce(event, current_time_in_millis)
         return cumulative_metrics
 
-    def _announce(self, outcomes, run_key, sink) -> None:
+    def _observer_for_run(self) -> RunObserver:
+        """Return the run's observer: the injected one, else the configured."""
+        observer = self._observer
+        if observer is None:
+            observer = observer_from_config(
+                self._config.get("dqframework.observers", None)
+            )
+            self._observer = observer
+        return observer
+
+    def _dataset_name(self, sink) -> str:
+        """Return the name the run's evidence belongs to."""
+        return (
+            self._config.get("dqframework.dataset", None)
+            or getattr(sink, "dataset", None)
+            or "unknown"
+        )
+
+    def _gate_event(self, outcomes, run_key: int, dataset: str) -> GateEvent:
+        """Build the run's gate event from its outcomes."""
+        return GateEvent.from_outcomes(
+            run_key=run_key,
+            dataset=dataset,
+            outcomes=outcomes,
+            ts=run_key,
+            job_id=self._spark.sparkContext.applicationId,
+            report=self._report_reference,
+        )
+
+    def _announce(self, event: GateEvent, run_key: int) -> None:
         """Emit the run's gate event; never raises (ADR-008)."""
         notifier = self._notifier
         if notifier is None:
@@ -265,16 +434,6 @@ class DQFramework:
                 self._config.get("dqframework.notifiers", None)
             )
             self._notifier = notifier
-        event = GateEvent.from_outcomes(
-            run_key=run_key,
-            dataset=self._config.get("dqframework.dataset", None)
-            or getattr(sink, "dataset", None)
-            or "unknown",
-            outcomes=outcomes,
-            ts=run_key,
-            job_id=self._spark.sparkContext.applicationId,
-            report=self._report_reference,
-        )
         try:
             notifier.notify(event)
         except Exception as error:  # noqa: BLE001 - notification is fail-open

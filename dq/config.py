@@ -69,6 +69,11 @@ class RulePack:
         return config_get(self.config, "dqframework.notifiers")
 
     @property
+    def observers(self):
+        """The ``dqframework.observers`` configuration, or ``None``."""
+        return config_get(self.config, "dqframework.observers")
+
+    @property
     def repository(self):
         """The ``dqframework.repository`` configuration, or an empty mapping."""
         return config_get(self.config, "dqframework.repository", {})
