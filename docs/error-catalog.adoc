@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 222 raise sites across the modules below; the contract
+The framework raises 233 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -119,23 +119,49 @@ The Arrow compute adapter (SPEC-015): portable plans over Arrow tables.
 
 == dq/compute_support.py
 
-*Content:* 6 `ConfigurationError` sites.
+*Content:* 7 `ConfigurationError` sites.
 
 What every compute adapter shares (ADR-010, ADR-014): the order of a plan's
 execution, resolving a column by exact name, and converting a bound to an
 exact fraction.
 
-* Cause: bindings do not exactly match the plan's datasets (a dataset is
-  missing, or a binding names one the plan does not require);
-  `execute_envelope` is handed a bare plan instead of a `RulesetEnvelope`; a
-  plan names a column that the dataset does not have exactly -- and the
-  message lists the columns it does have -- or that is ambiguous: a
-  duplicate, or one of two columns whose names differ only in case; or a
-  range bound is infinite or of a type with no exact fraction.
-* Fix: align binding names with the plan; execute single-semantics plans
-  with `execute_plan`; use the column's exact casing; give one of two
-  colliding columns a distinct name in the dataset; and keep `Infinity` out
-  of a column a ranges/v1 rule measures.
+* Cause: a portable rule names an `adapter` that does not exist; bindings do
+  not exactly match the plan's datasets (a dataset is missing, or a binding
+  names one the plan does not require); `execute_envelope` is handed a bare
+  plan instead of a `RulesetEnvelope`; a plan names a column that the
+  dataset does not have exactly -- and the message lists the columns it
+  does have -- or that is ambiguous: a duplicate, or one of two columns
+  whose names differ only in case; or a range bound is infinite or of a
+  type with no exact fraction.
+* Fix: name an adapter the message lists (`spark` or `arrow`); align binding
+  names with the plan; execute single-semantics plans with `execute_plan`;
+  use the column's exact casing; give one of two colliding columns a
+  distinct name in the dataset; and keep `Infinity` out of a column a
+  ranges/v1 rule measures.
+
+== dq/runner.py
+
+*Content:* 10 `ConfigurationError` sites.
+
+The Spark-free runner and the `dq-run` command (SPEC-015): a rule pack over
+files, with the portable engine on the Arrow adapter.
+
+* Cause: the rule pack is not a local file, or its datasets are missing,
+  remote, absent or of a format no reader knows. Or what the pack asks for
+  cannot be done without Spark: a rule with another engine, a portable rule
+  that does not name `adapter = "arrow"`, or a configured sink (a run over
+  files does not persist; its evidence is the report). Or the report cannot
+  say what it is about: no rule names its dataset and digest, rules on one
+  dataset certify two snapshots, `dqframework.dataset` is not a name, or
+  several datasets are run and it names none of them. All of these are
+  raised before a dataset is read. Two are raised in reading: a file pyarrow
+  cannot read, or one with no column in it.
+* Fix: give a local rule pack and a `--dataset name=path` for exactly the
+  datasets the rules name; keep `adapter = "arrow"` on every portable rule
+  and move the others to the `dq-kernel` command; remove
+  `dqframework.repository`; give every rule on a dataset one
+  `snapshot_sha256`. Without pyarrow installed the runner names the `arrow`
+  extra instead.
 
 == dq/run.py
 

@@ -16,11 +16,16 @@ translator's own error, never translated (ADR-002: no automatic
 translation). The caller certifies the dataset snapshot digest --
 plans fingerprint data by SHA-256, and legacy HOCON carries none, so
 the digest is a required configuration key and is never auto-derived.
+
+Which compute runs the plan is the rule's ``adapter`` key: ``spark``, the
+default, or ``arrow``. The Spark-free runner (``dq.runner``) runs this same
+engine with the Arrow adapter and no Spark session at all.
 """
 
 import logging
 from typing import Any, Dict, List
 
+from dq.compute_support import adapter_named
 from dq.engine.checkspec import build_result, normalize_criticality
 from dq.engine.dq_engine import DQEngine
 from dq.exceptions import ConfigurationError
@@ -29,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 class PortableEngine(DQEngine):
-    """Engine executing portable kernel plans over Spark."""
+    """Engine executing portable kernel plans over a compute adapter."""
 
     #: Severity is derived (kernel ``Severity`` normalized to criticality);
     #: plans carry no row filters or per-row failure counts.
@@ -45,7 +50,11 @@ class PortableEngine(DQEngine):
 
         Required keys: ``dataset`` (logical name), ``snapshot_sha256``
         (64-hex digest the caller certifies), and a non-empty ``plan``
-        list of legacy constraint dicts.
+        list of legacy constraint dicts. Optional: ``adapter``, the name of
+        the compute that will run the plan -- ``spark`` unless given.
+
+        The frame is not looked at here, so a bad payload, an unknown
+        adapter included, is refused before any data is read.
         """
         from dq.plan import DatasetRef
         from dq.portable_config import translate_plan
@@ -69,20 +78,19 @@ class PortableEngine(DQEngine):
                 "portable engine requires a non-empty 'plan' list of "
                 "constraint dicts"
             )
+        self._adapter = adapter_named(self._config.get("adapter", "spark"))
         self._dataset_name = dataset
         return translate_plan(checks, DatasetRef(dataset, sha))
 
     def _execute(self, dataframe, prepared) -> List[Dict[str, Any]]:
-        """Execute the plan on the Spark adapter and flatten to legacy dicts.
+        """Execute the plan on the rule's adapter and flatten to legacy dicts.
 
         The kernel reports its own ``severity`` on every outcome. It is
         normalized to the canonical ``criticality`` here, because the gate
         policy reads that key: without it a Warning-level rule would block
         under ``fail_on = "error"``.
         """
-        from dq.spark_adapter import execute_plan
-
-        outcomes = execute_plan(prepared, {self._dataset_name: dataframe})
+        outcomes = self._adapter.execute_plan(prepared, {self._dataset_name: dataframe})
         results = []
         for outcome in outcomes:
             legacy = outcome.to_legacy()

@@ -24,6 +24,7 @@ This module imports nothing optional.
 from __future__ import annotations
 
 import decimal
+import importlib
 import math
 from dataclasses import dataclass
 from fractions import Fraction
@@ -62,6 +63,32 @@ METRICS_BY_VERSION = {
     SEMANTIC_GROUPS_VERSION: GROUP_METRICS,
     SEMANTIC_RANGES_VERSION: RANGE_METRICS,
 }
+
+#: The module that executes a portable plan, by adapter name. A new compute
+#: adapter adds one entry here.
+ADAPTER_MODULES = {"spark": "dq.spark_adapter", "arrow": "dq.arrow_adapter"}
+
+
+def adapter_named(name: Any):
+    """Return the module that executes plans for the adapter called ``name``.
+
+    Args:
+        name: An adapter's name, as a rule's ``adapter`` key gives it.
+
+    Returns:
+        The adapter's module, which offers ``execute_plan``.
+
+    Raises:
+        ConfigurationError: When no adapter has that name. Nothing has been
+            read when it is raised, so a rule can be refused before its data.
+    """
+    module = ADAPTER_MODULES.get(name) if isinstance(name, str) else None
+    if module is None:
+        raise ConfigurationError(
+            f"adapter {name!r} is not a portable adapter; choose one of "
+            f"{sorted(ADAPTER_MODULES)}"
+        )
+    return importlib.import_module(module)
 
 
 @dataclass(frozen=True)

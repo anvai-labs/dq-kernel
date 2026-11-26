@@ -21,6 +21,7 @@ import pytest
 
 from dq import arrow_adapter
 from dq.arrow_adapter import execute_plan, validated_bindings
+from dq.compute_support import ADAPTER_MODULES, adapter_named
 from dq.envelope import RulesetEnvelope
 from dq.exceptions import ConfigurationError
 from dq.outcomes import CheckOutcome
@@ -761,6 +762,29 @@ def test_a_refusal_does_not_mask_a_fault_that_is_not_arrows():
             execute_plan(counts_plan(), {"orders": frame()})
     finally:
         arrow_adapter.canonical = original
+
+
+# --------------------------------------------------------- the mapping
+
+
+def test_an_adapter_is_found_by_its_name():
+    assert ADAPTER_MODULES == {"spark": "dq.spark_adapter", "arrow": "dq.arrow_adapter"}
+    assert adapter_named("arrow") is arrow_adapter
+    assert adapter_named("spark").__name__ == "dq.spark_adapter"
+    for name in ADAPTER_MODULES:
+        # What a rule's adapter is asked for, whoever runs the plan.
+        assert callable(adapter_named(name).execute_plan)
+
+
+@pytest.mark.parametrize(
+    "name", ["Arrow", "ARROW", "arrow2", "", " arrow", None, 7, ["arrow"]]
+)
+def test_a_name_no_adapter_has_is_refused_before_anything_is_read(name):
+    with pytest.raises(ConfigurationError) as raised:
+        adapter_named(name)
+    assert str(raised.value) == (
+        f"adapter {name!r} is not a portable adapter; choose one of ['arrow', 'spark']"
+    )
 
 
 # ------------------------------------------------------ without pyarrow
