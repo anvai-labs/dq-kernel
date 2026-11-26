@@ -23,6 +23,22 @@ This directory contains example configurations and scripts demonstrating how to 
 - `portable_counts.py` - Dependency-free portable count-plan demonstration using fixture counts
 - `portable_spark_counts.py` - Native Spark execution of a translated HOCON count-plan subset
 
+## Import Examples
+
+Sources for `dq-import` and `dq.harvest`, which read another tool's results as evidence. They need no Spark session and no vendor library.
+
+- `import/run_results.json` - A dbt `run_results.json` as dbt-core 1.12.7 wrote it, trimmed to seven records: a model (not a quality result) and six data tests covering `pass`, `warn` (by severity and by threshold), `fail`, `error` and `skipped`
+- `import/validation_result.json` - A Great Expectations validation result as GX 1.24.1 wrote it, trimmed to six expectations
+- `import/checks.csv`, `import/checks.json` - The same three checks in the columnar format, in CSV and in JSON
+
+These are result sources, not rule packs: `dq-validate` does not read them. The tests import all four.
+
+```bash
+dq-import examples/import/run_results.json --dataset-id orders \
+    --dataset-sha256 <64 hex digits> --report-json evidence.json
+dq-import examples/import/checks.csv --fail-on error
+```
+
 ## Running Examples
 
 Ensure you have the framework installed with Spark and Deequ support:

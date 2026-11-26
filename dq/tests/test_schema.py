@@ -33,7 +33,10 @@ def example_rule_packs():
     return sorted(
         path
         for path in EXAMPLES.rglob("*")
-        if path.is_file() and path.suffix in RULE_PACK_EXTENSIONS
+        # `examples/import/` holds result sources for `dq-import`, not rules.
+        if path.is_file()
+        and path.suffix in RULE_PACK_EXTENSIONS
+        and "import" not in path.parts
     )
 
 

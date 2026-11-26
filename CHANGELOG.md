@@ -78,6 +78,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   formatter, its own unit tests and the repository's guards as generated
 - `docs/writing-an-engine.adoc`: the engine contract with a complete example
   that is executed as a test
+- **Evidence importers** (SPEC-013): `dq.harvest` reads another tool's
+  quality results as this framework's own evidence, and imports no vendor
+  library to do it. Three sources: dbt's `run_results.json` (its data tests),
+  a Great Expectations validation result, and a columnar file -- CSV, or a
+  JSON array of records with `check`, `success`, an optional `criticality`
+  and an optional `details` -- that any tool can write. Every imported
+  outcome carries `details.origin`: the source system, the reference, the
+  digest of the bytes that were parsed, and the run the source names. A
+  source that cannot be imported -- a status the importer does not know, no
+  check in it, a malformed record, two checks with one name -- is refused
+  with a `HarvestError` naming the record and its position
+- `dq-import SOURCE --dataset-id ID --dataset-sha256 SHA --report-json PATH`:
+  reads a source once, applies the gate policy (`--fail-on`) and writes a
+  `dq-report/v1` document. It exits 0, 1 or 2 as `dq-kernel` does
+- `examples/import/`: a `run_results.json` as dbt-core 1.12.7 wrote it, a
+  validation result as Great Expectations 1.24.1 wrote it, and the columnar
+  format in CSV and JSON. The tests import all four
+- "Importing evidence" in the operator reference: what each source becomes,
+  the columnar format, and the refusals
 - Property-based tests (Hypothesis) for the pure kernel: the sanitizer
   always produces strict JSON, gate decisions partition the failures, exact
   thresholds stay exact where doubles would not, labels stay unique
@@ -207,6 +226,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its control plane moved to a closed repository
 - The historical planning documents state that they are proposals and
   point at the tracker; every proposal they make has a recorded disposition
+- `dq.engine.dq_engine.outcome_frames(spark, outcomes)` frames outcome
+  dictionaries for the sinks, as the engine base has always framed its own
+  (`_artifact_frames` now calls it). The schema is stated rather than
+  inferred: given outcome dictionaries whose `details` differ in shape,
+  `spark.createDataFrame` infers a map of strings and stringifies every
+  nested value, without an error
 - A DQX check without a `name` is labelled by its function and its columns
   (`is_not_null_id`, `is_unique_a_b` for `for_each_column`), as every other
   engine labels a check. It was `is_not_null_0`: a name that changed

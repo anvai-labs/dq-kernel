@@ -17,6 +17,7 @@ PACKAGE_ROOT = REPOSITORY_ROOT / "dq"
 CATALOG_PATH = REPOSITORY_ROOT / "docs" / "error-catalog.adoc"
 IN_SCOPE = {
     "ConfigurationError",
+    "HarvestError",
     "ValidationError",
     "RepositoryError",
     "IdentifierError",

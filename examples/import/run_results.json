@@ -1,0 +1,276 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/run-results/v6.json",
+    "dbt_version": "1.12.7",
+    "generated_at": "2026-11-26T02:17:34.008138Z",
+    "invocation_id": "11cfc1e8-98df-4b89-9570-fc85ee756525",
+    "invocation_started_at": "2026-11-26T02:17:32.211975Z",
+    "env": {}
+  },
+  "args": {
+    "print": true,
+    "cache_selected_only": false,
+    "resource_types": [],
+    "latest_version_pointer_enabled_by_default": false,
+    "require_yaml_configuration_for_mf_time_spines": true,
+    "quiet": false,
+    "allow_jinja_file_extensions": false,
+    "require_sql_header_in_test_configs": false,
+    "skip_nodes_if_on_run_start_fails": true,
+    "show": false,
+    "introspect": true,
+    "profiles_dir": ".",
+    "require_nested_cumulative_type_params": true,
+    "empty": false,
+    "vars": {},
+    "log_format": "default",
+    "use_catalogs_v2": false,
+    "require_valid_schema_from_generate_schema_name": false,
+    "macro_debugging": false,
+    "sqlparse": {
+      "MAX_GROUPING_DEPTH": null,
+      "MAX_GROUPING_TOKENS": null
+    },
+    "show_resource_report": false,
+    "enable_grouped_warn_error_parser_logs": false,
+    "use_colors_file": false,
+    "warn_error_options": {
+      "error": [],
+      "warn": [],
+      "silence": []
+    },
+    "v2_parser": "dbt-core-experimental-parser parse",
+    "require_corrected_analysis_fqns": false,
+    "use_fast_test_edges": false,
+    "indirect_selection": "eager",
+    "send_anonymous_usage_stats": false,
+    "exclude": [],
+    "maximum_seed_size_mib": 1,
+    "log_level_file": "debug",
+    "which": "build",
+    "strict_mode": false,
+    "use_colors": false,
+    "include_saved_query": false,
+    "defer": false,
+    "project_dir": ".",
+    "static_parser": true,
+    "exclude_resource_types": [],
+    "source_freshness_run_project_hooks": true,
+    "log_format_file": "debug",
+    "require_unique_project_resource_names": false,
+    "favor_state": false,
+    "populate_cache": true,
+    "snowflake_projects_otel": false,
+    "require_resource_names_without_spaces": true,
+    "select": [],
+    "show_all_deprecations": false,
+    "require_source_and_semantic_model_names_without_spaces": false,
+    "require_explicit_package_overrides_for_builtin_materializations": true,
+    "support_custom_ref_kwargs": false,
+    "hints_enabled": true,
+    "version_check": false,
+    "log_path": "logs",
+    "log_level": "info",
+    "write_json": true,
+    "log_file_max_bytes": 10485760,
+    "state_modified_compare_vars": false,
+    "upload_to_artifacts_ingest_api": false,
+    "validate_macro_args": true,
+    "partial_parse": true,
+    "export_saved_queries": false,
+    "require_all_warnings_handled_by_warn_error": true,
+    "state_modified_compare_more_unrendered_values": true,
+    "builtin_macros_prefer_overrides": false,
+    "use_v2_parser": false,
+    "printer_width": 80,
+    "require_ref_searches_node_package_before_root": false,
+    "partial_parse_file_diff": true,
+    "require_batched_execution_for_custom_microbatch_strategy": true,
+    "invocation_command": "dbt build --project-dir . --profiles-dir . --no-version-check --no-use-colors",
+    "require_generic_test_arguments_property": true
+  },
+  "elapsed_time": 0.3853466510772705,
+  "results": [
+    {
+      "status": "success",
+      "timing": [
+        {
+          "name": "compile",
+          "started_at": "2026-11-26T02:17:33.879245Z",
+          "completed_at": "2026-11-26T02:17:33.880344Z"
+        },
+        {
+          "name": "execute",
+          "started_at": "2026-11-26T02:17:33.880545Z",
+          "completed_at": "2026-11-26T02:17:33.891288Z"
+        }
+      ],
+      "thread_id": "Thread-1 (worker)",
+      "execution_time": 0.012750864028930664,
+      "adapter_response": {
+        "_message": "OK"
+      },
+      "message": "OK",
+      "failures": null,
+      "unique_id": "model.probe.orders",
+      "compiled": true,
+      "compiled_code": "\nselect * from (values\n  (1, 'new', 10.0),\n  (2, 'shipped', 20.0),\n  (2, 'weird', 500.0),\n  (null, 'new', null)\n) as t(order_id, status, amount)",
+      "relation_name": "\"probe\".\"main\".\"orders\"",
+      "batch_results": null,
+      "overload_results": null
+    },
+    {
+      "status": "warn",
+      "timing": [
+        {
+          "name": "compile",
+          "started_at": "2026-11-26T02:17:33.920295Z",
+          "completed_at": "2026-11-26T02:17:33.924500Z"
+        },
+        {
+          "name": "execute",
+          "started_at": "2026-11-26T02:17:33.924738Z",
+          "completed_at": "2026-11-26T02:17:33.931194Z"
+        }
+      ],
+      "thread_id": "Thread-1 (worker)",
+      "execution_time": 0.011947154998779297,
+      "adapter_response": {
+        "_message": "OK"
+      },
+      "message": "Got 1 result, configured to warn if != 0",
+      "failures": 1,
+      "unique_id": "test.probe.accepted_values_orders_status__new__shipped__cancelled.e6f11ca23e",
+      "compiled": true,
+      "compiled_code": "\n    \n    \n\nwith all_values as (\n\n    select\n        status as value_field,\n        count(*) as n_records\n\n    from \"probe\".\"main\".\"orders\"\n    group by status\n\n)\n\nselect *\nfrom all_values\nwhere value_field not in (\n    'new','shipped','cancelled'\n)\n\n\n",
+      "relation_name": null,
+      "batch_results": null,
+      "overload_results": null
+    },
+    {
+      "status": "error",
+      "timing": [
+        {
+          "name": "compile",
+          "started_at": "2026-11-26T02:17:33.933298Z",
+          "completed_at": "2026-11-26T02:17:33.934519Z"
+        },
+        {
+          "name": "execute",
+          "started_at": "2026-11-26T02:17:33.934715Z",
+          "completed_at": "2026-11-26T02:17:33.942359Z"
+        }
+      ],
+      "thread_id": "Thread-1 (worker)",
+      "execution_time": 0.014127969741821289,
+      "adapter_response": {},
+      "message": "Runtime Error in test broken_test (tests/broken_test.sql)\n  Binder Error: Referenced column \"does_not_exist\" not found in FROM clause!\n  Candidate bindings: \"order_id\", \"amount\"\n  \n  LINE 11:   select * from \"probe\".\"main\".\"orders\" where does_not_exist is null\n                                                         ^^^^^^^^^^^^^^",
+      "failures": null,
+      "unique_id": "test.probe.broken_test",
+      "compiled": true,
+      "compiled_code": "select * from \"probe\".\"main\".\"orders\" where does_not_exist is null",
+      "relation_name": null,
+      "batch_results": null,
+      "overload_results": null
+    },
+    {
+      "status": "warn",
+      "timing": [
+        {
+          "name": "compile",
+          "started_at": "2026-11-26T02:17:33.948818Z",
+          "completed_at": "2026-11-26T02:17:33.952988Z"
+        },
+        {
+          "name": "execute",
+          "started_at": "2026-11-26T02:17:33.953189Z",
+          "completed_at": "2026-11-26T02:17:33.957246Z"
+        }
+      ],
+      "thread_id": "Thread-1 (worker)",
+      "execution_time": 0.00941324234008789,
+      "adapter_response": {
+        "_message": "OK"
+      },
+      "message": "Got 1 result, configured to warn if !=0",
+      "failures": 1,
+      "unique_id": "test.probe.not_null_orders_amount.106140f9fd",
+      "compiled": true,
+      "compiled_code": "\n    \n    \n\n\n\nselect amount\nfrom \"probe\".\"main\".\"orders\"\nwhere amount is null\n\n\n",
+      "relation_name": null,
+      "batch_results": null,
+      "overload_results": null
+    },
+    {
+      "status": "pass",
+      "timing": [
+        {
+          "name": "compile",
+          "started_at": "2026-11-26T02:17:33.969274Z",
+          "completed_at": "2026-11-26T02:17:33.973611Z"
+        },
+        {
+          "name": "execute",
+          "started_at": "2026-11-26T02:17:33.973815Z",
+          "completed_at": "2026-11-26T02:17:33.977440Z"
+        }
+      ],
+      "thread_id": "Thread-1 (worker)",
+      "execution_time": 0.009145259857177734,
+      "adapter_response": {
+        "_message": "OK"
+      },
+      "message": null,
+      "failures": 0,
+      "unique_id": "test.probe.not_null_orders_status.8a27272c0a",
+      "compiled": true,
+      "compiled_code": "\n    \n    \n\n\n\nselect status\nfrom \"probe\".\"main\".\"orders\"\nwhere status is null\n\n\n",
+      "relation_name": null,
+      "batch_results": null,
+      "overload_results": null
+    },
+    {
+      "status": "fail",
+      "timing": [
+        {
+          "name": "compile",
+          "started_at": "2026-11-26T02:17:33.979348Z",
+          "completed_at": "2026-11-26T02:17:33.984401Z"
+        },
+        {
+          "name": "execute",
+          "started_at": "2026-11-26T02:17:33.984613Z",
+          "completed_at": "2026-11-26T02:17:33.988737Z"
+        }
+      ],
+      "thread_id": "Thread-1 (worker)",
+      "execution_time": 0.010390043258666992,
+      "adapter_response": {
+        "_message": "OK"
+      },
+      "message": "Got 1 result, configured to fail if != 0",
+      "failures": 1,
+      "unique_id": "test.probe.unique_orders_order_id.fed79b3a6e",
+      "compiled": true,
+      "compiled_code": "\n    \n    \n\nselect\n    order_id as unique_field,\n    count(*) as n_records\n\nfrom \"probe\".\"main\".\"orders\"\nwhere order_id is not null\ngroup by order_id\nhaving count(*) > 1\n\n\n",
+      "relation_name": null,
+      "batch_results": null,
+      "overload_results": null
+    },
+    {
+      "status": "skipped",
+      "timing": [],
+      "thread_id": "Thread-1 (worker)",
+      "execution_time": 0,
+      "adapter_response": {},
+      "message": null,
+      "failures": null,
+      "unique_id": "test.probe.not_null_customers_status.355d9d2596",
+      "compiled": false,
+      "compiled_code": null,
+      "relation_name": null,
+      "batch_results": null,
+      "overload_results": null
+    }
+  ]
+}

@@ -15,6 +15,10 @@ Requires Python 3.12/3.13, Java 17, and a Spark 3.5.9 runtime.
 Evidence can be kept in a SQL database instead of files. That sink and its Arrow path are
 optional extras: `pip install dq-kernel[sqlalchemy,arrow]`.
 
+Evidence can also come from other tools, without a Spark session: `dq.harvest` imports dbt
+test results, Great Expectations validation results, or a four-column CSV or JSON file, and
+`dq-import` applies the gate to them and writes the same `dq-report/v1`.
+
 ## Quick start
 
 ```python

@@ -141,10 +141,14 @@ def test_validate_config_defers_extension_payload_to_extension(tmp_path):
     assert validate_config(path) is True
 
 
+# `examples/import/` holds result sources for `dq-import` -- a dbt artifact,
+# a Great Expectations result -- not rule packs.
 RULE_PACKS = sorted(
     path
     for path in Path("examples").rglob("*")
-    if path.is_file() and path.suffix in (".conf", ".hocon", ".yaml", ".yml", ".json")
+    if path.is_file()
+    and path.suffix in (".conf", ".hocon", ".yaml", ".yml", ".json")
+    and "import" not in path.parts
 )
 
 

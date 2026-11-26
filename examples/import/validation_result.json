@@ -1,0 +1,247 @@
+{
+  "id": null,
+  "meta": {
+    "active_batch_definition": {
+      "batch_identifiers": {
+        "dataframe": "<DATAFRAME>"
+      },
+      "data_asset_name": "orders",
+      "data_connector_name": "fluent",
+      "datasource_name": "probe_source"
+    },
+    "batch_markers": {
+      "ge_load_time": "20261126T020540.609139Z",
+      "pandas_data_fingerprint": "f6f0865b4ae3810a0904f5e2cc697739"
+    },
+    "batch_parameters": {
+      "dataframe": "<DATAFRAME>"
+    },
+    "batch_spec": {
+      "batch_data": "PandasDataFrame"
+    },
+    "checkpoint_id": null,
+    "great_expectations_version": "1.24.1",
+    "run_id": {
+      "run_name": null,
+      "run_time": "2026-11-25T20:05:40.676136-06:00"
+    },
+    "validation_id": "a1cd5a63-3ef7-4233-9b58-590b45b21096",
+    "validation_time": "2026-11-26T02:05:40.676136+00:00"
+  },
+  "statistics": {
+    "evaluated_expectations": 11,
+    "success_percent": 9.090909090909092,
+    "successful_expectations": 1,
+    "unsuccessful_expectations": 10
+  },
+  "success": false,
+  "suite_name": "orders_suite",
+  "suite_parameters": {},
+  "results": [
+    {
+      "exception_info": {
+        "exception_message": null,
+        "exception_traceback": null,
+        "raised_exception": false
+      },
+      "expectation_config": {
+        "id": "0bdbf366-76cf-4033-80cf-f962a2d29afe",
+        "kwargs": {
+          "batch_id": "probe_source-orders",
+          "column": "status",
+          "value_set": [
+            "new",
+            "shipped",
+            "cancelled"
+          ]
+        },
+        "meta": {
+          "expectation_config_name": "status_in_allowed_set",
+          "severity": "warning"
+        },
+        "severity": "critical",
+        "type": "expect_column_values_to_be_in_set"
+      },
+      "meta": {},
+      "result": {
+        "element_count": 5,
+        "missing_count": 0,
+        "missing_percent": 0.0,
+        "partial_unexpected_counts": [
+          {
+            "count": 1,
+            "value": "weird"
+          }
+        ],
+        "partial_unexpected_index_list": [
+          3
+        ],
+        "partial_unexpected_list": [
+          "weird"
+        ],
+        "unexpected_count": 1,
+        "unexpected_percent": 20.0,
+        "unexpected_percent_nonmissing": 20.0,
+        "unexpected_percent_total": 20.0
+      },
+      "success": false
+    },
+    {
+      "exception_info": {
+        "exception_message": null,
+        "exception_traceback": null,
+        "raised_exception": false
+      },
+      "expectation_config": {
+        "id": "8b988aad-9062-49e1-9267-503f9f00cf6a",
+        "kwargs": {
+          "batch_id": "probe_source-orders",
+          "column": "order_id"
+        },
+        "meta": {},
+        "severity": "critical",
+        "type": "expect_column_values_to_not_be_null"
+      },
+      "meta": {},
+      "result": {
+        "element_count": 5,
+        "partial_unexpected_counts": [
+          {
+            "count": 1,
+            "value": null
+          }
+        ],
+        "partial_unexpected_index_list": [
+          4
+        ],
+        "partial_unexpected_list": [
+          null
+        ],
+        "unexpected_count": 1,
+        "unexpected_percent": 20.0
+      },
+      "success": false
+    },
+    {
+      "exception_info": {
+        "exception_message": null,
+        "exception_traceback": null,
+        "raised_exception": false
+      },
+      "expectation_config": {
+        "id": "207daaee-fb9d-480f-8932-69024880495a",
+        "kwargs": {
+          "batch_id": "probe_source-orders",
+          "column": "order_id",
+          "type_": "int64"
+        },
+        "meta": {},
+        "severity": "critical",
+        "type": "expect_column_values_to_be_of_type"
+      },
+      "meta": {},
+      "result": {
+        "observed_value": "float64"
+      },
+      "success": false
+    },
+    {
+      "exception_info": {
+        "exception_message": null,
+        "exception_traceback": null,
+        "raised_exception": false
+      },
+      "expectation_config": {
+        "id": "9dc50947-f859-42ae-b979-5bd712c4a44d",
+        "kwargs": {
+          "batch_id": "probe_source-orders",
+          "value": 4
+        },
+        "meta": {},
+        "severity": "critical",
+        "type": "expect_table_row_count_to_equal"
+      },
+      "meta": {},
+      "result": {
+        "observed_value": 5
+      },
+      "success": false
+    },
+    {
+      "exception_info": {
+        "exception_message": null,
+        "exception_traceback": null,
+        "raised_exception": false
+      },
+      "expectation_config": {
+        "id": "0d5ce31d-d0c5-4aca-9165-6c7e0b8c77db",
+        "kwargs": {
+          "batch_id": "probe_source-orders",
+          "column_list": [
+            "email",
+            "email2"
+          ]
+        },
+        "meta": {},
+        "severity": "critical",
+        "type": "expect_compound_columns_to_be_unique"
+      },
+      "meta": {},
+      "result": {
+        "element_count": 5,
+        "missing_count": 1,
+        "missing_percent": 20.0,
+        "partial_unexpected_counts": [],
+        "partial_unexpected_index_list": [],
+        "partial_unexpected_list": [],
+        "unexpected_count": 0,
+        "unexpected_percent": 0.0,
+        "unexpected_percent_nonmissing": 0.0,
+        "unexpected_percent_total": 0.0
+      },
+      "success": true
+    },
+    {
+      "exception_info": {
+        "exception_message": null,
+        "exception_traceback": null,
+        "raised_exception": false
+      },
+      "expectation_config": {
+        "id": "7e4807ad-fe40-4a02-9778-712aa011b2e6",
+        "kwargs": {
+          "batch_id": "probe_source-orders",
+          "column_list": [
+            "order_id",
+            "status",
+            "amount",
+            "email"
+          ]
+        },
+        "meta": {},
+        "severity": "critical",
+        "type": "expect_table_columns_to_match_ordered_list"
+      },
+      "meta": {},
+      "result": {
+        "details": {
+          "mismatched": [
+            {
+              "Expected": null,
+              "Expected Column Position": 4,
+              "Found": "email2"
+            }
+          ]
+        },
+        "observed_value": [
+          "order_id",
+          "status",
+          "amount",
+          "email",
+          "email2"
+        ]
+      },
+      "success": false
+    }
+  ]
+}

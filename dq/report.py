@@ -30,27 +30,45 @@ def framework_version() -> str:
         return "source"
 
 
+def local_file_path(reference: str, *, kind: str = "configuration") -> Path:
+    """Return the local file an evidence reference names.
+
+    Evidence binds to what it reads in full and digests, so it reads local
+    files only. A remote rule set -- or an imported result source -- must be
+    materialized to an immutable local file first.
+    """
+    parsed = urlparse(reference)
+    if parsed.scheme not in ("", "file"):
+        raise ConfigurationError(
+            f"Evidence reports require a local {kind} file; "
+            f"unsupported scheme: {parsed.scheme}"
+        )
+    return Path(parsed.path if parsed.scheme == "file" else reference)
+
+
+def read_local_file(reference: str, *, kind: str = "configuration") -> bytes:
+    """Return the bytes of the local file an evidence reference names.
+
+    Raises:
+        ConfigurationError: If the reference is not a local file, or it
+            cannot be read.
+    """
+    path = local_file_path(reference, kind=kind)
+    try:
+        return path.read_bytes()
+    except OSError as error:
+        raise ConfigurationError(
+            f"Could not read {kind} for evidence digest: {error}"
+        ) from error
+
+
 def sha256_file_reference(config_reference: str) -> str:
     """Return the SHA-256 digest of a local configuration reference.
 
     Evidence reports intentionally reject mutable remote configuration.  A
     remote rule set must be materialized to an immutable local file first.
     """
-    parsed = urlparse(config_reference)
-    if parsed.scheme not in ("", "file"):
-        raise ConfigurationError(
-            "Evidence reports require a local configuration file; "
-            f"unsupported scheme: {parsed.scheme}"
-        )
-
-    path = Path(parsed.path if parsed.scheme == "file" else config_reference)
-    try:
-        content = path.read_bytes()
-    except OSError as error:
-        raise ConfigurationError(
-            f"Could not read configuration for evidence digest: {error}"
-        ) from error
-    return hashlib.sha256(content).hexdigest()
+    return hashlib.sha256(read_local_file(config_reference)).hexdigest()
 
 
 def validate_sha256(value: str, label: str) -> str:

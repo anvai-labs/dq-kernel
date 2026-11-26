@@ -1,0 +1,5 @@
+[
+  {"check": "orders_id_unique", "success": false, "criticality": "error", "details": {"failed_rows": 3}},
+  {"check": "orders_status_in_set", "success": false, "criticality": "warn", "details": {"unexpected_percent": 12.5}},
+  {"check": "orders_row_count", "success": true}
+]
