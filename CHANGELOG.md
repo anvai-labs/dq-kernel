@@ -58,9 +58,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   example) and `examples/overlays/` (per-environment overlays)
 - **Engine SDK** (SPEC-011): `dq.sdk.conformance` runs an engine through
   the engine contract -- manifest, template, outcome boundary, unique
-  labels, canonical severity, determinism, persistence honesty, run key --
-  and reports each violation by the check that found it; every built-in
-  engine passes. `dq.sdk.fixtures` is one semantic corpus for all compute
+  labels, canonical severity, determinism, attribution under reordering,
+  persistence honesty, run key -- and reports each violation by the check
+  that found it; every built-in engine passes. The reordering check takes a
+  factory for the same engine with its checks in another order, and
+  requires every check to keep its outcome under its own name: that is what
+  finds an engine that reads a vendor's result positions as identities,
+  which no other check can see. Without it the report says attribution was
+  not checked. `dq.sdk.fixtures` is one semantic corpus for all compute
   adapters: 19 cases across counts/v1, groups/v1 and ranges/v1, each stating
   the metrics an adapter must compute and the decisions that follow. The
   decisions are checked against the kernel with no engine, and the metrics
@@ -210,6 +215,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/index.adoc` links the tracker instead of a hand-maintained list of
   specs, lists ADR-011 through ADR-015, and no longer links two review
   files in a `docs/reviews/` directory that does not exist
+
+### Fixed
+
+- The `greatexpectations` engine attributed GX's results to checks by
+  position. GX groups expectations by column and returns results in that
+  order, not the order they were defined in, so in any rule that mixed
+  column-level and table-level expectations a check was reported with
+  another's verdict. Criticality travels with the label, so a failed
+  `error` check could be reported as passed, a passing one as failed at
+  `warn`, and a gate set to `fail_on = error` opened. Each result is now
+  matched on the expectation it carries (type, arguments and severity), and
+  a run that cannot be attributed is refused with the position and the
+  check names. Two expectations GX treats as the same (one type and
+  arguments) are refused when the suite is built: GX silently ran only one
+  of them, and the engine then failed with a bare `zip` length error
 
 ## [0.3.0] - 2026-11-24
 

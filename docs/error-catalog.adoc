@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 208 raise sites across the modules below; the contract
+The framework raises 212 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -268,12 +268,30 @@ column parameters.
 
 == dq/engine/greatexpectations/greatexpectations_check.py
 
-Fail-closed expectation resolution for the greatexpectations engine.
+*Content:* 3 `ConfigurationError` + 3 `ValueError` sites.
 
-* `ValueError` -- an expectation entry has no `type`, or the `type` does
-  not resolve to a GX Core expectation class. Fix the rule's
-  `expectations` payload: every entry needs a snake-case GX expectation
-  `type` (e.g. `expect_column_values_to_not_be_null`).
+Fail-closed expectation resolution and result attribution for the
+greatexpectations engine.
+
+* Cause (`ValueError`): an expectation entry has no `type`, or the `type`
+  does not resolve to a GX Core expectation class. Or two entries are the
+  same expectation to GX -- one type, the same arguments and severity --
+  under different names: GX keeps one copy of such a pair and runs it
+  once, or runs both and reports two results nothing could tell apart.
+* Fix: give every entry a snake-case GX expectation `type` (e.g.
+  `expect_column_values_to_not_be_null`), and give two entries of one type
+  different arguments, or remove one.
+* Cause (`ConfigurationError`): a validation result could not be attributed
+  to an expectation. GX returned a result that matches none of the
+  configured expectations, a result two expectations match equally, two
+  results for one expectation, or none for one. Results are matched to
+  expectations by the type, arguments and severity they carry, never by
+  position, so this means GX reported something other than the suite's own
+  expectations.
+* Fix: this is not caused by the data. Check that the `great_expectations`
+  version is inside the supported range (`>=1.24,<2`) and that no two
+  entries differ only in `meta` or `notes`; then read the positions and
+  check names in the message against the rule's `expectations`.
 
 
 == dq/engine/dqx/dqx_check.py

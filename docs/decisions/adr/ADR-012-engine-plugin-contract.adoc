@@ -92,11 +92,14 @@ as failed whenever it shared a Deequ Check with a failing one. Two rules
 follow. A result's `check` is its check's label: the configured name, else
 the kind and columns, else the kind and position -- unique within a rule,
 which is refused otherwise. And a constraint's verdict is its own
-(`constraint_status`), never its parent Check's.
+(`constraint_status`), never its parent Check's. A third rule, added
+2026-11-25: a result is matched to its check by what it carries, never by
+its position in a vendor's output (see the amendment below).
 
 **9. The contract is executable (SPEC-011).** `dq.sdk.conformance` is the
 contract as a test suite any engine author can run; every built-in engine
-passes it. `dq.sdk.fixtures` holds one semantic corpus, with the metrics an
+passes it, with its checks also tried in another order. `dq.sdk.fixtures`
+holds one semantic corpus, with the metrics an
 adapter must compute and the decisions that follow from them, so a new
 compute adapter is measured against the same cases as Spark.
 
@@ -119,6 +122,20 @@ class is defined, not at first use.
   `dq.engine.schemavalidation.datatypes` (pydeequ datatype maps).
 * Engine lifecycle is uniform: log preamble, prepare-once caching, bounded
   persistence, capability guard.
+
+## Amendment (2026-11-25): a result is matched to its check by identity
+
+Rule 8 made labels unique. The `greatexpectations` engine then attached
+those labels to GX's results by position, and GX returns results in an
+order of its own -- grouped by column -- so a check could be reported with
+another's verdict, and a failed `error` check as passed. Rule 8 therefore
+has a third part: a result is matched to its check by what it carries (a
+name, a constraint, a type and arguments), never by where the vendor put
+it, and a result that cannot be matched refuses the run. Rule 9's suite
+checks it: built with the same checks in another order, an engine must
+report the same outcome under every label. The labelling rule is also the
+same for every engine now; the DQX engine named an unnamed check by its
+position.
 
 ## References
 

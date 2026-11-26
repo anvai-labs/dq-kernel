@@ -79,11 +79,20 @@ def problems_of(engine_class, outcomes=MIXED, sink=InMemorySink, **engine_kwargs
     )
 
 
+def reordered(engine_class, **engine_kwargs):
+    """A factory for the same engine with its checks in another order."""
+    return lambda dqts=None: engine_class(
+        CONFIG, dqts=dqts, outcomes=list(reversed(MIXED)), **engine_kwargs
+    )
+
+
 # ------------------------------------------------------------- a good engine
 
 
 def test_a_conforming_engine_passes_every_check():
-    report = assert_engine_conforms(factory(ExampleEngine), FRAME, InMemorySink)
+    report = assert_engine_conforms(
+        factory(ExampleEngine), FRAME, InMemorySink, reordered(ExampleEngine)
+    )
     assert isinstance(report, ConformanceReport) and report.conforms
     assert report.problems == () and report.notes == ()
     assert report.checks == (
@@ -93,6 +102,7 @@ def test_a_conforming_engine_passes_every_check():
         "check_names_are_unique",
         "criticality_is_canonical",
         "outcomes_are_deterministic",
+        "attribution_survives_reordering",
         "persistence_honours_the_capability",
         "artifacts_carry_the_injected_run_key",
     )
@@ -122,7 +132,10 @@ def test_an_engine_that_cannot_persist_conforms_when_it_refuses():
 def test_persistence_is_not_checked_without_a_sink_factory():
     report = conformance_problems(factory(ExampleEngine), FRAME)
     assert report.conforms
-    assert report.notes == ("persistence was not checked: no sink_factory was given",)
+    assert report.notes == (
+        "attribution under reordering was not checked: no reordered_factory was given",
+        "persistence was not checked: no sink_factory was given",
+    )
     assert "persistence_honours_the_capability" not in report.checks
 
 
@@ -130,6 +143,149 @@ def test_a_frame_with_one_verdict_only_is_noted_not_rejected():
     report = problems_of(ExampleEngine, outcomes=[("steady", True, "error")])
     assert report.conforms
     assert report.notes and "every outcome passed" in report.notes[0]
+
+
+# --------------------------------------- attribution under reordering
+
+
+class PositionalEngine(DQEngine):
+    """An engine that pairs its checks with a vendor's results by position.
+
+    The vendor returns one verdict per check in an order of its own, here
+    a fixed one, as GX does when it groups expectations by column. With
+    the checks in one order that happens to be the vendor's; in another
+    it is not, and every check is reported with another's verdict.
+    """
+
+    CAPABILITIES = {"criticality": "native", "failed_rows": True}
+
+    def __init__(
+        self, config, dqts=None, outcomes=MIXED, vendor_order=("broken", "steady")
+    ):
+        super().__init__(config, dqts)
+        self.outcomes = outcomes
+        self.vendor_order = vendor_order
+
+    def _prepare(self, dataframe):
+        return self.outcomes
+
+    def _execute(self, dataframe, prepared):
+        verdicts = {name: (ok, criticality) for name, ok, criticality in prepared}
+        results = [verdicts[name] for name in self.vendor_order]
+        return [
+            build_result(name, ok, {"criticality": criticality})
+            for (name, _, _), (ok, criticality) in zip(prepared, results)
+        ]
+
+
+def test_an_engine_that_reads_position_as_identity_is_rejected():
+    """The suite could not see this before: every other check still passes."""
+    assert problems_of(PositionalEngine).conforms
+    report = conformance_problems(
+        factory(PositionalEngine), FRAME, InMemorySink, reordered(PositionalEngine)
+    )
+    (problem,) = report.problems
+    assert problem.startswith("attribution_survives_reordering:")
+    # In one order the checks reached the engine as the vendor returns them.
+    assert "broken, steady" in problem
+    assert "never by its position" in problem
+
+
+def test_attribution_is_noted_not_checked_without_a_reordered_factory():
+    report = problems_of(ExampleEngine)
+    assert report.conforms
+    assert "attribution_survives_reordering" not in report.checks
+    assert report.notes == (
+        "attribution under reordering was not checked: no reordered_factory was given",
+    )
+
+
+def test_a_check_named_by_its_position_is_reported_rather_than_vouched_for():
+    """The one case this check cannot judge.
+
+    ``labels_for_checks`` names a second unnamed check of one kind by its
+    position (``hasSize``, ``hasSize_1``). Under another order the same
+    name is another check, and a comparison by name means nothing. The
+    suite cannot tell that from a real swap -- the names are all still
+    there -- so it reports what it saw. An author who gives those checks
+    names of their own, which is what the label rule is for, gets a true
+    answer.
+    """
+
+    class NumberedEngine(ExampleEngine):
+        def _execute(self, dataframe, prepared):
+            return [
+                build_result(f"check_{index}", ok, {"criticality": criticality})
+                for index, (_, ok, criticality) in enumerate(prepared)
+            ]
+
+    report = conformance_problems(
+        factory(NumberedEngine), FRAME, InMemorySink, reordered(NumberedEngine)
+    )
+    assert "attribution_survives_reordering" in report.checks
+    (problem,) = report.problems
+    assert problem.startswith("attribution_survives_reordering:")
+    assert "check_0, check_1" in problem
+
+
+def test_attribution_is_noted_not_checked_when_the_names_change_with_the_order():
+    class NamedAfterItsPosition(ExampleEngine):
+        def _execute(self, dataframe, prepared):
+            return [
+                build_result(f"{name}_{index}", ok, {"criticality": criticality})
+                for index, (name, ok, criticality) in enumerate(prepared)
+            ]
+
+    report = conformance_problems(
+        factory(NamedAfterItsPosition),
+        FRAME,
+        InMemorySink,
+        reordered(NamedAfterItsPosition),
+    )
+    assert report.problems == ()
+    assert "attribution_survives_reordering" not in report.checks
+    assert report.notes == (
+        "attribution under reordering was not checked: the check names changed "
+        "with the order; a check named by its position cannot be followed from "
+        "one run to the next",
+    )
+
+
+def test_a_reordered_engine_that_fails_to_run_is_rejected():
+    class Exploding(ExampleEngine):
+        def _execute(self, dataframe, prepared):
+            raise RuntimeError("boom")
+
+    report = conformance_problems(
+        factory(ExampleEngine), FRAME, InMemorySink, factory(Exploding)
+    )
+    (problem,) = report.problems
+    assert problem == (
+        "attribution_survives_reordering: the engine built with its checks in "
+        "another order failed: RuntimeError: boom"
+    )
+
+
+def test_attribution_is_noted_not_checked_when_the_engine_produces_nothing():
+    report = conformance_problems(
+        factory(ExampleEngine, outcomes=[]),
+        FRAME,
+        InMemorySink,
+        reordered(ExampleEngine),
+    )
+    assert "attribution_survives_reordering" not in report.checks
+    assert report.notes == (
+        "persistence was not checked: the engine produced no valid outcomes",
+        "attribution under reordering was not checked: the engine produced no "
+        "valid outcomes",
+    )
+
+
+def test_assert_engine_conforms_names_a_positional_engine():
+    with pytest.raises(AssertionError, match="attribution_survives_reordering"):
+        assert_engine_conforms(
+            factory(PositionalEngine), FRAME, InMemorySink, reordered(PositionalEngine)
+        )
 
 
 # ----------------------------------------------- each violation is named

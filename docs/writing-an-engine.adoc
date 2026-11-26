@@ -60,6 +60,16 @@ Evidence is attributed by a result's `check`. Two results with one name cannot b
 
 A rule whose two checks would report the same label is refused (`require_unique_labels`). An engine that reports a severity must put a canonical `criticality` on every result; the gate policy reads it.
 
+=== Each result goes with its own check
+
+A label is worth giving only when the outcome under it is that check's own. A vendor library returns its results in an order of its own, and an engine that walks two lists side by side -- its checks in one order, the vendor's results in another -- reports each check with another's verdict. Nothing downstream can see it: the failure count is right, every label is present, and only the pairing is wrong. A gate then blocks on a check that passed, or opens on one that failed.
+
+So a result is matched to its check by what it carries, never by where it sits. Most vendors put the check's identity on each result: DQX names its checks, Deequ names its `Check`s, and a Great Expectations result carries its expectation's type and arguments. Keep what the engine adds to a check -- its label, its criticality -- keyed by that identity, and look each result up. If a result cannot be attributed, refuse the run; never fall back to position.
+
+The `greatexpectations` engine is the cautionary example. GX groups expectations by column and returns results in that order, not in the order they were defined. The engine once zipped its labels against that list, so a failed check could be reported as passed. It now matches each result on the expectation it carries, and `dq/tests/test_greatexpectations.py` pins the case.
+
+Two checks a vendor cannot tell apart cannot be attributed at all. Refuse them while the suite is being built, before any data is read, and name both.
+
 === Declare what the engine can do
 
 `CAPABILITIES` is a manifest, checked when the engine class is defined and again when it is loaded:
@@ -132,6 +142,22 @@ def test_my_engine_conforms(spark):
 ----
 
 It checks that the manifest is valid, the template is used, results cross the outcome boundary, labels are unique, severity is canonical, a second run reports the same outcomes, persistence matches the declaration, and artifacts land under the run key the framework injects. A violation names the check that found it. The suite imports no engine and no vendor library, so it runs in any environment.
+
+None of that can see a result filed under the wrong check: the labels are unique and the outcomes repeat from one run to the next, whichever check each one came from. To have that checked, pass a fourth argument that builds the same engine with its checks in another order:
+
+[source,python]
+----
+assert_engine_conforms(
+    lambda dqts=None: MyEngine(make_config(), dqts=dqts),
+    frame,
+    InMemorySink,
+    reordered_factory=lambda dqts=None: MyEngine(make_config(reversed=True), dqts=dqts),
+)
+----
+
+Each check must then report the same outcome under its own name. An engine that reads position as identity fails `attribution_survives_reordering`, and the report names the checks whose outcomes moved. Without the argument the report says attribution was not checked.
+
+The labels have to mean the same check in both configurations. When they do not, the suite says it could not compare; when a label keeps its text but means another check -- `labels_for_checks` names a second unnamed check of one kind by its position -- it cannot tell that from a real swap and reports it. Name such checks.
 
 Every built-in engine passes it (`dq/tests/test_conformance_builtin.py`). `dq-engines` lists what is installed and what each engine declares.
 

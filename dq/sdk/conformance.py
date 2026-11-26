@@ -23,6 +23,19 @@ report at least one passing and one failing check, so there is something
 to check. ``sink_factory`` is optional; without it persistence is not
 checked.
 
+``reordered_factory`` is optional too; without it attribution under
+reordering is not checked. It builds the same engine with the same checks
+configured in another order. An engine must then report the same outcome
+under each check's name: a vendor's results are matched to checks by what
+they carry, never by where they sit, and an engine that reads position as
+identity swaps outcomes the moment the vendor returns them in another
+order. The checks therefore need labels that mean the same check in
+both configurations. When the labels themselves change, the suite says
+it could not compare. When a label keeps its text but means another
+check -- ``labels_for_checks`` names a second unnamed check of one kind
+by its position -- nothing sets that apart from a real swap, and the
+suite reports it; give such checks names of their own.
+
 Nothing here imports an engine or a vendor library.
 """
 
@@ -96,10 +109,70 @@ def _why(error: BaseException) -> str:
     return f"{type(error).__name__}: {error}"
 
 
+def _by_label(outcomes: List[dict]) -> dict:
+    return {outcome.get("check"): outcome for outcome in outcomes}
+
+
+def _check_attribution_under_reordering(
+    reordered_factory: Optional[EngineFactory],
+    frame,
+    outcomes: List[dict],
+    checks: List[str],
+    problems: List[str],
+    notes: List[str],
+) -> None:
+    """Check that each check keeps its outcome when the checks are reordered.
+
+    Only a comparison that was actually made is recorded as a check that
+    ran; when the two runs cannot be lined up, the report says so instead.
+    """
+    if reordered_factory is None:
+        notes.append(
+            "attribution under reordering was not checked: no "
+            "reordered_factory was given"
+        )
+        return
+    reordered, error = _run(reordered_factory(), frame)
+    if error is not None:
+        problems.append(
+            _problem(
+                "attribution_survives_reordering",
+                "the engine built with its checks in another order failed: "
+                f"{_why(error)}",
+            )
+        )
+        return
+    by_label = _by_label(outcomes)
+    in_another_order = _by_label(reordered)
+    if set(by_label) != set(in_another_order):
+        notes.append(
+            "attribution under reordering was not checked: the check names "
+            "changed with the order; a check named by its position cannot be "
+            "followed from one run to the next"
+        )
+        return
+    checks.append("attribution_survives_reordering")
+    moved = sorted(
+        label for label in by_label if by_label[label] != in_another_order[label]
+    )
+    if moved:
+        problems.append(
+            _problem(
+                "attribution_survives_reordering",
+                "the same check reported a different outcome when the checks "
+                "were configured in another order: "
+                + ", ".join(moved)
+                + "; match each result to its check by what it carries, "
+                "never by its position",
+            )
+        )
+
+
 def conformance_problems(
     engine_factory: EngineFactory,
     frame,
     sink_factory: Optional[Callable[[], Any]] = None,
+    reordered_factory: Optional[EngineFactory] = None,
 ) -> ConformanceReport:
     """Run an engine through the conformance suite.
 
@@ -110,6 +183,11 @@ def conformance_problems(
             and one failing check.
         sink_factory: Builds a fresh sink with a ``writes()`` method
             returning ``{(metric_type, key): rows}`` (``InMemorySink``).
+        reordered_factory: Builds a fresh engine with the same checks
+            configured in another order. Given it, the suite checks that
+            every check keeps its outcome under its own name. The labels
+            must mean the same check in both configurations: an explicit
+            name, or no two of one kind without a column.
 
     Returns:
         The :class:`ConformanceReport`.
@@ -226,6 +304,9 @@ def conformance_problems(
                 f"every outcome {'passed' if verdicts == {True} else 'failed'}; a frame "
                 "that makes the engine report both gives the suite more to check"
             )
+        _check_attribution_under_reordering(
+            reordered_factory, frame, outcomes, checks, problems, notes
+        )
 
     if not outcomes:
         # Nothing a persistence check could add: every later run would only
@@ -233,6 +314,11 @@ def conformance_problems(
         notes.append(
             "persistence was not checked: the engine produced no valid outcomes"
         )
+        if reordered_factory is not None:
+            notes.append(
+                "attribution under reordering was not checked: the engine "
+                "produced no valid outcomes"
+            )
         return ConformanceReport(tuple(checks), tuple(problems), tuple(notes))
     if sink_factory is None:
         notes.append("persistence was not checked: no sink_factory was given")
@@ -311,6 +397,7 @@ def assert_engine_conforms(
     engine_factory: EngineFactory,
     frame,
     sink_factory: Optional[Callable[[], Any]] = None,
+    reordered_factory: Optional[EngineFactory] = None,
 ) -> ConformanceReport:
     """Assert that an engine conforms to the engine contract (ADR-012).
 
@@ -318,6 +405,8 @@ def assert_engine_conforms(
         AssertionError: Listing every violation found, each naming the
             check that found it.
     """
-    report = conformance_problems(engine_factory, frame, sink_factory)
+    report = conformance_problems(
+        engine_factory, frame, sink_factory, reordered_factory
+    )
     assert report.conforms, f"does not conform:\n{report.summary()}"
     return report

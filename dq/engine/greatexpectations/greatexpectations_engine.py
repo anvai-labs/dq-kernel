@@ -30,9 +30,10 @@ logger = logging.getLogger(__name__)
 class GreatexpectationsEngine(DQEngine):
     """Engine applying GX Core expectations to a Spark DataFrame."""
 
-    #: GX has no per-rule severity (the kernel synthesizes it) and no
-    #: per-rule result counts for all expectation kinds; row scoping is
-    #: native via the ``row_condition`` constructor kwarg.
+    #: The kernel derives criticality from the rule: GX's own ``severity``
+    #: governs only GX's success flag and is not read. There are no per-rule
+    #: result counts for all expectation kinds; row scoping is native via
+    #: the ``row_condition`` constructor kwarg.
     CAPABILITIES = {
         "criticality": "derived",
         "row_filter": True,
@@ -90,15 +91,17 @@ class GreatexpectationsEngine(DQEngine):
     ) -> List[Dict[str, Any]]:
         """Extract metric dictionaries from the GX validation output.
 
-        Results are paired with the suite's ``(label, criticality)`` pairs
-        by index (GX returns one result per expectation, in order), and
-        every result is coerced through the strict-JSON sanitizer (type
-        normalization, depth and size truncation) so payload shape can
-        never breach the outcome boundary's structural gates.
+        Each result is attributed to its expectation by what it carries.
+        GX returns one result per expectation but not in suite order, so
+        position is never read as identity; a result that cannot be
+        attributed refuses the run. Every result is then coerced through
+        the strict-JSON sanitizer (type normalization, depth and size
+        truncation) so payload shape can never breach the outcome
+        boundary's structural gates.
         """
         summarymetrics = []
-        for (label, criticality), exp_result in zip(
-            self._gx_check.labels(), validation_output.results, strict=True
+        for label, criticality, exp_result in self._gx_check.attribute(
+            validation_output.results
         ):
             sanitized = _to_strict_json(exp_result.result)
             summarymetrics.append(
