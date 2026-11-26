@@ -25,6 +25,8 @@ logs. This spec adds one narrow observer port and two adapters.
 * An `OpenTelemetryObserver` behind an optional `otel` extra: one span per
   run and per rule, and counters for outcomes by status and criticality.
 * Configuration in the style of the notifiers: `dqframework.observers`.
+* A recording `InMemoryObserver`, for tests and for embedding platforms
+  that want the events themselves.
 
 == Out of scope
 
@@ -40,6 +42,102 @@ logs. This spec adds one narrow observer port and two adapters.
   a run's outcome or its evidence.
 * No observer is configured by default beyond logging, and nothing here
   adds a mandatory dependency.
+* An observer is built before any rule runs, so a configuration it cannot
+  read costs no engine work.
+
+=== What an observer is told
+
+For a run of two rules on one dataset each:
+
+[source]
+----
+run_started      run_key, job_id, dataset, rules
+rule_started     run_key, rule, engine, dataset
+rule_finished    run_key, rule, engine, dataset, duration_ms, outcomes, failed
+rule_started     run_key, rule, engine, dataset
+rule_finished    run_key, rule, engine, dataset, duration_ms, outcomes, failed
+run_finished     run_key, job_id, dataset, duration_ms, rules, outcomes, failed
+gate_event       the run's `GateEvent`, the record the notifier receives
+----
+
+* A *rule event* is one application of a rule to one dataset. A rule that
+  names several datasets runs once per dataset and gets a pair per dataset,
+  each naming the dataset it measured.
+* `rule` is the rule's name, or `rule N` when it has none. `engine` is the
+  engine as the rule writes it. `failed` is the names of the checks that
+  failed, in order.
+* Each event is an immutable record. `rule_finished` carries counts and
+  check names, never the outcome dictionaries: those are what the run
+  returns to its caller, and an observer must not be able to change them.
+* The gate event comes last, after the run has finished and the decision
+  has been made.
+
+A run that goes wrong is still explained:
+
+* A rule that raises gets a `rule_finished` carrying `error` -- the
+  exception's type and message -- and the time it took. The exception then
+  propagates as it does today.
+* A run that raises still gets `run_finished`, with `error`. No gate event
+  follows it, because no decision was reached.
+
+=== Configuring observers
+
+`dqframework.observers` is a list, read the way `dqframework.notifiers` is:
+
+[source,hocon]
+----
+dqframework {
+  observers = [
+    { type = "logging" }
+    { type = "otel" }
+  ]
+  dqrules = [...]
+}
+----
+
+* `logging` is the default when nothing is configured. A configured list
+  replaces it, as a configured `dqframework.notifiers` replaces the default
+  notifier; list `logging` to keep it.
+* `memory` is the recording observer.
+* `otel` is the OpenTelemetry adapter.
+* A type that is none of these is a configuration error, reported before
+  any rule runs.
+
+`DQFramework(spark, config, observer=...)` injects one in place of the
+configured observers.
+
+=== The logging observer
+
+One line per notification, under the `dq.run_events` logger, each naming the
+run and, where one applies, the rule and the engine:
+
+[source]
+----
+run_started run_key=1700000000000 job_id=local-abc dataset=orders rules=2
+rule_started run_key=1700000000000 rule=orders_id_complete engine=deequ dataset=default
+rule_finished run_key=1700000000000 rule=orders_id_complete engine=deequ dataset=default duration_ms=842.1 outcomes=3 failed=1
+----
+
+With `DQ_LOG_FORMAT=json` each line is one JSON object with the same fields
+and an `event` naming the notification. The variable is read when the
+observer is built.
+
+=== The OpenTelemetry adapter
+
+* One span per run (`dq.run`) and one per rule application (`dq.rule`), with
+  the run key, the rule, the engine and the dataset as attributes, and
+  `dq.duration_ms` on each when it ends. A rule or run that raised ends its
+  span in the error status, with the error as its description.
+* The gate decision is an attribute of the run span, `dq.gate_passed`.
+* One counter, `dq.outcomes`, counting outcomes by `dq.status` (`passed`
+  or `failed`) and `dq.criticality` (`error` or `warn` for a failed check).
+  The gate event does not say what a passed check's criticality was, so a
+  passed outcome carries `n/a`.
+* The `otel` extra provides `opentelemetry-api` and nothing else. An
+  application brings its own SDK, exporter and providers, which is how
+  OpenTelemetry instrumentation is meant to compose. Until providers are
+  configured, the API's own proxies accept every call and record nothing:
+  the adapter is silent, not failing.
 
 == Acceptance gates
 
@@ -60,5 +158,54 @@ logs. This spec adds one narrow observer port and two adapters.
 * [ ] G3 — not started
 * [ ] G4 — not started
 * [ ] G5 — not started
+
+[NOTE]
+====
+Amended 2026-11-26, before implementation. The OpenTelemetry facts below
+were read from the installed 1.45.2 API and SDK, not from memory.
+
+* The spec said "rule started, rule finished" without saying what a rule
+  is when it names several datasets. A rule runs once per dataset, so the
+  event is one application, and it names the dataset it measured.
+* The spec said nothing about a run that raises. Its purpose is to make a
+  run explainable after the fact, and a run that died is the one most in
+  need of explaining. So a rule that raises is still announced as finished,
+  with the error and the time it took, and a run that raises is still
+  announced as finished. The exception propagates exactly as before.
+* "Never receive a value they can mutate" is met by making every event an
+  immutable record that carries counts and check names rather than the
+  outcome dictionaries. The gate event needs no new record: the `GateEvent`
+  the notifier receives is already frozen.
+* An observer is built before any rule runs. The notifier is built after
+  the run, so a mistyped notifier is discovered only once every rule has
+  run; an observer costs a run its evidence if it fails the same way, and
+  a configuration error should not cost engine work.
+* Observers are configured exactly as notifiers are, which includes
+  replacing the default when configured. That is a choice a reader can
+  disagree with: someone who configures `otel` alone loses the log lines.
+  It is the behaviour next door, and the spec says so rather than invent a
+  second rule.
+* A recording observer is added. It is what the gates are checked with, and
+  what an embedding platform that wants the events themselves would use;
+  the notifiers have one.
+* The counter's third bucket is an invention of this amendment. The gate
+  event carries a failed check's criticality and not a passed check's, so
+  `passed` outcomes are counted with `dq.criticality = n/a` to keep one
+  attribute set across the counter.
+* The extra ships the API only. With it and no SDK, `get_tracer` returns a
+  `ProxyTracer` whose spans are `NonRecordingSpan` and `get_meter` returns
+  a proxy meter: every call succeeds and nothing is recorded. That is
+  silent enough to mislead, so it is stated in this spec and in the guide.
+* For G4, the adapter is tested against fakes as the gate asks, and also
+  against the real API through the SDK's in-memory span exporter and metric
+  reader, which export nothing off the process. Two things the fakes could
+  not have taught: the in-memory metric reader lives at
+  `opentelemetry.sdk.metrics.export`, and ending a span twice raises
+  nothing, only logs, so the adapter keeps its open spans and never ends
+  one twice. For that, `opentelemetry-sdk` becomes a development dependency.
+* The CI lanes install the `otel` extra so the adapter's tests run there;
+  the owner's lane is kept equal to the public one, and the change is said
+  to the owner.
+====
 
 Links: ADR-008; ADR-012; SPEC-012; SPEC-020.
