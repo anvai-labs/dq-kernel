@@ -32,7 +32,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install Poetry
-        run: pip install poetry==2.4.2
+        run: pip install poetry==2.5.2
       - name: Check lock file matches pyproject
         run: poetry check --lock
       - name: Install dependencies
@@ -87,7 +87,7 @@ jobs:
           distribution: temurin
           java-version: "17"
       - name: Install Poetry
-        run: pip install poetry==2.4.2
+        run: pip install poetry==2.5.2
       # Every extra with tests installs here: the lock resolves one version per
       # package for the union of extras, so they are co-installable. The dqx
       # extra carries a Python <3.13 marker; Poetry skips it on the 3.13 job
@@ -199,7 +199,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install Poetry
-        run: pip install poetry==2.4.2
+        run: pip install poetry==2.5.2
       - name: Build package
         run: poetry build
       - name: Verify the published rule-pack schema ships in the wheel

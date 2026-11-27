@@ -71,7 +71,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install Poetry
-        run: pip install poetry==2.4.2
+        run: pip install poetry==2.5.2
 
       - name: Install dependencies
         run: poetry install --with dev
@@ -137,7 +137,7 @@ jobs:
           java-version: "17"
 
       - name: Install Poetry
-        run: pip install poetry==2.4.2
+        run: pip install poetry==2.5.2
 
       # Every extra with tests installs here, as in the public lane: the lock
       # resolves one version per package for the union of extras, so they are
@@ -253,7 +253,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install Poetry
-        run: pip install poetry==2.4.2
+        run: pip install poetry==2.5.2
 
       - name: Build package
         run: poetry build
