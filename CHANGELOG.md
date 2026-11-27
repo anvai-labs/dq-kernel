@@ -135,6 +135,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PostgreSQL when `DQ_TEST_POSTGRES_URL` names one
 - `examples/durable_evidence.conf`, and a "Durable SQL sink" section in the
   operator reference
+- **Arrow compute adapter** (SPEC-015, ADR-010, ADR-014):
+  `dq.arrow_adapter` executes counts/v1, groups/v1 and ranges/v1 plans over
+  Arrow tables and hands the values to the kernel's own evaluation, so a
+  decision is made in one place whichever engine computed. It accepts a
+  pyarrow table, a record batch, anything that exports Arrow's stream
+  interface (Polars, DataFusion, pandas 2.2 and later), a DataFusion frame's
+  `to_arrow_table()`, a pandas DataFrame, or a Spark DataFrame through its
+  Arrow export, and imports no library but pyarrow. It computes what the
+  Spark adapter computes: the same semantic corpus, and on real Spark the
+  two agree on every metric, decision and refusal. A column is brought to a
+  form Arrow can compute on before it is measured, each step lossless.
+  Dictionary-encoded columns are decoded: undecoded, a float column's type
+  says `dictionary` and a present count cannot tell that a NaN is in it.
+  Polars' `string_view` strings become strings; half and single floats are
+  widened to double, where adding `0.0` also makes a signed zero one value,
+  as Spark counts it; `decimal32` and `decimal64` become `decimal128`. What
+  Arrow cannot compute on -- a list or a struct -- is refused, naming the
+  dataset, the column and the metric
+- A portable rule chooses its compute. `adapter = "arrow"` runs its plan on
+  the Arrow adapter, inside the Spark facade or with no Spark at all; the
+  key is `spark` when absent, and any other value is refused before data is
+  read
+- **A Spark-free runner** (ADR-014): `dq.runner.run(rule_pack, {name: path},
+  report=...)` and the `dq-run` command read datasets with pyarrow --
+  Parquet, Arrow IPC, CSV and newline-delimited JSON by a file's extension,
+  a directory as the dataset it holds -- and run portable rules on Arrow
+  through the same run core as the Spark facade, gate policy, observers and
+  notifiers included: `dq-run rules.conf --dataset orders=orders.parquet
+  --report report.json`. No Spark session and no sink: the evidence is a
+  `dq-report/v1` document with `runtime.spark` null. Everything a run over
+  files cannot do is refused before a dataset is read and all at once: a
+  rule that needs Spark, a portable rule that does not name the Arrow
+  adapter, a configured sink, a dataset missing, unused, remote or
+  unreadable
+- The run core, `dq.run.run_rules`, extracted from `DQFramework.run()`: the
+  rule loop, outcome normalization, the gate policy, notifiers and observers
+  in one place for every runner. `DQFramework` keeps its signature and its
+  outcomes
+- `dq.compute_support`: what every compute adapter shares -- which metric
+  kinds each semantic version defines, the exact-column and exact-fraction
+  refusals, the order a plan's datasets and groupings are visited, and a
+  plan's execution (validate, check the bindings, compute, evaluate) -- so
+  adapters cannot drift apart in what they accept or in what they say. A new
+  compute adapter is three callables and one entry in `ADAPTER_MODULES`
+- `examples/arrow_rule.conf`, one rule per semantic version for `dq-run`,
+  and a "Running over files, without Spark" section in the operator
+  reference, whose Python is run by a test
+- `polars` and `datafusion` as development dependencies, so the interchange
+  tests run in CI instead of skipping
 
 ### Changed
 
@@ -265,6 +314,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/index.adoc` links the tracker instead of a hand-maintained list of
   specs, lists ADR-011 through ADR-015, and no longer links two review
   files in a `docs/reviews/` directory that does not exist
+- The shared semantic corpus has 24 cases instead of 19: the two signed-zero
+  cases (as a value and as a grouping key), an empty ranges input, a `-0.0`
+  bound that is zero, and boolean bounds. Each was verified on a real Spark
+  session before it was written
+- A portable rule reads an optional `adapter` key (`spark`, the default, or
+  `arrow`)
+- The SQL sink reads a frame's rows through `dq.arrow_adapter.table_of`, the
+  one place that knows how to get an Arrow table out of a frame. What it
+  stores is unchanged
 
 ### Fixed
 
@@ -280,6 +338,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check names. Two expectations GX treats as the same (one type and
   arguments) are refused when the suite is built: GX silently ran only one
   of them, and the engine then failed with a bare `zip` length error
+- `examples/portable_rule.conf` no longer translated: its size check was
+  written as `min = 1`, which the translator refuses. It is repaired, and a
+  test now runs it. `docs/index.adoc` said the `build` check was not yet
+  required and that numeric ranges were outside the portable translator;
+  both statements were out of date
 
 ## [0.3.0] - 2026-11-24
 

@@ -32,6 +32,10 @@ Add `aws` for Glue/S3 support, `databricks` for the Databricks SDK integration, 
 Add `sqlalchemy` for the durable SQL sink and `arrow` for its Arrow path; neither is imported
 until a SQL sink is configured.
 
+Portable rules also run without Spark at all, over Arrow tables and files: `pip install
+'dq-kernel[arrow]'` needs neither Java nor a Spark runtime. See
+xref:#running-over-files[Running over files, without Spark].
+
 == Architecture
 
 image::framework-overview.png[Framework components]
@@ -194,9 +198,9 @@ the runtime; the framework does not embed them.
 
 == Engines
 
-Non-Spark compute (pandas, Polars, Arrow/DataFusion, SQLAlchemy/DuckDB)
-rides the same plugin contract -- see
-xref:compute-engines.adoc[Compute engines beyond Spark] for the vendor
+Non-Spark compute rides the same plugin contract, and the portable kernel's own semantics
+run over Arrow with no Spark session -- pandas, Polars and DataFusion frames included. See
+xref:compute-engines.adoc[Compute engines beyond Spark] for the Arrow adapter, the vendor
 support matrix and engine recipes.
 
 === Deequ
@@ -296,10 +300,18 @@ counts/v1 excludes floating-point NaN from present counts while Deequ's
 completeness counts it, so NaN-bearing columns can pass in PyDeequ and fail
 natively past thresholds between the two ratios. On empty inputs both engines
 fail completeness. Snapshot digests remain caller-certified.
-`dq.portable_config` translates exactly representable HOCON
-count rules and fails closed on everything else. Numeric ranges, uniqueness,
-schema, regex, clocks/timezones, durable admission and DataFusion remain
-outside this slice.
+
+`dq.portable_config` translates exactly representable HOCON rules --
+`isComplete`, `hasCompleteness`, `hasSize`, `DistinctnessByGroup`,
+`isNonNegative` and `isInRange` -- and fails closed on everything else: the
+check is never approximated and never silently swapped for another engine.
+Uniqueness, schema, regex and clocks/timezones remain outside it.
+
+A plan runs on the compute a rule names. `adapter = "spark"`, the default, runs it on
+Spark; `adapter = "arrow"` runs it on the Arrow adapter, inside the Spark facade or with no
+Spark at all. Any other value is refused before data is read. Both adapters are held to the
+same semantic corpus, and xref:#running-over-files[the runner] executes the same run core as
+the facade.
 
 Outcomes carry the rule ID, exact numerator/denominator, semantic version, logical
 plan digest and adapter declaration. `build_report` accepts these outcomes, but
@@ -428,7 +440,8 @@ With the `arrow` extra installed, a Spark DataFrame's rows are read through Arro
 has no public export, so its `_collect_as_arrow` is used when it is there), and a pyarrow table,
 or anything that exports the Arrow stream interface (Polars, pandas, DuckDB, DataFusion), is
 read directly. Otherwise the frame's own rows are read. Either way the stored payload is the
-same. `arrow = false` turns it off.
+same. `arrow = false` turns it off. How a frame is read is known in one place,
+`dq.arrow_adapter.table_of`, which every Arrow reader shares.
 
 Install with `pip install dq-kernel[sqlalchemy]`, adding `[arrow]` for the Arrow path.
 
@@ -553,6 +566,114 @@ trace.set_tracer_provider(TracerProvider())  # and your exporter
 Until providers are configured, OpenTelemetry's own proxies accept every
 call and record nothing. An `otel` observer with no SDK behind it is silent,
 not failing.
+
+[[running-over-files]]
+== Running over files, without Spark
+
+The Spark facade needs a session. Most teams outside a lakehouse have none, so the same run
+core -- the rule loop, the outcome boundary, the gate policy, the observers and the
+notifiers -- also binds to files read with Arrow, and writes the same `dq-report/v1`. Nothing
+is written to a sink: the report is the evidence.
+
+Install the path with the `arrow` extra, which brings pyarrow and needs neither Java nor Spark:
+
+[source,shell]
+----
+pip install 'dq-kernel[arrow]'
+----
+
+A portable rule opts in by naming the adapter. The shipped example runs one rule per semantic
+version over one file:
+
+[source,hocon]
+----
+include::../examples/arrow_rule.conf[]
+----
+
+Name each dataset the rules use and where it is, and where the report goes:
+
+[source,shell]
+----
+dq-run examples/arrow_rule.conf --dataset orders=orders.parquet --report report.json
+----
+
+`--dataset` takes `NAME=PATH` and is repeated for each dataset. A file is read by its
+extension: `.parquet` and `.pq`, `.arrow`, `.feather` and `.ipc`, `.csv`, `.json` and
+`.ndjson`; a directory is read as the dataset pyarrow finds in it. Parquet and Arrow IPC keep
+every type. A CSV keeps none -- pyarrow decides each column's type, a decimal becomes a double,
+and a NaN reads back as null -- and JSON must be newline-delimited. Each dataset is read whole
+into memory: a run over files is for data that fits in one process. The command prints a
+summary and exits 0 when the gate passed, 1 when it failed, and 2 when the rule pack cannot be
+run as given or a dependency is missing.
+
+The same run is a function call:
+
+[source,python]
+----
+from dq.runner import run
+
+result = run("examples/arrow_rule.conf", {"orders": "orders.parquet"}, report="report.json")
+result.decision.passed
+----
+
+=== What is refused, and when
+
+The runner does not substitute anything. Each of these is refused before a dataset is read,
+and all of them are reported at once:
+
+* a rule whose engine is not `portable`: it needs Spark, and the `dq-kernel` command runs it;
+* a portable rule that does not say `adapter = "arrow"`, one that names `spark` included;
+* `dqframework.repository`: a sink that is configured and never written would hold no evidence;
+* a dataset a rule needs that was not given, one that is given and no rule uses, one that is
+  remote, absent, or of an extension no reader knows.
+
+Two refusals come while reading: a file pyarrow cannot read, and one with no column in it.
+
+=== What the report says it is about
+
+The report's dataset is named and digested by what the rule pack says, never worked out from
+the files. The name is `dqframework.dataset`, or the one dataset the rules run on; a run over
+several datasets must say which one its evidence is about. The digest is the `snapshot_sha256`
+the rules certify for that dataset, and the rules on one dataset must agree on it. The report's
+`runtime.spark` is null and its `application_id` is `dq-run`.
+
+=== From Python, over any Arrow table
+
+`dq.arrow_adapter` takes a pyarrow table, a record batch, anything that exports Arrow's stream
+interface (a Polars, DataFusion or pandas frame), or a Spark DataFrame through its Arrow
+export, and imports no library but pyarrow. The frame is bound under the name the plan's
+dataset has:
+
+[source,python]
+----
+import decimal
+
+import polars as pl
+
+from dq.arrow_adapter import execute_plan
+from dq.sdk.fixtures import DATASET_NAME, build_plan, load_cases
+
+case = load_cases()[0]  # dataset "ds": columns id, score, amount
+plan = build_plan(case)
+frame = pl.DataFrame(
+    {
+        "id": ["a", None, "c", None, "b"],
+        "score": [1.5, float("nan"), None, 2.0, 3.0],
+        "amount": pl.Series(
+            [None, None, decimal.Decimal("3.50"), None, decimal.Decimal("2.00")],
+            dtype=pl.Decimal(10, 2),
+        ),
+    }
+)
+outcomes = execute_plan(plan, {DATASET_NAME: frame})
+[(outcome.to_legacy()["check"], outcome.success) for outcome in outcomes]
+----
+
+The frame needs every column its plan's rules name, and names it exactly; the first corpus case
+is a counts/v1 plan over `id`, `score` and `amount`.
+
+xref:compute-engines.adoc[Compute engines beyond Spark] lists the routes, what is done to a
+column before it is measured, and what is refused.
 
 [[importing-evidence]]
 == Importing evidence
@@ -742,6 +863,7 @@ dq-validate file:///absolute/path/config.conf --format json
 dq-engines --format json
 dq-import examples/import/run_results.json --dataset-id orders \
     --dataset-sha256 <64 hex digits> --report-json evidence.json
+dq-run examples/arrow_rule.conf --dataset orders=orders.parquet --report report.json
 ----
 
 `dq-kernel` creates a Spark session, runs the configured checks, prints a summary, and exits
@@ -756,7 +878,9 @@ Every checked-in example is validated in CI.
 entry-point, with each engine's capability manifest and, for an engine whose
 optional dependency is missing, how to install it. `dq-import` reads another
 tool's results as evidence and needs no Spark session: see
-xref:#importing-evidence[Importing evidence]. `DQ_LOG_FORMAT=json` makes a run
+xref:#importing-evidence[Importing evidence]. `dq-run` runs a rule pack over files with
+Arrow and needs no Spark session either: see
+xref:#running-over-files[Running over files, without Spark]. `DQ_LOG_FORMAT=json` makes a run
 log JSON lines: see xref:#observing-a-run[Observing a run].
 
 === Gate policy
@@ -838,9 +962,10 @@ The coverage floors are a ratchet, kept a few points under what CI measures, so 
 fails the build. They stood at 55, 57 and 46 from the first release while coverage rose past 93,
 where they could not fail.
 
-The fail-closed aggregate job, `build`, is the one to require in branch protection. That is a
-repository setting: the workflows cannot switch it on, and until it is, a red `build` does not by
-itself stop a merge.
+The fail-closed aggregate job, `build`, is the check `main`'s branch protection requires:
+changes reach `main` by pull request only, and a red `build` stops the merge. Every compute
+adapter is held to the same semantic corpus, and the Arrow adapter is measured against the
+Spark adapter on real Spark.
 
 The owner path runs only after immutable owner/repository checks and environment approval on
 self-hosted capacity. Other pull requests stay on GitHub-hosted runners.

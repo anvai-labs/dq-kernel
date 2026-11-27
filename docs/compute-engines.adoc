@@ -50,11 +50,11 @@ Vendor support today (verified against the installed distributions):
 
 | portable kernel (`portable` engine)
 | yes (Spark adapter)
-| planned (ADR-010 Arrow engine)
-| planned
-| planned
-| no
-| no
+| yes (Arrow adapter, through interchange)
+| yes (Arrow adapter, through interchange)
+| yes (Arrow adapter, through interchange)
+| no (SPEC-016)
+| no (SPEC-016)
 |===
 
 GX has no Polars or DataFusion datasource (zero references in its
@@ -62,11 +62,128 @@ distribution); pandas and SQL are its two non-Spark execution engines.
 DuckDB is not a named GX datasource but works through the generic
 SQLAlchemy path.
 
-== Recipe: a pandas/Arrow engine on the plugin contract
+== The Arrow adapter
 
-A minimal non-Spark engine -- drop-in under `dq/engine/<name>/` or an
-external distribution registering the `dq_kernel.engines` entry-point
-group:
+The portable kernel's plans run over an Arrow table with no Spark at all:
+`dq.arrow_adapter` computes a plan's metrics and hands them to the kernel's
+own evaluation (`dq.plan`), so a decision is made in one place whichever
+engine computed. A rule opts in by naming the adapter:
+
+[source,hocon]
+----
+{ name = "orders_complete"
+  engine = "portable"
+  dataframes = ["orders"]
+  dataset = "orders"
+  snapshot_sha256 = "<64 hex digits>"
+  adapter = "arrow"
+  plan = [ { constraint = "isComplete", constraint_name = "id_complete", column = "id", level = "Error" } ] }
+----
+
+`adapter` is `spark` when absent. Any other value is refused before data is
+read.
+
+The adapter computes what the Spark adapter computes. The same semantic
+corpus runs through both, and on real Spark the two agree on every metric,
+every decision and every refusal. Where Arrow differs from Spark by
+construction, the adapter does the work: Arrow counts `0.0` and `-0.0` as
+two distinct values where Spark counts one, so a signed zero is made one
+value before anything is counted.
+
+Its surface is the Spark adapter's -- `capabilities_for`, `execute_plan`,
+`execute_envelope` and `compute_plan_values` -- and what the two share
+lives once, in `dq.compute_support`: which metric kinds each semantic
+version defines, the exact-column and exact-fraction refusals, the order a
+plan's datasets and groupings are visited, and the plan's execution
+itself. A new compute adapter is three callables around that
+(`dq.compute_support.ComputeAdapter`) and one entry in
+`dq.compute_support.ADAPTER_MODULES`; the SQL adapter (SPEC-016) is the
+next.
+
+=== What a dataset can be
+
+Read, in this order, each found by name on the object, so that no library
+but pyarrow is imported (`dq.arrow_adapter.table_of`):
+
+* a pyarrow table, as it is;
+* a record batch, or a reader of record batches;
+* a Spark DataFrame, through the export it has: `toArrow()` on Spark Connect
+  and PySpark 4, the private `_collect_as_arrow()` on classic PySpark 3.5.
+  An empty frame exports no batch, so its table is built from the frame's
+  column names with no row in it;
+* an object with `__arrow_c_stream__`, Arrow's stream interface: Polars,
+  DataFusion, pandas 2.2 and later. A Polars `LazyFrame` offers nothing and
+  must be collected first;
+* an object with `to_arrow_table()`: DataFusion;
+* a pandas DataFrame, through pyarrow's own conversion. A pandas index that
+  is not the plain range index becomes a column, as pyarrow makes it.
+
+A binding that is none of these is refused by its type.
+
+=== What is done to a column before it is measured
+
+"It is an Arrow column" is not yet "Arrow can compute on it", and the gaps
+differ by type and by pyarrow version. Before a column is measured it is
+brought to the form every kernel is written for, each step lossless:
+
+* a dictionary-encoded column -- which `pq.read_table` returns for a column
+  stored that way -- is decoded. Its type says `dictionary`, not `double`:
+  undecoded, a present count cannot tell that a NaN is in it;
+* a `string_view` column -- how Polars hands over its strings -- becomes
+  `string`;
+* a half- or single-precision float is widened to double, and `0.0` is
+  added, which makes a signed zero one value;
+* `decimal32` and `decimal64` are widened to `decimal128`;
+* a null-typed column is given a type: Arrow counts an all-null column of
+  the null type as one distinct value, and Spark counts none.
+
+A list, a struct or a map is neither countable distinct nor a bound. Arrow
+has no kernel for it, and the adapter refuses with a `ConfigurationError`
+that names the dataset, the column and the metric. Nothing is approximated.
+
+== The Spark-free runner
+
+`dq.runner` binds the one run core (`dq.run`) to files read with pyarrow:
+the gate policy, the observers and the notifiers of the rule pack all
+apply, with no Spark session and no sink. Its evidence is a `dq-report/v1`
+document.
+
+[source,shell]
+----
+pip install 'dq-kernel[arrow]'
+dq-run examples/arrow_rule.conf --dataset orders=orders.parquet --report report.json
+----
+
+[source,python]
+----
+from dq.runner import run
+
+result = run("rules.conf", {"orders": "orders.parquet"}, report="report.json")
+result.decision.passed
+----
+
+A file is read by its extension: `.parquet` and `.pq`, `.arrow`, `.feather`
+and `.ipc`, `.csv`, `.json` and `.ndjson`; a directory as the dataset
+pyarrow finds in it. Parquet and Arrow IPC keep every type. A CSV keeps
+none: pyarrow decides each column's type, a decimal becomes a double, and a
+NaN reads back as null. JSON must be newline-delimited, and its types are
+told the same way.
+
+The runner does not substitute, and refuses before it reads a dataset:
+a rule with another engine, a portable rule that does not name
+`adapter = "arrow"` (one naming `spark` included), a configured sink, and a
+dataset that is missing, unused, remote, absent or of a format no reader
+knows. The operator reference (xref:index.adoc[Data Quality Framework reference],
+"Running over files, without Spark") has the details.
+
+== Recipe: a non-Spark engine on the plugin contract
+
+The Arrow adapter is the supported way to run the kernel's semantics
+without Spark. An engine of another vocabulary -- one that evaluates its
+own predicates over a frame -- still follows the same skeleton: subclass
+`DQEngine`, declare `CAPABILITIES` honestly, and implement the two hooks.
+A minimal one, drop-in under `dq/engine/<name>/` or an external
+distribution registering the `dq_kernel.engines` entry-point group:
 
 [source,python]
 ----
@@ -123,9 +240,7 @@ dq_kernel.engines =
 
 Everything else -- loading, the log preamble, capability-guarded
 persistence, `dq-report/v1` evidence, gate events with the severity
-split -- comes from the contract. The same skeleton carries an
-Arrow/DataFusion engine (ADR-010): replace the predicate evaluation
-with plan compilation; keep `CAPABILITIES` honest.
+split -- comes from the contract.
 
 == Recipe: SQLAlchemy / DuckDB through GX
 
@@ -161,18 +276,50 @@ def _execute(self, dataframe, prepared):
 Postgres/SQLite/DuckDB/Snowflake all resolve through the SQLAlchemy
 URL; the duckdb-engine dialect package provides the DuckDB driver.
 
-== Recipe: pandas/Polars today without a new engine
+== pandas and Polars with the portable semantics
 
-Until a native pandas engine lands, the same validation semantics are
-reachable two ways:
+For the kernel's own semantics, a pandas or a Polars frame needs no engine
+of its own: it is handed to the Arrow adapter as it is. The frame needs
+every column its plan's rules name, and names it exactly:
 
-* *Portable plans*: convert the frame to Spark for the run (or wait for
-  the ADR-010 Arrow adapter, which will consume the identical plan) --
-  plans are compute-agnostic by construction and carry
-  `counts/v1`-`ranges/v1` semantics with fingerprints.
-* *SQL pushdown*: materialize the frame into DuckDB/SQLite and run the
-  GX-SQL recipe above; the `greatexpectations` engine payload
-  (`expectations`) is datasource-neutral.
+[source,python]
+----
+from decimal import Decimal
+
+import polars as pl
+
+from dq.arrow_adapter import execute_plan
+from dq.plan import (
+    ColumnRef,
+    Comparison,
+    DatasetRef,
+    ExecutionPlan,
+    Predicate,
+    RuleKind,
+    RuleSpec,
+)
+
+dataset = DatasetRef("orders", "a" * 64)  # the snapshot the rule was certified for
+plan = ExecutionPlan(
+    (
+        RuleSpec(
+            "id_complete",
+            dataset,
+            RuleKind.COMPLETENESS,
+            Predicate(Comparison.EQ, Decimal(1)),
+            ColumnRef("id"),
+        ),
+    )
+)
+frame = pl.DataFrame({"region": ["east", "east", "west"], "id": ["a", None, "a"]})
+(outcome,) = execute_plan(plan, {"orders": frame})
+----
+
+The outcome is the kernel's, whichever adapter computed it:
+`outcome.to_legacy()["details"]["adapter"]` says `{"name": "arrow", "version": "1"}`.
+
+The operator reference (xref:index.adoc[], "Portable count plans") describes
+the rules and the vocabulary.
 
 == What deliberately does not exist
 
@@ -180,7 +327,9 @@ reachable two ways:
   vocabularies native; only identity/severity cross the seam).
 * No automatic translation of vendor rules into portable plans
   (ADR-002); the fail-closed translator accepts the documented subset.
-* No non-Spark persistence impls yet: `OutcomeSink` is
-  signature-polymorphic, but the built-in sinks are Spark-bound
-  (`RepositorySink.save` uses `withColumn`). An Arrow-native sink is
-  part of the ADR-010 gated follow-up behind differential fixtures.
+* No persistence from a Spark-free run. The built-in sinks read a Spark
+  DataFrame -- `RepositorySink` through its own rows, the SQL sink through
+  its Arrow export -- so a run over files writes its evidence as a report
+  and refuses a configured sink rather than leave it unwritten.
+* No SQL adapter yet: `adapter = "sql"` over a SQLAlchemy connection is
+  SPEC-016.

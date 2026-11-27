@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 219 raise sites across the modules below; the contract
+The framework raises 233 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -90,16 +90,90 @@ the evidence store refused an unsafe write; `HarvestError` is a
 
 == dq/spark_adapter.py
 
-*Content:* 8 `ConfigurationError` sites.
+*Content:* 2 `ConfigurationError` sites.
 
-* Cause: bindings do not exactly match plan datasets, bound objects are not
-  Spark DataFrames, or columns fail exact case-sensitive resolution
-  (including duplicates and case-insensitive collisions); infinite range
-  bounds fail closed; `execute_envelope` is handed a bare plan instead of a
-  `RulesetEnvelope`.
-* Fix: align binding names with the plan, pass DataFrames, and use the
-  exact column casing listed in the error; execute single-semantics plans
-  with `execute_plan`.
+* Cause: dataset bindings are not a mapping, or a bound object is not a
+  Spark DataFrame. Everything else a plan can get wrong -- bindings that do
+  not exactly match the plan's datasets, a bare plan handed to
+  `execute_envelope`, a missing or ambiguous column, an infinite bound -- is
+  refused by `dq/compute_support.py`, which every adapter shares.
+* Fix: pass a mapping of dataset names to DataFrames.
+
+== dq/arrow_adapter.py
+
+*Content:* 3 `ConfigurationError` sites.
+
+The Arrow compute adapter (SPEC-015): portable plans over Arrow tables.
+
+* Cause: dataset bindings are not a mapping, do not name exactly the plan's
+  datasets, or hold something Arrow cannot read -- not a pyarrow table, a
+  record batch, an object exporting Arrow's stream interface (Polars,
+  DataFusion, pandas), or a Spark DataFrame. Or Arrow has no kernel for what
+  a plan asks of a column: a list or a struct has no distinct count and no
+  bound, and the message names the dataset, the column and the metric.
+* Fix: bind each dataset to an Arrow table or to an object that exports one;
+  for a nested column, measure a column that holds values, or encode it
+  first. The refusals every adapter shares are listed under
+  `dq/compute_support.py`. Without pyarrow installed the adapter names the
+  `arrow` extra instead, before any dataset is read.
+
+== dq/compute_support.py
+
+*Content:* 7 `ConfigurationError` sites.
+
+What every compute adapter shares (ADR-010, ADR-014): the order of a plan's
+execution, resolving a column by exact name, and converting a bound to an
+exact fraction.
+
+* Cause: a portable rule names an `adapter` that does not exist; bindings do
+  not exactly match the plan's datasets (a dataset is missing, or a binding
+  names one the plan does not require); `execute_envelope` is handed a bare
+  plan instead of a `RulesetEnvelope`; a plan names a column that the
+  dataset does not have exactly -- and the message lists the columns it
+  does have -- or that is ambiguous: a duplicate, or one of two columns
+  whose names differ only in case; or a range bound is infinite or of a
+  type with no exact fraction.
+* Fix: name an adapter the message lists (`spark` or `arrow`); align binding
+  names with the plan; execute single-semantics plans with `execute_plan`;
+  use the column's exact casing; give one of two colliding columns a
+  distinct name in the dataset; and keep `Infinity` out of a column a
+  ranges/v1 rule measures.
+
+== dq/runner.py
+
+*Content:* 10 `ConfigurationError` sites.
+
+The Spark-free runner and the `dq-run` command (SPEC-015): a rule pack over
+files, with the portable engine on the Arrow adapter.
+
+* Cause: the rule pack is not a local file, or its datasets are missing,
+  remote, absent or of a format no reader knows. Or what the pack asks for
+  cannot be done without Spark: a rule with another engine, a portable rule
+  that does not name `adapter = "arrow"`, or a configured sink (a run over
+  files does not persist; its evidence is the report). Or the report cannot
+  say what it is about: no rule names its dataset and digest, rules on one
+  dataset certify two snapshots, `dqframework.dataset` is not a name, or
+  several datasets are run and it names none of them. All of these are
+  raised before a dataset is read. Two are raised in reading: a file pyarrow
+  cannot read, or one with no column in it.
+* Fix: give a local rule pack and a `--dataset name=path` for exactly the
+  datasets the rules name; keep `adapter = "arrow"` on every portable rule
+  and move the others to the `dq-kernel` command; remove
+  `dqframework.repository`; give every rule on a dataset one
+  `snapshot_sha256`. Without pyarrow installed the runner names the `arrow`
+  extra instead.
+
+== dq/run.py
+
+*Content:* 1 `ValidationError` site.
+
+The one run core (ADR-014).
+
+* Cause: a run produced more outcomes, or a larger serialized batch, than it
+  is allowed to (`dq.outcomes.MAX_OUTCOMES`, `MAX_BATCH_BYTES`). Evidence
+  that cannot be bounded cannot be certified, so the run is refused.
+* Fix: split the rule pack, or the dataset, so that one run stays within the
+  bounds.
 
 == dq/cdf_adapter.py
 

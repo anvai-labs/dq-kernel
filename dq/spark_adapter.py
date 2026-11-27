@@ -20,6 +20,18 @@ from collections.abc import Mapping
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
+from dq.compute_support import ComputeAdapter
+from dq.compute_support import as_exact_fraction as _as_exact_fraction
+from dq.compute_support import capability_sets
+from dq.compute_support import (
+    execute_envelope_with,
+    execute_plan_with,
+    metrics_by_grouping,
+    metrics_of,
+    require_exact_bindings,
+    require_exact_column,
+    values_by_dataset,
+)
 from dq.exceptions import ConfigurationError
 from dq.outcomes import CheckOutcome
 from dq.plan import (
@@ -28,6 +40,7 @@ from dq.plan import (
     MetricKind,
     SEMANTIC_GROUPS_VERSION,
     SEMANTIC_RANGES_VERSION,
+    SEMANTICS_VERSION,
 )
 
 if TYPE_CHECKING:
@@ -35,37 +48,12 @@ if TYPE_CHECKING:
 
 ADAPTER_NAME = "spark"
 ADAPTER_VERSION = "1"
-CAPABILITIES = CapabilitySet(
-    ADAPTER_NAME,
-    ADAPTER_VERSION,
-    frozenset({MetricKind.ROW_COUNT, MetricKind.PRESENT_COUNT}),
-)
-GROUP_CAPABILITIES = CapabilitySet(
-    ADAPTER_NAME,
-    ADAPTER_VERSION,
-    frozenset(
-        {
-            MetricKind.GROUP_COUNT,
-            MetricKind.GROUP_MIN_DISTINCT,
-            MetricKind.GROUP_MAX_DISTINCT,
-        }
-    ),
-    SEMANTIC_GROUPS_VERSION,
-)
-RANGES_CAPABILITIES = CapabilitySet(
-    ADAPTER_NAME,
-    ADAPTER_VERSION,
-    frozenset(
-        {
-            MetricKind.COLUMN_COUNT,
-            MetricKind.COLUMN_MIN,
-            MetricKind.COLUMN_MAX,
-        }
-    ),
-    SEMANTIC_RANGES_VERSION,
-)
-
-_MAX_LISTED_COLUMNS = 8
+_SETS = capability_sets(ADAPTER_NAME, ADAPTER_VERSION)
+#: What this adapter can compute for each semantic version. These names are
+#: what ``capabilities_for`` reads, so a caller can narrow one for a test.
+CAPABILITIES = _SETS[SEMANTICS_VERSION]
+GROUP_CAPABILITIES = _SETS[SEMANTIC_GROUPS_VERSION]
+RANGES_CAPABILITIES = _SETS[SEMANTIC_RANGES_VERSION]
 
 
 def capabilities_for(plan: ExecutionPlan) -> CapabilitySet:
@@ -84,11 +72,7 @@ def execute_plan(
     plan: ExecutionPlan, datasets: Mapping[str, DataFrame]
 ) -> tuple[CheckOutcome, ...]:
     """Compute the plan's metrics with Spark and evaluate exact outcomes."""
-    capabilities = _capabilities_for(plan)
-    plan.validate_for(capabilities)
-    bindings = _validated_bindings(plan, datasets)
-    values = compute_plan_values(plan, bindings)
-    return plan.evaluate(values, capabilities)
+    return execute_plan_with(plan, datasets, _ADAPTER)
 
 
 def execute_envelope(
@@ -96,40 +80,21 @@ def execute_envelope(
 ) -> tuple[CheckOutcome, ...]:
     """Execute every subplan of a :class:`RulesetEnvelope` with Spark.
 
-    Mixed-semantics rulesets get one entry point: each subplan's metrics are
-    computed with its own semantics and capabilities, and the envelope
-    dispatches evaluation into one aggregate verdict (ADR-004/005).
+    Mixed-semantics rulesets get one entry point, as for every adapter
+    (:func:`dq.compute_support.execute_envelope_with`).
     """
-    from dq.envelope import RulesetEnvelope
-
-    if not isinstance(envelope, RulesetEnvelope):
-        raise ConfigurationError(
-            "execute_envelope requires a RulesetEnvelope, not a bare plan; "
-            "use execute_plan for single-semantics execution"
-        )
-    capabilities_by_version = {}
-    values = {}
-    for plan in envelope.plans:
-        capabilities = _capabilities_for(plan)
-        plan.validate_for(capabilities)
-        capabilities_by_version.setdefault(plan.semantic_version, capabilities)
-        bindings = _validated_bindings(plan, datasets)
-        values.update(compute_plan_values(plan, bindings))
-    return tuple(envelope.evaluate(values, capabilities_by_version))
+    return execute_envelope_with(envelope, datasets, _ADAPTER)
 
 
 def compute_plan_values(plan: ExecutionPlan, bindings: dict) -> dict:
     """Compute every plan metric over the bound DataFrames."""
-
-    values = {}
-    for name in sorted(bindings):
-        if plan.semantic_version == SEMANTIC_GROUPS_VERSION:
-            values.update(_dataset_group_metrics(name, bindings[name], plan))
-        elif plan.semantic_version == SEMANTIC_RANGES_VERSION:
-            values.update(_dataset_range_metrics(name, bindings[name], plan))
-        else:
-            values.update(_dataset_counts(name, bindings[name], plan))
-    return values
+    return values_by_dataset(
+        plan,
+        bindings,
+        _dataset_counts,
+        _dataset_group_metrics,
+        _dataset_range_metrics,
+    )
 
 
 def _validated_bindings(plan: ExecutionPlan, datasets) -> dict[str, DataFrame]:
@@ -138,18 +103,7 @@ def _validated_bindings(plan: ExecutionPlan, datasets) -> dict[str, DataFrame]:
             "dataset bindings require a mapping of dataset names to DataFrames"
         )
     bindings = dict(datasets)
-    expected = {metric.dataset.name for metric in plan.metrics}
-    missing = sorted(expected - set(bindings))
-    unknown = sorted(set(bindings) - expected)
-    if missing or unknown:
-        detail = []
-        if missing:
-            detail.append(f"missing {missing}")
-        if unknown:
-            detail.append(f"unknown {unknown}")
-        raise ConfigurationError(
-            "dataset bindings must exactly match plan datasets: " + "; ".join(detail)
-        )
+    require_exact_bindings((metric.dataset.name for metric in plan.metrics), bindings)
     from pyspark.sql import DataFrame
 
     for name, dataframe in bindings.items():
@@ -161,33 +115,21 @@ def _validated_bindings(plan: ExecutionPlan, datasets) -> dict[str, DataFrame]:
 
 
 def _require_exact_column(dataframe, name: str, column: str):
-    """Resolve one column by exact name, rejecting ambiguity, and return it."""
+    """Resolve one column by exact name, rejecting ambiguity, and return its field."""
     fields = dataframe.schema.fields
-    fields_by_name = {field.name: field for field in fields}
-    field = fields_by_name.get(column)
-    if field is None:
-        available = ", ".join(sorted(fields_by_name)[:_MAX_LISTED_COLUMNS])
-        raise ConfigurationError(
-            f"column {column!r} in dataset {name!r} requires an exact "
-            f"case-sensitive match; available columns: {available}"
-        )
-    duplicates = any(other is not field and other.name == column for other in fields)
-    if duplicates or any(
-        other.lower() == column.lower() for other in fields_by_name if other != column
-    ):
-        raise ConfigurationError(
-            f"column {column!r} in dataset {name!r} is ambiguous: duplicate or "
-            "case-insensitive colliding fields cannot be resolved"
-        )
-    return field
+    return require_exact_column(
+        name,
+        column,
+        [field.name for field in fields],
+        {field.name: field for field in fields},
+    )
 
 
 def _dataset_counts(name: str, dataframe, plan: ExecutionPlan) -> dict:
     from pyspark.sql import functions as F
     from pyspark.sql.types import DoubleType, FloatType
 
-    metrics = [metric for metric in plan.metrics if metric.dataset.name == name]
-
+    metrics = metrics_of(plan, name)
     aggregates = [F.count(F.lit(1)).alias("dq_row_count")]
     aliases = {}
     for index, metric in enumerate(metrics):
@@ -227,16 +169,8 @@ def _dataset_group_metrics(name: str, dataframe, plan: ExecutionPlan) -> dict:
     # without a JVM (see test_kernel_imports_without_optional_dependencies).
     from dq.utils.spark_expr import grouped_bounds_summary
 
-    metrics = [metric for metric in plan.metrics if metric.dataset.name == name]
-    groupings = {}
-    for metric in metrics:
-        groupings.setdefault(metric.group_by, []).append(metric)
-
     values = {}
-    for grouping in sorted(
-        groupings, key=lambda columns: [column.name for column in columns]
-    ):
-        group_metrics = groupings[grouping]
+    for grouping, group_metrics in metrics_by_grouping(metrics_of(plan, name)).items():
         columns = sorted(
             {
                 metric.column.name
@@ -273,31 +207,6 @@ def _dataset_group_metrics(name: str, dataframe, plan: ExecutionPlan) -> dict:
     return values
 
 
-def _as_exact_fraction(value, name: str, column: str):
-    """Convert a Spark bound to an exact Fraction; refuse infinite bounds."""
-    import decimal
-
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return Fraction(value)
-    if isinstance(value, decimal.Decimal):
-        return Fraction(value)
-    if isinstance(value, float):
-        import math
-
-        if math.isinf(value):
-            raise ConfigurationError(
-                f"column {column!r} in dataset {name!r} has an infinite "
-                "bound; ranges/v1 bounds must be finite"
-            )
-        return Fraction(decimal.Decimal(str(value)))
-    raise ConfigurationError(
-        f"column {column!r} in dataset {name!r} produced a bound of an "
-        f"unsupported type: {type(value).__name__}"
-    )
-
-
 def _dataset_range_metrics(name: str, dataframe, plan: ExecutionPlan) -> dict:
     """Compute value-range bounds, one aggregate per dataset.
 
@@ -309,7 +218,7 @@ def _dataset_range_metrics(name: str, dataframe, plan: ExecutionPlan) -> dict:
     from pyspark.sql import functions as F
     from pyspark.sql.types import DoubleType, FloatType
 
-    metrics = [metric for metric in plan.metrics if metric.dataset.name == name]
+    metrics = metrics_of(plan, name)
     columns = sorted({metric.column.name for metric in metrics if metric.column})
     for column in columns:
         _require_exact_column(dataframe, name, column)
@@ -352,3 +261,7 @@ def _dataset_range_metrics(name: str, dataframe, plan: ExecutionPlan) -> dict:
         bound = _as_exact_fraction(raw, name, metric.column.name)
         values[metric] = Fraction(0) if bound is None else bound
     return values
+
+
+#: What this module offers a plan: its capabilities, its binding check, its computation.
+_ADAPTER = ComputeAdapter(capabilities_for, _validated_bindings, compute_plan_values)

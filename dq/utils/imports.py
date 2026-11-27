@@ -34,7 +34,7 @@ def require_extra(
         note: Optional trailing caveat (e.g. Python-version or
             extra-conflict constraints).
         kind: What the extra is for, as the error message names it: an
-            ``engine`` (the default) or an ``observer``.
+            ``engine`` (the default), an ``observer`` or an ``adapter``.
 
     Returns:
         The imported module.
