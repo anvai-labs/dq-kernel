@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 233 raise sites across the modules below; the contract
+The framework raises 245 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -117,6 +117,35 @@ The Arrow compute adapter (SPEC-015): portable plans over Arrow tables.
   `dq/compute_support.py`. Without pyarrow installed the adapter names the
   `arrow` extra instead, before any dataset is read.
 
+== dq/sql_adapter.py
+
+*Content:* 12 `ConfigurationError` sites.
+
+The SQL compute adapter (SPEC-016): portable plans compiled to one aggregate
+statement per dataset, run on an SQLAlchemy bind. DuckDB is the certified
+lane.
+
+* Cause: dataset bindings are not a mapping, do not name exactly the plan's
+  datasets, or a binding is not a `SqlDataset` -- a table whose columns
+  declare their types and a bind that is an `Engine`, a `Connection`, or
+  something with a dialect and an execute. Or the bind's dialect is one the
+  adapter does not know (it knows DuckDB and PostgreSQL), so nothing is
+  asked of it. Or, for each metric on its own, the column it names cannot
+  be measured that way: a type the adapter does not recognise (JSON, an
+  array, a struct); a text, temporal, binary or UUID column asked for a
+  bound; a float column on a dialect that cannot keep NaN out. Or a bound
+  table's own filter holds a parameter that has no value. Or the declared
+  capabilities cannot hold the plan. Every one of these is raised before
+  any query runs, and names the rule that asked. One is raised in running:
+  the database refused the statement.
+* Fix: bind a declared table and a bind of a known dialect; measure a column
+  of a type the adapter knows, and ask for bounds only of a number, a
+  decimal or a boolean; give a filter's parameter a value. When the database
+  refuses the statement the message names the dataset and the dialect, and
+  says when the statement ran in the caller's own transaction, which the
+  engine may have left aborted until it is rolled back. Without SQLAlchemy
+  installed the adapter names the `sqlalchemy` extra instead.
+
 == dq/compute_support.py
 
 *Content:* 7 `ConfigurationError` sites.
@@ -133,7 +162,7 @@ exact fraction.
   does have -- or that is ambiguous: a duplicate, or one of two columns
   whose names differ only in case; or a range bound is infinite or of a
   type with no exact fraction.
-* Fix: name an adapter the message lists (`spark` or `arrow`); align binding
+* Fix: name an adapter the message lists (`spark`, `arrow` or `sql`); align binding
   names with the plan; execute single-semantics plans with `execute_plan`;
   use the column's exact casing; give one of two colliding columns a
   distinct name in the dataset; and keep `Infinity` out of a column a

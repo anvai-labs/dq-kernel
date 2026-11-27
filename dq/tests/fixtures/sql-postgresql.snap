@@ -1,0 +1,139 @@
+-- SPEC-016, G2: every corpus plan as the PostgreSQL dialect spells it.
+-- Reviewed by eye once; held by dq/tests/test_corpus_sql.py.
+-- To regenerate, after reviewing the change: python dq/tests/test_corpus_sql.py
+
+-- case counts-mixed-null-nan-infinity-decimal
+SELECT count(*) AS dq_row_count, count(*) FILTER (WHERE ds.amount IS NOT NULL) AS dq_present_1, count(*) FILTER (WHERE ds.id IS NOT NULL) AS dq_present_2, count(*) FILTER (WHERE ds.score IS NOT NULL AND ds.score != CAST('NaN' AS DOUBLE PRECISION)) AS dq_present_3 
+FROM ds
+
+-- case counts-empty-input
+SELECT count(*) AS dq_row_count, count(*) FILTER (WHERE ds.id IS NOT NULL) AS dq_present_1, count(*) FILTER (WHERE ds.score IS NOT NULL AND ds.score != CAST('NaN' AS DOUBLE PRECISION)) AS dq_present_2 
+FROM ds
+
+-- case counts-exact-two-thirds-boundary
+SELECT count(*) AS dq_row_count, count(*) FILTER (WHERE ds.id IS NOT NULL) AS dq_present_1 
+FROM ds
+
+-- case counts-strings-are-present-even-when-they-read-nan
+SELECT count(*) AS dq_row_count, count(*) FILTER (WHERE ds.flag IS NOT NULL) AS dq_present_1, count(*) FILTER (WHERE ds.s IS NOT NULL) AS dq_present_2 
+FROM ds
+
+-- case counts-null-only-column-passes-a-zero-threshold
+SELECT count(*) AS dq_row_count, count(*) FILTER (WHERE ds.label IS NOT NULL) AS dq_present_1, count(*) FILTER (WHERE ds.n IS NOT NULL) AS dq_present_2 
+FROM ds
+
+-- case counts-nan-only-and-infinity-only-columns
+SELECT count(*) AS dq_row_count, count(*) FILTER (WHERE ds.a IS NOT NULL AND ds.a != CAST('NaN' AS DOUBLE PRECISION)) AS dq_present_1, count(*) FILTER (WHERE ds.b IS NOT NULL AND ds.b != CAST('NaN' AS DOUBLE PRECISION)) AS dq_present_2 
+FROM ds
+
+-- case groups-distinct-bounds-across-three-regions
+WITH dq_grouped_0 AS 
+(SELECT ds.region AS dq_key_0, count(DISTINCT ds.id) AS dq_distinct_0 
+FROM ds GROUP BY ds.region)
+ SELECT (SELECT count(*) AS dq_value 
+FROM dq_grouped_0) AS dq_group_count_0, (SELECT max(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_max_0_0, (SELECT min(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_min_0_0
+
+-- case groups-empty-input-passes-vacuously
+WITH dq_grouped_0 AS 
+(SELECT ds.region AS dq_key_0, count(DISTINCT ds.id) AS dq_distinct_0 
+FROM ds GROUP BY ds.region)
+ SELECT (SELECT count(*) AS dq_value 
+FROM dq_grouped_0) AS dq_group_count_0, (SELECT max(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_max_0_0, (SELECT min(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_min_0_0
+
+-- case groups-null-keys-and-null-values
+WITH dq_grouped_0 AS 
+(SELECT ds.region AS dq_key_0, count(DISTINCT ds.id) AS dq_distinct_0 
+FROM ds GROUP BY ds.region)
+ SELECT (SELECT count(*) AS dq_value 
+FROM dq_grouped_0) AS dq_group_count_0, (SELECT min(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_min_0_0, (SELECT max(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_max_0_0
+
+-- case groups-two-column-key
+WITH dq_grouped_0 AS 
+(SELECT ds.region AS dq_key_0, ds.day AS dq_key_1, count(DISTINCT ds.id) AS dq_distinct_0 
+FROM ds GROUP BY ds.region, ds.day)
+ SELECT (SELECT count(*) AS dq_value 
+FROM dq_grouped_0) AS dq_group_count_0, (SELECT min(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_min_0_0, (SELECT max(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_max_0_0
+
+-- case groups-single-group
+WITH dq_grouped_0 AS 
+(SELECT ds.region AS dq_key_0, count(DISTINCT ds.id) AS dq_distinct_0 
+FROM ds GROUP BY ds.region)
+ SELECT (SELECT count(*) AS dq_value 
+FROM dq_grouped_0) AS dq_group_count_0, (SELECT max(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_max_0_0, (SELECT min(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_min_0_0
+
+-- case groups-duplicates-do-not-count
+WITH dq_grouped_0 AS 
+(SELECT ds.region AS dq_key_0, count(DISTINCT ds.id) AS dq_distinct_0 
+FROM ds GROUP BY ds.region)
+ SELECT (SELECT count(*) AS dq_value 
+FROM dq_grouped_0) AS dq_group_count_0, (SELECT max(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_max_0_0, (SELECT min(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_min_0_0
+
+-- case groups-signed-zeros-are-one-value
+WITH dq_grouped_0 AS 
+(SELECT ds.region AS dq_key_0, count(DISTINCT ds.v) AS dq_distinct_0 
+FROM ds GROUP BY ds.region)
+ SELECT (SELECT count(*) AS dq_value 
+FROM dq_grouped_0) AS dq_group_count_0, (SELECT max(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_max_0_0, (SELECT min(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_min_0_0
+
+-- case groups-signed-zero-key-is-one-group
+WITH dq_grouped_0 AS 
+(SELECT ds.k AS dq_key_0, count(DISTINCT ds.id) AS dq_distinct_0 
+FROM ds GROUP BY ds.k)
+ SELECT (SELECT count(*) AS dq_value 
+FROM dq_grouped_0) AS dq_group_count_0, (SELECT min(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_min_0_0, (SELECT max(dq_grouped_0.dq_distinct_0) AS dq_value 
+FROM dq_grouped_0) AS dq_group_max_0_0
+
+-- case ranges-integer-bounds
+SELECT count(*) FILTER (WHERE ds.amount IS NOT NULL) AS dq_count_0, max(ds.amount) FILTER (WHERE ds.amount IS NOT NULL) AS dq_max_0, min(ds.amount) FILTER (WHERE ds.amount IS NOT NULL) AS dq_min_0 
+FROM ds
+
+-- case ranges-decimal-bounds-are-exact
+SELECT count(*) FILTER (WHERE ds.amount IS NOT NULL) AS dq_count_0, max(ds.amount) FILTER (WHERE ds.amount IS NOT NULL) AS dq_max_0, min(ds.amount) FILTER (WHERE ds.amount IS NOT NULL) AS dq_min_0 
+FROM ds
+
+-- case ranges-double-bounds-render-through-shortest-decimal
+SELECT count(*) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_count_0, max(ds.v) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_max_0, min(ds.v) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_min_0 
+FROM ds
+
+-- case ranges-double-excludes-nan-and-null
+SELECT count(*) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_count_0, max(ds.v) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_max_0, min(ds.v) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_min_0 
+FROM ds
+
+-- case ranges-no-values-passes-vacuously
+SELECT count(*) FILTER (WHERE ds.d IS NOT NULL) AS dq_count_0, min(ds.d) FILTER (WHERE ds.d IS NOT NULL) AS dq_min_0, count(*) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_count_1, max(ds.v) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_max_1, min(ds.v) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_min_1 
+FROM ds
+
+-- case ranges-empty-input-passes-vacuously
+SELECT count(*) FILTER (WHERE ds.d IS NOT NULL) AS dq_count_0, min(ds.d) FILTER (WHERE ds.d IS NOT NULL) AS dq_min_0, count(*) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_count_1, max(ds.v) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_max_1 
+FROM ds
+
+-- case ranges-negative-zero-bound-is-zero
+SELECT count(*) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_count_0, max(ds.v) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_max_0, min(ds.v) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_min_0 
+FROM ds
+
+-- case ranges-boolean-bounds-are-zero-and-one
+SELECT count(*) FILTER (WHERE ds.flag IS NOT NULL) AS dq_count_0, max(CAST(ds.flag AS INTEGER)) FILTER (WHERE ds.flag IS NOT NULL) AS dq_max_0, min(CAST(ds.flag AS INTEGER)) FILTER (WHERE ds.flag IS NOT NULL) AS dq_min_0 
+FROM ds
+
+-- case ranges-infinite-bound-fails-closed
+SELECT count(*) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_count_0, max(ds.v) FILTER (WHERE ds.v IS NOT NULL AND ds.v != CAST('NaN' AS DOUBLE PRECISION)) AS dq_max_0 
+FROM ds
+
+-- case ranges-text-bounds-fail-closed
+REFUSED: column 's' in dataset 'ds' has an unsupported type for ranges/v1 bounds: VARCHAR. rule 'min_at_least_zero' needs column_min of it, and bounds are declared absent for a text column
+

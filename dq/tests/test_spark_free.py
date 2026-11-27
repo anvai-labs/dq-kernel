@@ -96,7 +96,7 @@ assert not loaded, loaded
 assert callable(dq.arrow_adapter.execute_plan)
 assert callable(dq.run.run_rules)
 assert dq.runner.ADAPTER == "arrow" and dq.runner.ENGINE == "portable"
-assert sorted(dq.compute_support.ADAPTER_MODULES) == ["arrow", "spark"]
+assert sorted(dq.compute_support.ADAPTER_MODULES) == ["arrow", "spark", "sql"]
 print("ok")
 """
     result = run_python(["-c", code], child_env())
