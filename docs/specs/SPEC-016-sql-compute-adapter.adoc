@@ -2,11 +2,11 @@
 :toc:
 :sectlinks.
 
-Status: Accepted +
+Status: Verified — CI run 45922787034 green on PR #69: 2214 passed on Python 3.13 (95.44% line, 93.65% branch) and 2220 on 3.12, 267 changed lines at 100% +
 Date: 2026-11-24 +
 Driven by: ADR-002, ADR-011 +
 Milestone: M3 +
-Depends on: SPEC-015 +
+Depends on: SPEC-015, SPEC-007 +
 
 == Purpose
 
@@ -19,32 +19,45 @@ so the plan compiles to one query per dataset and the data never moves.
 == In scope
 
 * `dq.sql_adapter`: compiles a counts/v1, groups/v1, or ranges/v1 plan into a
-  single aggregate `SELECT` per dataset, with named bind parameters, and
-  evaluates the returned values with the kernel's own evaluation.
+  single aggregate `SELECT` per dataset and evaluates the returned values
+  with the kernel's own evaluation.
 * Execution over an injected SQLAlchemy `Engine` or `Connection`. DuckDB is
   the certified lane; PostgreSQL-dialect statement compilation is
   snapshot-tested without a server.
-* A capability set for the adapter. Where an engine's semantics differ from
-  the kernel's (NaN ordering in min/max, floating-point ranges that must be
-  exact), the capability is declared absent and the plan fails closed at
-  validation.
-* Wiring: `engine = "portable"` with `adapter = "sql"` and a connection
-  reference whose credentials come from the environment.
+* A capability set for the adapter and, beneath it, what each column type
+  and each database dialect may be asked for. Where an engine's semantics
+  differ from the kernel's, or are not verified against them, the capability
+  is declared absent and the plan fails closed at validation, before any
+  query runs.
+* Wiring: `engine = "portable"` with `adapter = "sql"`. The rule's dataset is
+  bound as a `SqlDataset`: a SQLAlchemy table whose columns declare their
+  types, and the `Engine` or `Connection` that reaches it. A bind is built
+  from a URL the environment holds (`engine_from_env`); a rule pack never
+  carries a credential.
 
 == Out of scope
 
-* Certifying warehouses other than DuckDB (the statements are ANSI, but
-  each warehouse is a separate lane);
+* Certifying warehouses other than DuckDB (the statements are built with
+  SQLAlchemy Core and rendered by the bind's own dialect, but each warehouse
+  is a separate lane);
 * compiling vendor-engine vocabularies to SQL;
 * DDL or any write to the target database;
-* a query builder dependency: the compiler emits SQL itself.
+* a query builder dependency;
+* reflecting a table's columns from the database (see the note below);
+* a runner that resolves SQL datasets out of a rule pack: `dq-run` reads
+  files (SPEC-015).
 
 == Contracts
 
 * One query per dataset per plan; no per-rule query and no client-side
   filtering of rows.
-* Compilation is deterministic: a plan always compiles to the same text, so
-  the statement can be logged, reviewed, and snapshot-tested.
+* Nothing reaches the database before the plan has been checked against the
+  bound tables' declared columns and the bind's dialect. A plan the adapter
+  cannot honour is refused before any query executes.
+* Compilation is deterministic: a plan and a dialect always compile to the
+  same text, so the statement can be logged, reviewed, and snapshot-tested.
+  It carries identifiers only -- no literal of its own, so nothing to bind --
+  and the dialect quotes them.
 * The adapter returns metric values in the Python types the Spark adapter
   returns, so the kernel's evaluation cannot tell the adapters apart.
 * `dq.sql_adapter` imports with SQLAlchemy absent and with every other extra
@@ -61,12 +74,146 @@ so the plan compiles to one query per dataset and the data never moves.
   missing capability.
 * G4 — A fake connection records exactly one query per dataset for a
   multi-rule plan.
+* G5 — `dq.sql_adapter` imports with SQLAlchemy absent and every other extra
+  blocked, and `adapter = "sql"` names it.
+* G6 — A bind is built from a URL the environment holds, and is refused when
+  the variable does not hold one.
 
 == Progress
 
-* [ ] G1 — not started
-* [ ] G2 — not started
-* [ ] G3 — not started
-* [ ] G4 — not started
+* [x] G1 — evidence: `dq/tests/test_corpus_sql.py::test_sql_computes_the_documented_metrics`,
+  `::test_sql_decides_every_case_as_the_corpus_documents`,
+  `::test_sql_fails_closed_in_the_words_the_other_adapters_use`,
+  `dq/tests/test_sql_adapter_spark.py::test_both_adapters_compute_the_corpus_metrics_over_the_same_rows`
+  (all 24 cases on DuckDB; and on real Spark the two adapters agree metric
+  for metric over the same rows)
+* [x] G2 — evidence: `dq/tests/test_corpus_sql.py::test_g2_every_corpus_plan_compiles_to_its_postgresql_statement`,
+  `::test_the_snapshot_holds_every_corpus_case_and_nothing_else`,
+  `::test_a_plan_always_compiles_to_the_same_text`,
+  `::test_no_statement_carries_a_parameter_of_its_own`
+* [x] G3 — evidence: `dq/tests/test_sql_adapter.py::test_g3_a_bound_on_a_text_column_is_refused_before_any_query`,
+  `::test_g3_each_family_without_bounds_is_refused_naming_it`,
+  `::test_g3_a_type_the_adapter_does_not_know_is_refused_for_everything`,
+  `::test_g3_a_dialect_the_adapter_does_not_know_is_asked_for_nothing`,
+  `::test_g3_a_float_on_a_dialect_that_cannot_keep_nan_out_is_refused`,
+  `::test_a_column_counted_for_one_metric_is_still_asked_about_for_the_next`
+  (each against a connection that records, and recorded nothing)
+* [x] G4 — evidence: `dq/tests/test_sql_adapter.py::test_g4_one_query_per_dataset_for_a_multi_rule_plan`,
+  `::test_g4_each_semantics_is_one_statement`,
+  `::test_two_groupings_are_one_statement_and_a_group_count_is_not_a_cross_join`,
+  `dq/tests/test_corpus_sql.py::test_the_text_that_is_compiled_is_the_text_that_is_run`
+* [x] G5 — evidence: `dq/tests/test_sql_adapter.py::test_g5_the_module_imports_with_sqlalchemy_absent_and_every_extra_blocked`,
+  `::test_g5_adapter_sql_names_this_module`,
+  `::test_a_portable_rule_on_the_sql_adapter_runs_through_the_engine`
+* [x] G6 — evidence: `dq/tests/test_sql_adapter.py::test_g6_a_bind_is_built_from_the_environment`,
+  `::test_g6_without_a_url_the_variable_is_named_and_nothing_is_built`,
+  `::test_g6_a_url_that_cannot_be_read_is_refused_without_repeating_it`
+  (the last without repeating the URL, which may hold a password)
+
+[NOTE]
+====
+Amended 2026-11-27, before implementation, and again after it. The first
+facts were read from
+duckdb 2.0.1, duckdb-engine 0.17.0 and SQLAlchemy 2.0.58 and 2.1.9, not from
+memory. Four of the spec's first sentences did not survive them and are
+rewritten above rather than left to be read.
+
+* A dataset is bound with its columns declared, never reflected. *Corrected:*
+the first draft let a plan find a column's type from the database. It cannot:
+a NaN has to be kept out of a float column's present count and bounds, DuckDB
+gives no type-agnostic way to find one (a NaN equals itself there, and `isnan`
+is a binder error on a non-numeric column), so the compiler has to know the
+type before it writes the statement -- and table reflection through
+duckdb-engine 0.17.0, the newest there is, fails on every combination probed
+(SQLAlchemy 2.0.58 or 2.1.9 with DuckDB 1.4.4 or 2.0.1). A `SqlDataset` is a
+SQLAlchemy table or subquery whose columns carry types, and the bind.
+* The bind is an `Engine`, a `Connection`, or a test double with a
+  dialect and an `execute`. Given an `Engine`, the adapter opens and closes
+  its own connection. Given a `Connection`, it runs in the caller's
+  transaction and cannot insulate it: *DuckDB has no `SAVEPOINT`*
+  (`begin_nested()` is a parser error) and a failed statement leaves the
+  transaction aborted until it is rolled back. That is why everything
+  checkable is checked before the statement, and why a refusal that comes
+  from the database says so.
+* The NaN predicate is compiled per dialect. `func.isnan` renders as plain
+  `isnan(...)` for the PostgreSQL dialect too, where there is no such
+  function; there the predicate is a comparison with `'NaN'` cast to a
+  double. A dialect with no predicate registered -- any but DuckDB and
+  PostgreSQL -- is declared absent for every floating column, and a plan
+  measuring one is refused before any query.
+* What a column may be asked for, by the family of its declared type:
+
+[cols="1,3,3,3",options="header"]
+|===
+|Family |Present count |Distinct count |Bounds
+|integer, numeric, boolean |yes |yes |yes
+|float |with NaN kept out |with NaN kept out |with NaN kept out; only on a dialect with a predicate
+|text, temporal, binary, UUID |yes |yes |no: an unsupported type for bounds
+|anything else (JSON, arrays, structs, custom) |no |no |no
+|===
+
+  Bounds are exact because DuckDB hands back `int`, `float`, `Decimal` and
+  `bool` as Spark does, and a 32-bit `FLOAT` comes back widened to the same
+  double Spark reports for a `FloatType` (`0.10000000149011612`). A type the
+  adapter does not recognise is refused for everything, because whether its
+  values can be NaN, and how they compare, is not known. DuckDB itself will
+  count distinct or take a minimum of a list, a struct or an interval; the
+  refusal is the adapter's.
+* DuckDB's semantics are the kernel's, verified: `count(x)` counts a NaN, so
+  a present count filters it; `max` over a column holding a NaN is the NaN,
+  so bounds filter it; a signed zero is one value and one group; NaN is one
+  distinct value and one group; a null key is its own group; over an empty
+  table every count is 0 and every bound NULL, which the adapter reports as
+  0. Several distinct counts share one grouped query.
+* A plan's statement is one `SELECT`. Counts and ranges aggregate the table
+  directly. Groups reduce a grouped subquery -- one per distinct grouping --
+  to the group count and the minimum and maximum of each column's distinct
+  count. A refusal names the first rule that needs what was asked for.
+* `adapter = "sql"` is one more entry in `dq.compute_support.ADAPTER_MODULES`.
+  The portable engine hands its frame to the adapter as the binding, so a
+  SQL rule is run by passing a `SqlDataset` where a Spark rule gets a
+  DataFrame. Building that binding from a rule pack's own settings, as
+  `dq-run` builds one from files, is a runner and is out of scope here.
+* For G1, `duckdb` and `duckdb-engine` become development dependencies; the
+  `sqlalchemy` extra already exists (SPEC-007). For G2 the snapshot is a
+  file of compiled statements, reviewed by eye once and then held by a test.
+* Amended after implementation. Building it corrected the amendment once and
+  the first implementation three times:
+
+** A decimal read through a *typed* expression comes back rounded. The
+   DuckDB dialect declares that its driver has no native decimal, so
+   SQLAlchemy turns what the driver gave -- an exact `Decimal` -- into a
+   `Decimal` again by way of a float, and one that differs from `0.1` in
+   the twentieth place comes back as `0.1`. Nothing downstream could tell.
+   The corpus's own case about two such decimals is what showed it. So the
+   statement is run as text, and what is logged, snapshot-tested and
+   executed is one text.
+** A `Decimal` bound as a parameter *arrives* rounded, even when the SQL
+   casts the parameter to the column's type. It is bound as text and cast
+   instead -- in the tests' loader, and in the reference.
+** *Corrected:* the statement does carry values, when a bound subquery
+   filters on one. They are written into the text, which stays
+   self-contained. SQLAlchemy writes `NULL` for a parameter that has no
+   value and only warns, so the query would quietly answer about nothing:
+   that is refused with everything else, before any query.
+** PostgreSQL has no `min` or `max` of a boolean. The compile alone looked
+   well; running every corpus statement by hand on a real PostgreSQL 14 is
+   what showed it. A boolean's bounds are 0 and 1 there too, so they are
+   taken of it cast to an integer, once. All 24 cases pass on that server.
+   It is not a CI lane: DuckDB remains the only certified one.
+** A dialect is a small profile -- how it says NaN, whether it bounds a
+   boolean -- and a dialect without one is asked for nothing, not only for
+   no float. The first implementation refused float columns on a dialect it
+   did not know, and measured everything else there.
+** The first implementation resolved a column once and let its later
+   metrics through unasked: the count of a text column passed, and so did
+   its bound, until the query ran. Reviewing the compiled statements showed
+   it -- a case that should have been refused had a statement. Each metric
+   is asked of its column on its own now, and a test holds that.
+** Two of the first amendment's phrases did not survive either: the NaN
+   predicate is chosen by the dialect the statement is *for*, not the one it
+   is bound to (the PostgreSQL snapshot first said `isnan`), and the
+   PostgreSQL NaN literal is part of the text, not a parameter.
+====
 
 Links: ADR-002; ADR-011; SPEC-007; SPEC-015.

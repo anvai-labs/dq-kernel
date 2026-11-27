@@ -768,7 +768,11 @@ def test_a_refusal_does_not_mask_a_fault_that_is_not_arrows():
 
 
 def test_an_adapter_is_found_by_its_name():
-    assert ADAPTER_MODULES == {"spark": "dq.spark_adapter", "arrow": "dq.arrow_adapter"}
+    assert ADAPTER_MODULES == {
+        "spark": "dq.spark_adapter",
+        "arrow": "dq.arrow_adapter",
+        "sql": "dq.sql_adapter",
+    }
     assert adapter_named("arrow") is arrow_adapter
     assert adapter_named("spark").__name__ == "dq.spark_adapter"
     for name in ADAPTER_MODULES:
@@ -783,7 +787,8 @@ def test_a_name_no_adapter_has_is_refused_before_anything_is_read(name):
     with pytest.raises(ConfigurationError) as raised:
         adapter_named(name)
     assert str(raised.value) == (
-        f"adapter {name!r} is not a portable adapter; choose one of ['arrow', 'spark']"
+        f"adapter {name!r} is not a portable adapter; choose one of "
+        "['arrow', 'spark', 'sql']"
     )
 
 

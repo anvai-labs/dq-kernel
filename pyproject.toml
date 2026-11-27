@@ -96,6 +96,14 @@ opentelemetry-sdk = ">=1.25,<2"
 # even without the `arrow` extra.
 polars = "^2.0"
 datafusion = "^55.0"
+# The SQL compute adapter's certified lane (SPEC-016). Development
+# dependencies only: the package reaches a database through the optional
+# `sqlalchemy` extra. duckdb-engine is the SQLAlchemy dialect for DuckDB,
+# which DuckDB does not bundle. The ranges are anchored on the versions the
+# tests were run on. Note that duckdb-engine requires sqlalchemy, so a
+# development install holds that too without the extra.
+duckdb = "^2.0"
+duckdb-engine = "^0.17"
 
 [tool.poetry.scripts]
 dq-kernel = "dq.cli:main"

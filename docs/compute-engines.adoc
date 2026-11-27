@@ -53,8 +53,8 @@ Vendor support today (verified against the installed distributions):
 | yes (Arrow adapter, through interchange)
 | yes (Arrow adapter, through interchange)
 | yes (Arrow adapter, through interchange)
-| no (SPEC-016)
-| no (SPEC-016)
+| yes (SQL adapter)
+| yes (SQL adapter; the certified lane)
 |===
 
 GX has no Polars or DataFusion datasource (zero references in its
@@ -97,8 +97,8 @@ version defines, the exact-column and exact-fraction refusals, the order a
 plan's datasets and groupings are visited, and the plan's execution
 itself. A new compute adapter is three callables around that
 (`dq.compute_support.ComputeAdapter`) and one entry in
-`dq.compute_support.ADAPTER_MODULES`; the SQL adapter (SPEC-016) is the
-next.
+`dq.compute_support.ADAPTER_MODULES`; the SQL adapter is the second built
+that way.
 
 === What a dataset can be
 
@@ -140,6 +140,125 @@ brought to the form every kernel is written for, each step lossless:
 A list, a struct or a map is neither countable distinct nor a bound. Arrow
 has no kernel for it, and the adapter refuses with a `ConfigurationError`
 that names the dataset, the column and the metric. Nothing is approximated.
+
+== The SQL adapter
+
+The same plans run where the data already lives: `dq.sql_adapter` compiles a
+plan into one aggregate `SELECT` per dataset, has the database run it, and
+hands the one row it gets back to the kernel's own evaluation. The data does
+not move. A rule opts in with `adapter = "sql"`.
+
+A dataset is bound as a `SqlDataset`: a SQLAlchemy table whose columns
+declare their types, and the `Engine` or `Connection` that reaches it:
+
+[source,python]
+----
+from decimal import Decimal
+
+from sqlalchemy import Column, MetaData, Numeric, String, Table, create_engine, text
+
+from dq.plan import (
+    ColumnRef,
+    Comparison,
+    DatasetRef,
+    ExecutionPlan,
+    Predicate,
+    RuleKind,
+    RuleSpec,
+)
+from dq.sql_adapter import SqlDataset, compile_plan, execute_plan
+
+# A dataset: a table whose columns declare their types, and a bind.
+orders = Table("orders", MetaData(), Column("id", String), Column("amount", Numeric(10, 2)))
+engine = create_engine("duckdb:///:memory:")
+orders.create(engine)
+with engine.begin() as connection:
+    connection.execute(text("INSERT INTO orders VALUES ('a', 1.25), (NULL, 3.50)"))
+
+plan = ExecutionPlan(
+    (
+        RuleSpec(
+            "id_complete",
+            DatasetRef("orders", "a" * 64),  # the snapshot the rule was certified for
+            RuleKind.COMPLETENESS,
+            Predicate(Comparison.EQ, Decimal(1)),
+            ColumnRef("id"),
+        ),
+    )
+)
+dataset = {"orders": SqlDataset(orders, engine)}
+
+compile_plan(plan, dataset)["orders"]  # the statement, before anything is run
+(outcome,) = execute_plan(plan, dataset)
+----
+
+The columns are declared, not looked up from the database. Their types decide
+the statement -- a float column must have NaN kept out of its present count
+and its bounds -- and nothing type-agnostic can find a NaN in DuckDB. The
+declared type is what the adapter may assume about the values; it need not be
+how the database stores them.
+
+=== What is refused, and when
+
+Everything that can be checked is checked when the bindings are validated,
+and nothing reaches the database until that is done. What cannot be honoured
+is refused before any query runs, naming the rule that asked for it. The
+order matters because a failed statement cannot be taken back: DuckDB has no
+savepoint, and it leaves the transaction the statement ran in aborted.
+
+* a column that is not there, exactly named, as every adapter refuses it;
+* a dialect the adapter does not know: it knows DuckDB and PostgreSQL, and
+  asks nothing of any other;
+* a column of a type it cannot measure -- JSON, an array, a struct -- whose
+  values may be NaN, or how they compare, is not known;
+* a bound of a text, temporal, binary or UUID column: the kernel's bounds are
+  numbers, decimals and booleans;
+* a float column on a dialect that has no way to keep NaN out;
+* a filter of a bound subquery that holds a parameter with no value. Its
+  value would be written into the statement as `NULL`, and the query would
+  quietly answer about nothing.
+
+=== Two things DuckDB does that the adapter undoes
+
+* *A decimal read through a typed expression comes back rounded.* The DuckDB
+  dialect declares that the driver has no native decimal, so SQLAlchemy turns
+  what the driver gave -- an exact `Decimal` -- into a `Decimal` again by way
+  of a float. A decimal that differs from `0.1` in the twentieth place comes
+  back as `0.1`. The adapter runs its statement as text, so the driver's own
+  value comes back.
+* *A decimal bound as a parameter arrives rounded.* Loaded with a parameter,
+  the same decimal is already a double when it reaches the table, even when
+  the SQL casts the parameter to the column's type. Bind it as text and cast
+  it, or write it as a literal.
+
+And one thing PostgreSQL does not have: no `min` or `max` of a boolean. Where
+that is so the bounds are taken of the boolean cast to an integer -- the same
+two values, 0 and 1.
+
+DuckDB is the certified lane: its semantics are checked to be the kernel's,
+on the corpus and against the Spark adapter on the same rows. The statement
+is rendered by the bind's own dialect, or by another one to compile for: every
+corpus statement is held as a PostgreSQL snapshot, and was run once by hand
+on a real PostgreSQL 14, which is how the boolean came to light.
+
+A bind is built from a URL the environment holds, never from a rule pack. The
+table is declared with its columns; it is never reflected (reflection through
+duckdb-engine fails on every version combination tried):
+
+[source,python]
+----
+from sqlalchemy import Column, MetaData, String, Table
+
+from dq.sql_adapter import SqlDataset, engine_from_env
+
+engine = engine_from_env("ORDERS_DATABASE_URL")
+orders = Table("orders", MetaData(), Column("id", String))
+dataset = {"orders": SqlDataset(orders, engine)}
+----
+
+`dq-run` reads files. A SQL rule is run by handing the portable engine a
+`SqlDataset` where a Spark rule gets a frame, or by calling the adapter as
+above.
 
 == The Spark-free runner
 
@@ -331,5 +450,10 @@ the rules and the vocabulary.
   DataFrame -- `RepositorySink` through its own rows, the SQL sink through
   its Arrow export -- so a run over files writes its evidence as a report
   and refuses a configured sink rather than leave it unwritten.
-* No SQL adapter yet: `adapter = "sql"` over a SQLAlchemy connection is
-  SPEC-016.
+* No reflection of a table's columns in the SQL adapter. It binds declared
+  columns, and table reflection through duckdb-engine fails on every version
+  combination tried; a runner that resolves SQL datasets out of a rule pack
+  would be new work.
+* No warehouse certified but DuckDB. The SQL adapter's statements are
+  rendered by each dialect and were run once by hand on PostgreSQL 14; a lane
+  of its own is what would certify another database.

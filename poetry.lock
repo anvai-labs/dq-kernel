@@ -996,6 +996,51 @@ pluggy = ">=0.13.1,<2"
 pygments = ">=2.19.1,<3"
 
 [[package]]
+name = "duckdb"
+version = "2.0.1"
+description = "DuckDB in-process database"
+optional = false
+python-versions = ">=3.11.0"
+groups = ["dev"]
+files = [
+    {file = "duckdb-2.0.1-cp311-cp311-macosx_10_15_universal2.whl", hash = "sha256:13b30d7a5894eba65b13692d7527c6ab34272ac356c9048bf5c6546bc3c8595e"},
+    {file = "duckdb-2.0.1-cp311-cp311-macosx_10_15_x86_64.whl", hash = "sha256:8d6ed58d7cd42d7f2afafa0c9900cd7842d07d7bd7c1f6a2f9e7fdb5dffda756"},
+    {file = "duckdb-2.0.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:6034635ec5da2d204e671858287aba90b9174d3e2773db6680f939cbfb810683"},
+    {file = "duckdb-2.0.1-cp311-cp311-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:dd8961476eb9e048d1e784eb6bad7aad39304d72b4e4fd8c021f1863b7ee6425"},
+    {file = "duckdb-2.0.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:eb32b389d99d14cbbec4c110f58237c77eacefc65ef6f737619f413c97a91a77"},
+    {file = "duckdb-2.0.1-cp311-cp311-win_amd64.whl", hash = "sha256:7e4ea6aa02ce732d589a2b30daea79c3ea4f1515b6d05ede93fe687007aaf62b"},
+    {file = "duckdb-2.0.1-cp311-cp311-win_arm64.whl", hash = "sha256:f8c5bf863b967ee1fa9b068d1a048c9a3b4b11ad8c17d57df70cd50b67334a10"},
+    {file = "duckdb-2.0.1-cp312-abi3-macosx_10_15_universal2.whl", hash = "sha256:4c70c88a9cfb4dc6d4b1892da39a2974e6b51b67845cc12e192a99ec4e41b211"},
+    {file = "duckdb-2.0.1-cp312-abi3-macosx_10_15_x86_64.whl", hash = "sha256:f9458590d4f88d3c862393e3f709c097dc61dcb68533cc895b5d91545736bed6"},
+    {file = "duckdb-2.0.1-cp312-abi3-macosx_11_0_arm64.whl", hash = "sha256:68ff6c4ff3dda16762019db0591ee775954094c266f99e16212884a4e656009d"},
+    {file = "duckdb-2.0.1-cp312-abi3-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ba06918b64d4061bd9ed722dc10adf66f9a10f96426e2403db93a36f590ba3dc"},
+    {file = "duckdb-2.0.1-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:39ffeb136abed770a496e5592a464f18a07b1543e7ddb1ff6453215e179f1647"},
+    {file = "duckdb-2.0.1-cp312-abi3-win_amd64.whl", hash = "sha256:67a7dab509897ec1f1d46283783edb8fdc005f02fde6e263fb77a8a3bf7f1b85"},
+    {file = "duckdb-2.0.1-cp312-abi3-win_arm64.whl", hash = "sha256:c73e8f28853c66d0590ec1bd35ee6ef837ccd50fa4b429149f79ec57e0f0556a"},
+    {file = "duckdb-2.0.1.tar.gz", hash = "sha256:5b3f493140e35b75298ee0fc606d98e3065e8601e64fe81b09326de7a6fd68e0"},
+]
+
+[package.extras]
+all = ["adbc-driver-manager", "fsspec", "ipython", "numpy", "pandas", "pyarrow"]
+
+[[package]]
+name = "duckdb-engine"
+version = "0.17.0"
+description = "SQLAlchemy driver for duckdb"
+optional = false
+python-versions = "<4,>=3.9"
+groups = ["dev"]
+files = [
+    {file = "duckdb_engine-0.17.0-py3-none-any.whl", hash = "sha256:3aa72085e536b43faab635f487baf77ddc5750069c16a2f8d9c6c3cb6083e979"},
+    {file = "duckdb_engine-0.17.0.tar.gz", hash = "sha256:396b23869754e536aa80881a92622b8b488015cf711c5a40032d05d2cf08f3cf"},
+]
+
+[package.dependencies]
+duckdb = ">=0.5.0"
+packaging = ">=21"
+sqlalchemy = ">=1.3.22"
+
+[[package]]
 name = "filelock"
 version = "4.3.1"
 description = "A platform independent file lock."
@@ -1130,10 +1175,9 @@ vertica = ["sqlalchemy (>=1.4.0)", "sqlalchemy-vertica-python (>=0.5.10)"]
 name = "greenlet"
 version = "3.5.6"
 description = "Lightweight in-process concurrent programming"
-optional = true
+optional = false
 python-versions = ">=3.10"
-groups = ["main"]
-markers = "(platform_machine == \"aarch64\" or platform_machine == \"ppc64le\" or platform_machine == \"x86_64\" or platform_machine == \"amd64\" or platform_machine == \"AMD64\" or platform_machine == \"win32\" or platform_machine == \"WIN32\") and (extra == \"sqlalchemy\" or extra == \"dqx\") and (extra == \"sqlalchemy\" or python_version == \"3.12\") and (python_version == \"3.13\" or extra == \"dqx\" or extra == \"sqlalchemy\")"
+groups = ["main", "dev"]
 files = [
     {file = "greenlet-3.5.6-cp310-cp310-macosx_11_0_universal2.whl", hash = "sha256:95e7c44d072db623a1aab04ce488cf9533294a77ed9d072cd503a3596f4106ac"},
     {file = "greenlet-3.5.6-cp310-cp310-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b7d501d5eb5d4f67207df364752ad697465b834268744be7581c18d81d35d41d"},
@@ -1215,6 +1259,7 @@ files = [
     {file = "greenlet-3.5.6-cp315-cp315t-win_arm64.whl", hash = "sha256:f9fe868463ec7e1363733af77e38a5fda3e9b63940337048c945d69e0c80ff24"},
     {file = "greenlet-3.5.6.tar.gz", hash = "sha256:8e67c43bdfc88d5fee6db0d3e40175b362fc95fb85f0412d233b9b203c53a575"},
 ]
+markers = {main = "(platform_machine == \"aarch64\" or platform_machine == \"ppc64le\" or platform_machine == \"x86_64\" or platform_machine == \"amd64\" or platform_machine == \"AMD64\" or platform_machine == \"win32\" or platform_machine == \"WIN32\") and (extra == \"sqlalchemy\" or extra == \"dqx\") and (extra == \"sqlalchemy\" or python_version == \"3.12\") and (python_version == \"3.13\" or extra == \"dqx\" or extra == \"sqlalchemy\")", dev = "platform_machine == \"aarch64\" or platform_machine == \"ppc64le\" or platform_machine == \"x86_64\" or platform_machine == \"amd64\" or platform_machine == \"AMD64\" or platform_machine == \"win32\" or platform_machine == \"WIN32\""}
 
 [package.extras]
 docs = ["Sphinx", "furo"]
@@ -3225,10 +3270,9 @@ files = [
 name = "sqlalchemy"
 version = "2.0.58"
 description = "Database Abstraction Library"
-optional = true
+optional = false
 python-versions = ">=3.7"
-groups = ["main"]
-markers = "python_version == \"3.13\" and extra == \"sqlalchemy\" or python_version == \"3.12\" and (extra == \"dqx\" or extra == \"sqlalchemy\")"
+groups = ["main", "dev"]
 files = [
     {file = "sqlalchemy-2.0.58-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:d701a78738b23697270e892924a9a6b56575945ed92f98a46acc3df182ed3e67"},
     {file = "sqlalchemy-2.0.58-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:d97e138a4d7022e6e53ee02bee3e48381a63a2c2be5119796a29aaf2f39f4ec6"},
@@ -3289,6 +3333,7 @@ files = [
     {file = "sqlalchemy-2.0.58-py3-none-any.whl", hash = "sha256:cc1b78ba0ed1f32156d1582f94ca4aca74633e4dcdde3eb1562dd4742493f594"},
     {file = "sqlalchemy-2.0.58.tar.gz", hash = "sha256:2acdcec9836b7c1514a9ad426e7731669a1186d96481a2e82c50bf2aebb49061"},
 ]
+markers = {main = "python_version == \"3.13\" and extra == \"sqlalchemy\" or python_version == \"3.12\" and (extra == \"dqx\" or extra == \"sqlalchemy\")"}
 
 [package.dependencies]
 greenlet = {version = ">=1", markers = "platform_machine == \"aarch64\" or platform_machine == \"ppc64le\" or platform_machine == \"x86_64\" or platform_machine == \"amd64\" or platform_machine == \"AMD64\" or platform_machine == \"win32\" or platform_machine == \"WIN32\""}
@@ -3539,4 +3584,4 @@ sqlalchemy = ["sqlalchemy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "0489b7b420323ea4a8f8a3e7f592956b5dde0d5c14244fba91d544a51a5dd98f"
+content-hash = "eace03475a80a3636a00632c63b7c31eb095ba916d83749b251126a3d5227b71"

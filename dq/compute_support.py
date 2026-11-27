@@ -66,7 +66,11 @@ METRICS_BY_VERSION = {
 
 #: The module that executes a portable plan, by adapter name. A new compute
 #: adapter adds one entry here.
-ADAPTER_MODULES = {"spark": "dq.spark_adapter", "arrow": "dq.arrow_adapter"}
+ADAPTER_MODULES = {
+    "spark": "dq.spark_adapter",
+    "arrow": "dq.arrow_adapter",
+    "sql": "dq.sql_adapter",
+}
 
 
 def adapter_named(name: Any):

@@ -177,7 +177,7 @@ def test_an_adapter_that_does_not_exist_is_refused_before_the_frame_is_read(adap
     with pytest.raises(ConfigurationError) as raised:
         engine.apply(Unread())
     assert f"adapter {adapter!r} is not a portable adapter" in str(raised.value)
-    assert "['arrow', 'spark']" in str(raised.value)
+    assert "['arrow', 'spark', 'sql']" in str(raised.value)
 
 
 def test_the_refusal_names_the_adapter_after_the_payload_is_checked(sample_frame):
