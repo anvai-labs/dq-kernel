@@ -208,3 +208,21 @@ def test_build_job_verifies_the_published_schema_is_in_the_wheel():
         check
     ), "the build job must verify dq/schemas/rule-pack.schema.json is in the wheel"
     assert "assert" in check and "dist" in check
+
+
+def test_build_jobs_prove_the_wheel_needs_no_extra():
+    """The development group carries three extras' packages (datafusion brings
+    pyarrow, duckdb-engine brings SQLAlchemy, the OpenTelemetry SDK brings the
+    OpenTelemetry API), and every lane has Spark, so no lane that installs it
+    can show the package manages without them. Both lanes build the wheel, so
+    both prove it."""
+    for workflow, job in (("ci.yml", "build"), ("owner-private-ci.yml", "owner-build")):
+        runs = [step.get("run", "") for step in _load(workflow)["jobs"][job]["steps"]]
+        check = next((run for run in runs if "check_core_install.py" in run), "")
+        assert check, f"{workflow}: {job} must run scripts/check_core_install.py"
+        assert "python -m venv" in check, "the proof needs an empty environment"
+        assert (
+            "*.whl" in check and check.count("pip install") == 1
+        ), "of the wheel alone"
+        built = next(i for i, run in enumerate(runs) if "poetry build" in run)
+        assert runs.index(check) > built, "the wheel must exist first"

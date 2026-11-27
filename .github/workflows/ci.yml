@@ -39,7 +39,10 @@ jobs:
         run: poetry install --with dev
       - name: Check formatting
         run: poetry run black --check dq/
-      - name: Validate example without optional engine dependencies
+      # Not "without optional engine dependencies": the development group
+      # carries three extras' packages. The proof that the wheel needs no
+      # extra is in the build job.
+      - name: Validate example in a development install
         run: poetry run dq-validate examples/basic_deequ_validation.conf
       - name: Lint
         run: >-
@@ -215,6 +218,16 @@ jobs:
           assert required in names, f"{required} is missing from {wheel}"
           print(f"{wheel} carries {required}")
           PY
+      - name: Prove the wheel needs no extra
+        # The dev group carries three extras' packages (datafusion brings
+        # pyarrow, duckdb-engine brings SQLAlchemy, the OpenTelemetry SDK brings
+        # the OpenTelemetry API), and every lane has Spark, so no lane that
+        # installs it can show the package manages without them. Only a bare
+        # install of the wheel can; the script says what it checks there.
+        run: |
+          python -m venv "$RUNNER_TEMP/core"
+          "$RUNNER_TEMP/core/bin/python" -m pip install --quiet --disable-pip-version-check dist/dq_kernel-*.whl
+          "$RUNNER_TEMP/core/bin/python" scripts/check_core_install.py dist/dq_kernel-*.whl
       - name: Upload artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
