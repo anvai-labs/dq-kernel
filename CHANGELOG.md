@@ -212,6 +212,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CI proves the wheel needs no extra.** The build job installs the built
+  wheel, and nothing else, into an empty environment and runs
+  `scripts/check_core_install.py` there. It refuses an environment that holds
+  an optional dependency, then checks what the package says works with none:
+  every module of the wheel imports, except sixteen declared to need an extra
+  to import, and each of those stops at a missing package; every command
+  answers `--help`, and the validator accepts an example; each entry point
+  that needs an extra, asked to work, names it; and each command that needs
+  one, asked to run, exits with 2, the code its help promises, and says what
+  to install. No other lane can show this: the development group carries three
+  extras' packages (datafusion brings pyarrow, duckdb-engine brings SQLAlchemy,
+  the OpenTelemetry SDK brings the OpenTelemetry API), and every lane has
+  Spark. The lint lane's step that used to claim it is now named for what it
+  does, validating an example in a development install
 - **The whole lock is re-resolved**, with every constraint in `pyproject.toml`
   unchanged: 41 movements, where updating one dependency at a time had left
   the transitive ones behind. Great Expectations 1.24.1 → 1.25.0, pandas
@@ -377,6 +391,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test now runs it. `docs/index.adoc` said the `build` check was not yet
   required and that numeric ranges were outside the portable translator;
   both statements were out of date
+- `dq-kernel` crashed where Spark is not installed, with an
+  `UnboundLocalError`, instead of exiting 2 as its help promises for a
+  missing dependency: the handler read exit codes that were bound inside the
+  `try` whose first import had just failed. No test lane could reach it,
+  since every lane has Spark. It now logs what to install and exits 2, and it
+  judges the configuration before it looks for Spark, so an invalid rule pack
+  is reported as such with or without Spark installed
 
 ## [0.3.0] - 2026-11-24
 

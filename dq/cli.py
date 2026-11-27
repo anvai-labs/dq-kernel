@@ -73,22 +73,23 @@ Examples:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # Bound before the try: the handlers below return these, and an import
+    # inside it is what fails where Spark is not installed.
+    from dq.exceptions import ConfigurationError
+    from dq.gate import EXIT_CONFIGURATION, EXIT_GATE_FAILED, EXIT_PASSED, evaluate_gate
+
     try:
-        from pyspark.sql import SparkSession
         from dq.dq_framework import DQFramework
-        from dq.exceptions import ConfigurationError
-        from dq.gate import (
-            EXIT_CONFIGURATION,
-            EXIT_GATE_FAILED,
-            EXIT_PASSED,
-            evaluate_gate,
-        )
         from dq.report import build_report, sha256_file_reference, write_report
         from dq.validate import is_local_config_reference, validate_config
 
+        # Judged before Spark is looked for, so the verdict on a rule pack is
+        # the same with or without Spark installed.
         if is_local_config_reference(args.config) and not validate_config(args.config):
             logger.error("Configuration validation failed; Spark was not started")
             return EXIT_CONFIGURATION
+
+        from pyspark.sql import SparkSession
 
         logger.info(f"Initializing Spark session with master: {args.spark_master}")
         spark = (

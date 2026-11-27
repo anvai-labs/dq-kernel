@@ -268,3 +268,40 @@ def test_dq_run_passes_a_clean_file_where_spark_cannot_be_imported(tmp_path):
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert "The gate passed." in result.stdout
     assert json.loads(report.read_text())["status"] == "passed"
+
+
+# ------------------------------------------ the Spark command, without Spark
+
+
+def dq_kernel_without_spark(arguments, env):
+    """Run the ``dq-kernel`` command where Spark cannot be imported."""
+    return run_python(
+        ["-c", "from dq.cli import main; raise SystemExit(main())", *arguments], env
+    )
+
+
+def test_dq_kernel_names_the_extra_and_exits_two_where_spark_cannot_be_imported(
+    tmp_path,
+):
+    """What its help promises: exit 2 for a missing dependency. The handler
+    needs its exit codes while the import it handles is failing, so they
+    cannot be bound inside the same ``try``: with none bound it crashed."""
+    env = child_env(PYTHONPATH=spark_cannot_be_imported(tmp_path / "blocked"))
+    result = dq_kernel_without_spark(
+        [str(ROOT / "examples" / "basic_deequ_validation.conf")], env
+    )
+    assert result.returncode == 2, (result.stdout, result.stderr)
+    assert "Traceback" not in result.stderr
+    assert "pip install dq-kernel[spark]" in result.stderr
+
+
+def test_dq_kernel_judges_the_configuration_before_it_looks_for_spark(tmp_path):
+    """One verdict with or without Spark installed: an invalid rule pack is
+    reported as such -- what dq-validate says too -- not as a missing
+    dependency."""
+    env = child_env(PYTHONPATH=spark_cannot_be_imported(tmp_path / "blocked"))
+    absent = tmp_path / "absent.conf"
+    result = dq_kernel_without_spark([str(absent)], env)
+    assert result.returncode == 2, (result.stdout, result.stderr)
+    assert "Configuration validation failed" in result.stderr
+    assert "Install Spark support" not in result.stderr

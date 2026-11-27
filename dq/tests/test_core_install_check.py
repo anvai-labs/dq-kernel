@@ -1,0 +1,583 @@
+# Copyright 2024 Data Quality Framework Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+"""The check that the published wheel needs no extra.
+
+CI installs the wheel alone and runs ``scripts/check_core_install.py``: the
+development group carries three extras' packages, so no lane that installs
+it can show the package manages without them, and every lane has Spark.
+These tests hold the check itself honest -- what makes an environment unfit
+for the proof, which modules may need an extra to import, and what a
+command or an entry point must say when asked to work without one.
+"""
+
+import importlib.util
+import tomllib
+import zipfile
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = REPOSITORY_ROOT / "scripts" / "check_core_install.py"
+
+
+def load():
+    spec = importlib.util.spec_from_file_location("check_core_install", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+check = load()
+
+#: What a rule-pack's metadata might declare: one dependency of each kind.
+REQUIRES = [
+    "pyhocon (<0.4.0,>=0.3.59)",
+    "pyarrow (>=16,<27) ; extra == 'arrow'",
+    'pywin32-ctypes (>=0.2.0,<0.3.0) ; sys_platform == "win32"',
+]
+
+
+@pytest.fixture
+def wheel(tmp_path):
+    """Return a function that writes a wheel holding only given requirements."""
+    built = tmp_path / "dq_kernel-0.0.0-py3-none-any.whl"
+
+    def write(requires):
+        with zipfile.ZipFile(built, "w") as archive:
+            archive.writestr(
+                "dq_kernel-0.0.0.dist-info/METADATA",
+                "Metadata-Version: 2.1\nName: dq-kernel\nVersion: 0.0.0\n"
+                + "".join(f"Requires-Dist: {line}\n" for line in requires),
+            )
+        return built
+
+    return write
+
+
+def missing(module):
+    """Return the error Python raises for a module that is not installed."""
+    return ModuleNotFoundError(f"No module named '{module}'", name=module)
+
+
+def importer(outcomes):
+    """Return an ``import_module`` that raises what ``outcomes`` says."""
+
+    def import_module(name):
+        if outcomes.get(name) is not None:
+            raise outcomes[name]
+        return SimpleNamespace(__file__="/nowhere/module.py")
+
+    return import_module
+
+
+# ------------------------------------------------------------ the requirements
+
+
+def test_a_requirement_line_is_one_of_three_kinds():
+    assert check.requirement_line(REQUIRES[0]) == ("pyhocon", check.ALWAYS)
+    assert check.requirement_line(REQUIRES[1]) == ("pyarrow", check.EXTRA)
+    assert check.requirement_line(REQUIRES[2]) == ("pywin32-ctypes", check.PLATFORM)
+    assert check.requirement_line("DQ.Kernel_Dist (>=1)") == (
+        "dq-kernel-dist",
+        check.ALWAYS,
+    )
+
+
+def test_the_requirements_come_from_the_wheel_itself(wheel):
+    assert check.requirements(wheel(REQUIRES)) == [
+        ("pyhocon", check.ALWAYS),
+        ("pyarrow", check.EXTRA),
+        ("pywin32-ctypes", check.PLATFORM),
+    ]
+
+
+def test_every_extra_a_refusal_must_name_is_declared():
+    """Read from the packaging declaration, so the check and the package agree."""
+    pyproject = tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text())
+    extras = pyproject["tool"]["poetry"]["extras"]
+    named = {extra.removeprefix("-E ") for _, _, extra in check.ASKED_TO_WORK}
+    assert named == {"arrow", "sqlalchemy", "otel"}
+    assert named <= set(extras), "a refusal names an extra the package does not declare"
+
+
+# ------------------------------------------------------- a fit environment
+
+
+def test_an_environment_with_an_optional_dependency_proves_nothing():
+    required = [
+        ("pyyaml", check.ALWAYS),
+        ("pyarrow", check.EXTRA),
+        ("sqlalchemy", check.EXTRA),
+    ]
+    found = check.problems(required, {"pyyaml", "sqlalchemy"})
+    assert len(found) == 1
+    assert found[0].startswith("this environment holds optional dependencies")
+    assert found[0].endswith("sqlalchemy")
+
+
+def test_every_always_dependency_must_be_present():
+    found = check.problems(
+        [("pyyaml", check.ALWAYS), ("requests", check.ALWAYS)], {"requests"}
+    )
+    assert found == ["core dependencies are not installed: pyyaml"]
+
+
+def test_a_platform_dependency_is_not_missed_when_the_platform_is_absent():
+    required = [("pyyaml", check.ALWAYS), ("pywin32-ctypes", check.PLATFORM)]
+    assert check.problems(required, {"pyyaml"}) == []
+
+
+def test_the_development_environment_cannot_make_the_proof():
+    """Why CI needs a bare install: with an extra installed, the check refuses."""
+    pytest.importorskip(
+        "pyarrow", reason="an extra must be installed for this to mean anything"
+    )
+    present = check.installed()
+    assert "dq-kernel" in present
+    assert check.problems(
+        [("pyhocon", check.ALWAYS), ("pyarrow", check.EXTRA)], present
+    )
+
+
+def test_only_a_location_inside_the_interpreter_s_own_environment_counts(
+    tmp_path, monkeypatch
+):
+    """Judged by directory, not by spelling: ``venv-copy`` starts like ``venv``."""
+    root = tmp_path.resolve()
+    monkeypatch.setattr(check.sys, "prefix", str(root / "venv"))
+    inside = root / "venv" / "lib" / "site-packages" / "dq" / "__init__.py"
+    assert check.from_installation(inside)
+    assert not check.from_installation(root / "checkout" / "dq" / "__init__.py")
+    assert not check.from_installation(root / "venv-copy" / "dq" / "__init__.py")
+
+
+# --------------------------------------------------------------- the modules
+
+
+def package_at(root):
+    """Lay out a package the way the wheel does, tests and notebooks included."""
+    for relative in (
+        "__init__.py",
+        "plan.py",
+        "engine/__init__.py",
+        "engine/x.py",
+        "sdk/fixtures/semantic-cases.json",
+        "tests.py",
+        "tests/__init__.py",
+        "tests/test_x.py",
+        "notebooks/job.py",
+    ):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+    return SimpleNamespace(__name__="dq", __file__=str(root / "__init__.py"))
+
+
+def test_the_walk_covers_what_a_user_runs_and_nothing_else(tmp_path):
+    """The tests and the notebooks are left out by their directories; a module
+    that merely shares a name with one of them is still walked."""
+    package = package_at(tmp_path / "site-packages" / "dq")
+    assert check.modules_of(package) == [
+        "dq",
+        "dq.engine",
+        "dq.engine.x",
+        "dq.plan",
+        "dq.tests",
+    ]
+
+
+def test_a_module_that_needs_an_extra_to_import_is_a_problem(monkeypatch):
+    """Any module, listed or not: this is what a hand-written list missed."""
+    monkeypatch.setattr(
+        check.importlib, "import_module", importer({"dq.history": missing("pyarrow")})
+    )
+    monkeypatch.setattr(check, "NEEDS_AN_EXTRA_TO_IMPORT", frozenset())
+    assert check.import_problems(["dq.history", "dq.plan"]) == [
+        "dq.history does not import without an extra: No module named 'pyarrow'"
+    ]
+
+
+def test_a_declared_module_must_stop_at_a_package_not_its_own(monkeypatch):
+    modules = ("dq.engine.x", "dq.engine.y", "dq.engine.z")
+    monkeypatch.setattr(
+        check.importlib,
+        "import_module",
+        importer(
+            {"dq.engine.x": missing("pyspark"), "dq.engine.y": missing("dq.plann")}
+        ),
+    )
+    monkeypatch.setattr(check, "NEEDS_AN_EXTRA_TO_IMPORT", frozenset(modules))
+    assert check.import_problems(list(modules)) == [
+        "dq.engine.y, declared to need an extra, stops at a module of its own: "
+        "No module named 'dq.plann'",
+        "dq.engine.z is declared to need an extra and imports without one: "
+        "remove it from NEEDS_AN_EXTRA_TO_IMPORT",
+    ]
+
+
+def test_a_module_that_fails_another_way_is_a_problem(monkeypatch):
+    monkeypatch.setattr(
+        check.importlib, "import_module", importer({"dq.plan": SyntaxError("bad")})
+    )
+    assert check.import_problems(["dq.plan"]) == [
+        "dq.plan fails to import another way: SyntaxError: bad"
+    ]
+
+
+def test_the_log_says_which_package_each_declared_module_lacks(monkeypatch, capsys):
+    monkeypatch.setattr(
+        check.importlib, "import_module", importer({"dq.engine.x": missing("pyspark")})
+    )
+    monkeypatch.setattr(check, "NEEDS_AN_EXTRA_TO_IMPORT", frozenset({"dq.engine.x"}))
+    assert check.import_problems(["dq.engine.x", "dq.plan"]) == []
+    indented = [
+        line for line in capsys.readouterr().out.splitlines() if line.startswith("  ")
+    ]
+    assert indented == ["  dq.engine.x (pyspark)"]
+
+
+def test_every_declared_module_is_one_the_checkout_ships():
+    """A name matching no file would hide nothing and catch nothing."""
+    for name in sorted(check.NEEDS_AN_EXTRA_TO_IMPORT):
+        assert (
+            (REPOSITORY_ROOT / Path(*name.split("."))).with_suffix(".py").is_file()
+        ), name
+
+
+# -------------------------------------------------------------- the commands
+
+COMMANDS = {
+    "dq-run": ("dq.runner", "main"),
+    "dq-validate": ("dq.validate", "main"),
+}
+
+
+def record_runs(monkeypatch, answers):
+    """Make each command return what ``answers`` says for its first argument."""
+    calls = []
+
+    def run(target, arguments):
+        calls.append((target, arguments))
+        return answers.get(arguments[0], (0, "usage: something\n"))
+
+    monkeypatch.setattr(check, "run", run)
+    return calls
+
+
+def only_commands(monkeypatch, commands, answers=()):
+    """Leave the commands to be judged: nothing is asked to run."""
+    monkeypatch.setattr(check, "commands", lambda: dict(commands))
+    monkeypatch.setattr(check, "ASKED_TO_RUN", ())
+    return record_runs(monkeypatch, dict(answers))
+
+
+def test_the_wheel_s_own_commands_are_told_from_its_dependencies(monkeypatch):
+    entry_points = [
+        SimpleNamespace(name="dq-run", value="dq.runner:main"),
+        SimpleNamespace(name="dq-engines", value="dq.engines:main"),
+        SimpleNamespace(name="pyhocon", value="pyhocon.cli:main"),
+    ]
+    monkeypatch.setattr(check.metadata, "entry_points", lambda group: entry_points)
+    assert check.commands() == {
+        "dq-run": ("dq.runner", "main"),
+        "dq-engines": ("dq.engines", "main"),
+    }
+
+
+def test_a_command_runs_isolated_so_it_cannot_import_the_checkout(monkeypatch):
+    """A plain ``python -c`` puts the checkout, the working directory, first
+    on the path: the command would run the checkout's code, not the wheel's."""
+    seen = []
+
+    def run(argv, **options):
+        seen.append(argv)
+        return SimpleNamespace(returncode=0, stdout="usage: x", stderr="")
+
+    monkeypatch.setattr(check.subprocess, "run", run)
+    assert check.run(("dq.runner", "main"), ["--help"]) == (0, "usage: x")
+    assert seen == [
+        [
+            check.sys.executable,
+            "-I",
+            "-c",
+            "import sys; from dq.runner import main; sys.exit(main() or 0)",
+            "--help",
+        ]
+    ]
+
+
+def test_every_command_is_asked_for_help(monkeypatch):
+    calls = only_commands(monkeypatch, COMMANDS)
+    assert check.command_problems(Path("scratch")) == []
+    assert [arguments for _, arguments in calls if arguments == ["--help"]] == [
+        ["--help"],
+        ["--help"],
+    ]
+
+
+@pytest.mark.parametrize(
+    ("answer", "problem"),
+    [
+        ((1, "Traceback: boom"), "--help exits 1: Traceback: boom"),
+        ((1, "\n   \n"), "--help exits 1: (no output)"),
+        ((2, "usage: dq-run\nerror: broken"), "--help exits 2: error: broken"),
+        ((0, "silence"), "--help exits 0: silence"),
+    ],
+    ids=["crashed", "said-nothing", "printed-its-usage-then-failed", "silent"],
+)
+def test_a_command_that_does_not_answer_help_is_a_problem(monkeypatch, answer, problem):
+    """The second is what argparse does for an error of its own: the usage is
+    printed, and the exit code says it failed."""
+    only_commands(monkeypatch, COMMANDS, {"--help": answer})
+    assert check.command_problems(Path("scratch")) == [
+        f"dq-run {problem}",
+        f"dq-validate {problem}",
+    ]
+
+
+def test_the_validator_must_be_installed_and_accept_the_shipped_example(monkeypatch):
+    refused = (2, "Configuration validation failed")
+    calls = only_commands(monkeypatch, COMMANDS, {str(check.ON_SPARK): refused})
+    assert check.command_problems(Path("scratch")) == [
+        f"dq-validate {check.ON_SPARK.name} exits 2: Configuration validation failed"
+    ]
+    assert (("dq.validate", "main"), [str(check.ON_SPARK)]) in calls
+
+    only_commands(monkeypatch, {"dq-run": ("dq.runner", "main")})
+    assert check.command_problems(Path("scratch")) == [
+        "the wheel installs no command named dq-validate"
+    ]
+
+
+def kernel_asked_to_run(monkeypatch):
+    """Leave ``dq-kernel`` to be judged over one rule pack; return its path."""
+    rules = str(Path("scratch") / "rules.conf")
+    monkeypatch.setattr(
+        check,
+        "commands",
+        lambda: {
+            "dq-kernel": ("dq.cli", "main"),
+            "dq-validate": ("dq.validate", "main"),
+        },
+    )
+    monkeypatch.setattr(
+        check,
+        "ASKED_TO_RUN",
+        (("dq-kernel", lambda scratch: [rules], "pip install dq-kernel[spark]"),),
+    )
+    return rules
+
+
+def test_a_command_that_exits_two_and_says_what_to_install_passes(monkeypatch):
+    rules = kernel_asked_to_run(monkeypatch)
+    record_runs(monkeypatch, {rules: (2, "Install: pip install dq-kernel[spark]")})
+    assert check.command_problems(Path("scratch")) == []
+
+
+@pytest.mark.parametrize(
+    ("answer", "problem"),
+    [
+        (
+            (1, "Traceback (most recent call last):\nUnboundLocalError: no value"),
+            "dq-kernel, asked to run, exits 1 and does not say "
+            "'pip install dq-kernel[spark]': UnboundLocalError: no value",
+        ),
+        (
+            (1, "Install Spark support with: pip install dq-kernel[spark]"),
+            "dq-kernel, asked to run, exits 1 and does not say "
+            "'pip install dq-kernel[spark]': "
+            "Install Spark support with: pip install dq-kernel[spark]",
+        ),
+        (
+            (2, "error"),
+            "dq-kernel, asked to run, exits 2 and does not say "
+            "'pip install dq-kernel[spark]': error",
+        ),
+    ],
+    ids=["crashed", "right-words-wrong-code", "right-code-wrong-words"],
+)
+def test_a_command_is_judged_by_its_exit_code_and_by_its_words(
+    monkeypatch, answer, problem
+):
+    """Exit 2 is what every command's help promises for a missing dependency.
+    The first answer is the crash this guards against; the problem quotes a
+    command's last line, where a traceback says what went wrong."""
+    rules = kernel_asked_to_run(monkeypatch)
+    record_runs(monkeypatch, {rules: answer})
+    assert check.command_problems(Path("scratch")) == [problem]
+
+
+def test_a_command_the_wheel_does_not_install_is_a_problem(monkeypatch):
+    monkeypatch.setattr(check, "commands", lambda: dict(COMMANDS))
+    monkeypatch.setattr(
+        check, "ASKED_TO_RUN", (("dq-kernel", lambda scratch: [], "spark"),)
+    )
+    assert check.command_problems(Path("scratch")) == [
+        "the wheel installs no command named dq-kernel"
+    ]
+
+
+def test_the_run_over_files_hands_the_runner_a_dataset_that_is_there(tmp_path):
+    """dq-run refuses a missing file before it needs pyarrow, which would
+    let it name nothing and still exit 2."""
+    dataset = tmp_path / "orders.parquet"
+    arguments = check.over_files(tmp_path)
+    assert dataset.is_file()
+    assert arguments == [
+        str(check.OVER_FILES),
+        "--dataset",
+        f"orders={dataset}",
+        "--report",
+        str(tmp_path / "report.json"),
+    ]
+    assert check.OVER_FILES.is_file() and check.ON_SPARK.is_file()
+
+
+# ------------------------------------------------------- asked to work
+
+
+def test_an_entry_point_that_names_its_extra_passes():
+    def call(module):
+        raise ImportError(
+            "The arrow adapter requires the optional pyarrow package; "
+            "install it with `poetry install -E arrow`"
+        )
+
+    assert check.refuses_naming_the_extra(None, call, "-E arrow") == ""
+
+
+@pytest.mark.parametrize(
+    "failure, expected",
+    [
+        (ImportError("No module named 'pyarrow'"), "named no extra"),
+        (ValueError("boom"), "failed another way: ValueError: boom"),
+    ],
+)
+def test_an_entry_point_that_fails_any_other_way_is_a_problem(failure, expected):
+    def call(module, failure=failure):
+        raise failure
+
+    assert expected in check.refuses_naming_the_extra(None, call, "-E arrow")
+
+
+def test_an_entry_point_that_runs_means_an_extra_is_installed():
+    assert check.refuses_naming_the_extra(
+        None, lambda module: object(), "-E arrow"
+    ) == ("it ran: an extra is installed")
+
+
+def test_an_entry_point_that_does_not_name_its_extra_is_a_problem(monkeypatch, capsys):
+    def asked_to(work):
+        monkeypatch.setattr(
+            check,
+            "ASKED_TO_WORK",
+            (("dq.adapter", lambda module: module.work(), "-E adapter"),),
+        )
+        monkeypatch.setattr(
+            check.importlib, "import_module", lambda name: SimpleNamespace(work=work)
+        )
+
+    def refusing(message):
+        def work():
+            raise ImportError(message)
+
+        return work
+
+    asked_to(refusing("No module named 'vendor'"))
+    assert check.asked_to_work_problems() == [
+        "dq.adapter, asked to work, it named no extra: No module named 'vendor'"
+    ]
+
+    asked_to(refusing("install it with `poetry install -E adapter`"))
+    assert check.asked_to_work_problems() == []
+    printed = capsys.readouterr().out
+    assert "dq.adapter, asked to work, names its extra: -E adapter" in printed
+
+
+def test_with_the_extras_installed_no_sample_is_refused_for_its_extra():
+    """A sample that named its extra here would name it in the empty
+    environment for the wrong reason."""
+    for package in ("pyarrow", "sqlalchemy", "opentelemetry"):
+        pytest.importorskip(
+            package, reason="an extra must be installed for this to mean anything"
+        )
+    found = check.asked_to_work_problems()
+    assert len(found) == len(check.ASKED_TO_WORK), found
+    assert not any("named no extra" in problem for problem in found), found
+
+
+# --------------------------------------------------------- the whole check
+
+
+def every_stage_passes(monkeypatch):
+    monkeypatch.setattr(check, "installed", lambda: {"pyhocon", "dq-kernel"})
+    monkeypatch.setattr(check, "modules_of", lambda package: ["dq"])
+    monkeypatch.setattr(check.importlib, "import_module", importer({}))
+    monkeypatch.setattr(check, "from_installation", lambda location: True)
+    monkeypatch.setattr(check, "import_problems", lambda names: [])
+    monkeypatch.setattr(check, "asked_to_work_problems", lambda: [])
+    monkeypatch.setattr(check, "command_problems", lambda scratch: [])
+
+
+def test_the_check_passes_when_the_wheel_is_all_there_is(monkeypatch, wheel):
+    every_stage_passes(monkeypatch)
+    assert check.main([str(wheel(REQUIRES))]) == 0
+
+
+def test_the_check_refuses_when_an_optional_dependency_is_installed(monkeypatch, wheel):
+    every_stage_passes(monkeypatch)
+    monkeypatch.setattr(check, "installed", lambda: {"pyhocon", "dq-kernel", "pyarrow"})
+    assert check.main([str(wheel(REQUIRES))]) == 1
+
+
+def test_the_check_refuses_when_the_package_is_not_installed(monkeypatch, wheel):
+    every_stage_passes(monkeypatch)
+    monkeypatch.setattr(check, "installed", lambda: {"pyhocon"})
+    assert check.main([str(wheel(REQUIRES))]) == 1
+
+
+def test_the_package_imported_from_outside_the_installation_is_a_problem(
+    monkeypatch, wheel
+):
+    every_stage_passes(monkeypatch)
+    monkeypatch.setattr(check, "from_installation", lambda location: False)
+    assert check.main([str(wheel(REQUIRES))]) == 1
+
+
+def test_an_unfit_environment_is_refused_before_any_module_is_imported(
+    monkeypatch, wheel
+):
+    def never(names):
+        raise AssertionError("the proof is void: nothing should be imported")
+
+    every_stage_passes(monkeypatch)
+    monkeypatch.setattr(check, "installed", lambda: {"pyhocon", "dq-kernel", "pyarrow"})
+    monkeypatch.setattr(check, "import_problems", never)
+    monkeypatch.setattr(check.importlib, "import_module", never)
+    assert check.main([str(wheel(REQUIRES))]) == 1
+
+
+def test_every_problem_is_reported_not_only_the_first(monkeypatch, wheel, capsys):
+    every_stage_passes(monkeypatch)
+    monkeypatch.setattr(check, "import_problems", lambda names: ["modules"])
+    monkeypatch.setattr(check, "asked_to_work_problems", lambda: ["entry points"])
+    monkeypatch.setattr(check, "command_problems", lambda scratch: ["commands"])
+    assert check.main([str(wheel(REQUIRES))]) == 1
+    reported = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("problem:")
+    ]
+    assert reported == [
+        "problem: modules",
+        "problem: entry points",
+        "problem: commands",
+    ]
+
+
+def test_it_takes_exactly_one_wheel():
+    assert check.main([]) == 2
+    assert check.main(["nowhere.whl"]) == 2
