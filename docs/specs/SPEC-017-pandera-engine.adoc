@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: In Progress +
+Status: Verified — CI run 46001108010 green on PR #72: 2364 passed on Python 3.13 (95.59% line, 93.86% branch) and 2370 on 3.12, 196 changed lines at 100% +
 Date: 2026-11-24 +
 Driven by: ADR-012, ADR-001 +
 Milestone: M3 +
@@ -82,13 +82,44 @@ whose input is not a Spark DataFrame.
 
 == Progress
 
-* [x] G1 — observed 2026-11-27: pandera 0.36.0 with pandas 3.1.1 and
-  Polars 2.2.0 on Python 3.13, in an isolated environment. The lock gains
-  three packages and moves none; the verified calls are in the note
-* [ ] G2 — not started
-* [ ] G3 — not started
-* [ ] G4 — not started
-* [ ] G5 — not started
+* [x] G1 — evidence: `dq/tests/test_pandera.py::test_g1_the_facts_the_spec_rests_on_hold_in_the_installed_pandera`,
+  `::test_g1_importing_pandera_sets_spark_s_timezone_switch_for_the_process`
+  (pandera 0.36.0 with pandas 3.1.1 and Polars 2.2.0, observed on 2026-11-27
+  in an isolated environment and since run in CI against the installed
+  package; the lock gained three packages and moved none)
+* [x] G2 — evidence: `dq/tests/test_pandera.py::test_g2_the_engine_conforms_with_its_columns_in_either_order`,
+  `dq/tests/test_conformance_builtin.py::test_every_built_in_engine_conforms`,
+  `::test_built_in_engines_conform_without_a_sink_too`
+  (on a pandas frame and on a Polars frame, with attribution checked against
+  the same schema with its columns in another order)
+* [x] G3 — evidence: `dq/tests/test_pandera.py::test_g3_a_passing_schema_passes_every_outcome`,
+  `::test_g3_a_failing_column_check_carries_its_reason_and_its_rows`,
+  `::test_g3_a_failing_warning_level_check_is_reported_as_one`,
+  `::test_g3_a_null_in_a_non_nullable_column_is_counted`,
+  `::test_g3_a_duplicate_where_unique_is_declared_is_counted`,
+  `::test_g3_a_wrong_dtype_fails_without_a_failing_value`,
+  `::test_g3_a_missing_required_column_fails_every_outcome_of_that_column`,
+  `::test_g3_a_whole_column_of_the_wrong_dtype`,
+  `::test_g3_an_optional_column_that_is_absent_passes_and_says_so`,
+  `::test_g3_a_check_named_in_the_document_reports_under_that_name`,
+  `::test_each_result_is_attributed_to_its_own_check`,
+  `::test_the_gate_reads_the_criticality_of_the_check_that_failed`
+  (each on pandas and on Polars)
+* [x] G4 — evidence: `dq/tests/test_pandera.py::test_g4_an_unknown_check_is_refused_naming_where_it_was_written`,
+  `::test_g4_an_unknown_key_inside_a_check_is_refused_naming_it`,
+  `::test_g4_a_document_pandera_cannot_read_is_refused_quoting_its_error`,
+  `::test_g4_coerce_is_refused_saying_why`,
+  `::test_g4_strict_is_refused_saying_why`,
+  `::test_g4_two_checks_named_alike_are_refused`,
+  `dq/tests/test_pandera_unit.py::test_what_pandera_drops_is_refused_naming_where_it_was_written`,
+  `::test_what_pandera_keeps_but_this_engine_cannot_vouch_for_is_refused`,
+  `::test_a_failure_that_is_no_outcome_of_the_schema_refuses_the_run`,
+  `::test_two_failures_for_one_check_are_refused`
+  (the live ones against the real package, the rest with a stand-in)
+* [x] G5 — evidence: `dq/tests/test_pandera.py::test_g5_the_example_rule_pack_validates`,
+  `::test_g5_the_example_runs_as_a_rule_pack_is_loaded`,
+  `dq/tests/test_validate.py::test_checked_in_example_is_a_valid_configuration`,
+  `dq/tests/test_documented_snippets.py::test_the_documented_python_runs`
 
 [NOTE]
 ====
