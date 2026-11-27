@@ -202,9 +202,9 @@ a command, or an observed CI run is not a gate.
 | SPEC-017
 | link:specs/SPEC-017-pandera-engine.adoc[pandera engine]
 | M3
-| Accepted
-| 0/5
-| gated on the live dependency and API check
+| In Progress
+| 1/5
+| 
 
 | SPEC-018
 | link:specs/SPEC-018-soda-core-engine.adoc[Soda Core engine]
@@ -264,7 +264,7 @@ a command, or an observed CI run is not a gate.
 * M0: 2/2 specs verified; 14/14 acceptance gates met
 * M1: 4/4 specs verified; 22/22 acceptance gates met
 * M2: 3/3 specs verified; 13/13 acceptance gates met
-* M3: 2/4 specs verified; 12/22 acceptance gates met
+* M3: 2/4 specs verified; 13/22 acceptance gates met
 * M4: 0/4 specs verified; 0/18 acceptance gates met
 * M5: 0/3 specs verified; 0/9 acceptance gates met
 * Shipped: 3/3 specs verified; 7/7 acceptance gates met

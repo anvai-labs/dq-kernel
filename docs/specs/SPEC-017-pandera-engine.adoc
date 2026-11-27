@@ -2,67 +2,156 @@
 :toc:
 :sectlinks.
 
-Status: Accepted — gated on the live dependency and API check +
+Status: In Progress +
 Date: 2026-11-24 +
 Driven by: ADR-012, ADR-001 +
 Milestone: M3 +
 Depends on: SPEC-011 +
-Gate: before any build, install the pinned version in an isolated
-  environment together with the other extras, confirm they resolve, and
-  record the verified API calls here. No build starts on an unverified API. +
+Gate: met 2026-11-27. The live dependency and API check is recorded under
+  G1 and in the note below; no build started before it. +
 
 == Purpose
 
 Wrap pandera, the most widely used schema and dataframe validation library
 in the pandas and Polars ecosystem, so its users get this framework's
-evidence, gate, and sinks without rewriting their checks. It is the first
-engine whose input is not a Spark DataFrame.
+evidence and gate without rewriting their checks. It is the first engine
+whose input is not a Spark DataFrame.
 
 == In scope
 
-* `dq/engine/pandera/`: an engine on the ADR-012 hooks.
-* Payload in pandera's own vocabulary: a schema in its serialized form, or
-  a list of column checks. No Python is loaded from configuration (ADR-001
-  non-goal), so a reference to a schema object in a module is out.
-* Backends: pandas, and Polars where pandera supports the serialized schema
-  there.
-* Results: one outcome per failing and passing check, carrying failure
-  counts and a bounded list of failing column and check names.
-* An optional `pandera` extra and live tests in the main test lane.
+* `dq/engine/pandera/`: an engine on the ADR-012 hooks that validates a
+  pandas or a Polars DataFrame.
+* Payload in pandera's own vocabulary. A rule's `schema` is the document
+  pandera's `to_json()` writes: a nested mapping in HOCON, YAML or JSON, or
+  that document as a text. The document names its backend:
+  `schema_type = "dataframe"` is pandas and `"polars_dataframe"` is Polars.
+  No Python is loaded from configuration (ADR-001 non-goal), so a reference
+  to a schema object or a function in a module is out.
+* Results: one outcome per check and per column property the schema
+  enforces, passing and failing alike. Each carries pandera's reason and,
+  where pandera counts them, how many rows failed -- never a failing value.
+* Severity: a check pandera is told to treat as a warning (`raise_warning`)
+  is reported with `criticality: warn`; every other outcome is an `error`.
+* An optional `pandera` extra, and live tests in the main test lane.
 
 == Out of scope
 
-* Custom check functions written in Python and referenced from a rule pack;
-* schema inference (that is profiling, SPEC-019);
-* backends beyond pandas and Polars.
+* Custom check functions written in Python and referenced from a rule pack.
+  A serialized schema cannot carry one; see the note.
+* Schema inference (that is profiling, SPEC-019).
+* Backends beyond pandas and Polars.
+* Persistence to a repository. The framework's artifact path builds Spark
+  frames from the frame's own session, and a pandas or Polars frame has
+  none, so the engine declares `persistence` false and refuses one.
+* A runner that resolves a frame for a schema out of a rule pack. The
+  engine is called with a frame in hand (`dq-run` reads files for portable
+  rules, SPEC-015).
 
 == Contracts
 
-* Capabilities are declared honestly: row-filter support, failed-row counts,
-  and persistence reflect what the engine can really do.
-* Vendor vocabulary passes through untouched; only identity and severity
+* Capabilities are declared honestly: no row filter; failed-row counts
+  where pandera gives them; no persistence.
+* Vendor vocabulary passes through untouched. Only identity and severity
   cross the check seam.
 * The engine imports no pandera until it is used.
+* Nothing pandera drops silently gets through. pandera ignores a check or a
+  key it does not recognise, and the schema then validates anything. So the
+  engine reads the document, writes the schema back out, and refuses every
+  key of the input that is missing from pandera's own document at the same
+  place.
+* A result is matched to its check by what the failure carries -- the
+  column and the check's name -- never by its position.
+* A warning-level check is never reported as passed on pandera's word
+  alone: under lazy validation pandera says nothing about one that fails.
 
 == Acceptance gates
 
 * G1 — The live dependency and API check is recorded here: versions
   installed, the calls verified against the real package, and the date.
-* G2 — The engine passes the conformance suite (SPEC-011).
-* G3 — Live round trips: a passing schema, a failing column check, and a
-  failing dataframe-level check each produce the specified outcomes.
-* G4 — An unknown construct or an unserializable schema fails closed with a
-  message naming the check.
+* G2 — The engine passes the conformance suite (SPEC-011) on a pandas frame
+  and on a Polars frame, with attribution checked against a schema whose
+  columns are in another order.
+* G3 — Live round trips on each backend. A passing schema, a failing column
+  check, a wrong dtype, a null in a non-nullable column, a duplicate where
+  `unique` is declared, a missing required column and a failing
+  warning-level check each produce the specified outcomes.
+* G4 — An unknown construct or a document pandera cannot read fails closed
+  with a message naming the check.
 * G5 — A checked-in example rule pack validates and is covered by a test.
 
 == Progress
 
-* [ ] G1 — PyPI checked 2026-11-24: pandera 0.36.0, Python >=3.10, depends
-  on packaging, pydantic, typeguard, typing_extensions, typing_inspect. The
-  live check has not been run
+* [x] G1 — observed 2026-11-27: pandera 0.36.0 with pandas 3.1.1 and
+  Polars 2.2.0 on Python 3.13, in an isolated environment. The lock gains
+  three packages and moves none; the verified calls are in the note
 * [ ] G2 — not started
 * [ ] G3 — not started
 * [ ] G4 — not started
 * [ ] G5 — not started
 
-Links: ADR-012; ADR-001; SPEC-011; SPEC-015; docs/compute-engines.adoc.
+[NOTE]
+====
+Amended 2026-11-27, before any build, with what the gate check measured: an
+isolated environment on Python 3.13 with pandera 0.36.0 (released
+2026-11-10), pandas 3.1.1 and Polars 2.2.0. Three of the spec's first
+sentences did not survive it and are rewritten above rather than left to be
+read.
+
+* The dependency is safe to add. With `pandera = "^0.36"` as an optional
+  dependency and one `pandera` extra, the lock gains three packages
+  (pandera 0.36.0, typeguard 4.6.1 and typing-inspect 0.9.0) and moves no
+  version. Poetry cannot name a dependency's own extras, so the extra is
+  pandera alone: `pandera[pandas]` would add only numpy and pandas, and
+  `pandera[polars]` only polars. The frame's library comes with the frames.
+* The classes are imported per backend. `from pandera import Check` warns
+  that the top-level names will be removed; the engine uses `pandera.pandas`
+  and `pandera.polars`.
+* A schema is written with `to_json()` and read with
+  `DataFrameSchema.from_json()`. The document is keyed: a column holds at
+  most one check of each kind (`greater_than_or_equal_to`, `str_length`,
+  `isin`, ...), with its statistics and optionally `error` and
+  `raise_warning`. A `checks` list on a column is not a document pandera
+  reads: it raises a bare `KeyError: 'options'`, which the engine turns into
+  a refusal. So a column and a check's name identify a check.
+* The two backends spell a check's argument differently. pandas writes
+  `{"min_value": 0}`; Polars writes `{"value": 0}`, and a bare `0` when the
+  statistic is all there is. The comparison the Contracts ask for equates
+  the three, or correct documents would be refused.
+* *Corrected:* G3 asked for a failing dataframe-level check. One written as
+  a Python function cannot be serialized -- pandera warns that only
+  registered checks may be serialized and writes `"checks": null` -- and
+  ADR-001 forbids loading the function from configuration. G3 names the
+  column properties a document does carry instead.
+* Under lazy validation pandera reports nothing for a warning-level check
+  that fails. It is absent from `SchemaErrors.schema_errors`, and when only
+  such checks fail, `validate()` returns the frame. The engine validates a
+  copy of the schema in which every warning-level check is made strict, and
+  remembers which they were.
+* A failure carries `column_name`, `reason_code`, `check` and
+  `failure_cases`. `check` is a `Check` for a column check, and a bare name
+  for a column property: `not_nullable`, `field_uniqueness`, the dtype. On
+  pandas it is the schema's own object; on Polars a copy. So a result is
+  matched on the column and the check's name.
+* `failure_cases` is a DataFrame for a check, a null, a duplicate and a
+  dtype the column's values do not fit. Its length is the number of failed
+  rows, and it holds the failing values themselves -- which is why an
+  outcome carries a count and never a value. Elsewhere it is a string: the
+  column's name when a required column is absent (then `column_name` is
+  `None` and the reason `COLUMN_NOT_IN_DATAFRAME`), or the dtype a whole
+  column has when it is the wrong one. The engine reports a count only
+  where pandera gave one.
+* One cause can be two failures. On pandas a null in an integer column
+  turns the column to float, and pandera reports both the null and the
+  dtype. The engine reports both.
+* A required column that is absent fails every outcome of that column, with
+  that reason and no count. An optional column that is absent raises
+  nothing: its outcomes pass, with `present: false` in their details.
+* pandas 3 stores text as `str`, so `"dtype": "object"` fails a text column
+  there. The example writes `str`.
+* Persistence is out. `DQEngine._artifact_frames` takes the session from the
+  frame, and a pandas or Polars frame has none. A caller with a session can
+  still frame the outcomes for a sink, as a harvester's are
+  (`dq.engine.dq_engine.outcome_frames`).
+====
+
+Links: ADR-012; ADR-001; SPEC-011; SPEC-015; SPEC-013.
