@@ -286,6 +286,23 @@ def test_no_datasets_at_all_is_refused(tmp_path, unread):
     refused(pack, ["orders.parquet"], unread, "a run needs its datasets")
 
 
+def test_dataset_names_that_are_not_strings_are_refused_in_order(tmp_path, unread):
+    """A caller's keys need not be strings. Sorting them with the rules'
+    names once raised a TypeError where a refusal belongs."""
+    orders = str(write_orders(tmp_path))
+    pack = write_pack(tmp_path, rule_pack(rule()))
+    with pytest.raises(ConfigurationError) as raised:
+        runner.run(str(pack), {1: orders, 2: orders, "extra": orders})
+    lines = str(raised.value).splitlines()
+    assert lines[1:] == [
+        "  - no dataset is given for 'orders', which a rule needs",
+        "  - a dataset is given for 1, which no rule uses",
+        "  - a dataset is given for 2, which no rule uses",
+        "  - a dataset is given for 'extra', which no rule uses",
+    ]
+    assert unread == []
+
+
 def test_every_problem_is_reported_at_once(tmp_path, unread):
     orders = str(write_orders(tmp_path))
     pack = write_pack(

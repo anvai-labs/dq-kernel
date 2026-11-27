@@ -601,7 +601,8 @@ dq-run examples/arrow_rule.conf --dataset orders=orders.parquet --report report.
 extension: `.parquet` and `.pq`, `.arrow`, `.feather` and `.ipc`, `.csv`, `.json` and
 `.ndjson`; a directory is read as the dataset pyarrow finds in it. Parquet and Arrow IPC keep
 every type. A CSV keeps none -- pyarrow decides each column's type, a decimal becomes a double,
-and a NaN reads back as null -- and JSON must be newline-delimited. The command prints a
+and a NaN reads back as null -- and JSON must be newline-delimited. Each dataset is read whole
+into memory: a run over files is for data that fits in one process. The command prints a
 summary and exits 0 when the gate passed, 1 when it failed, and 2 when the rule pack cannot be
 run as given or a dependency is missing.
 

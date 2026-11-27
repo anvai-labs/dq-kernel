@@ -224,9 +224,11 @@ def runnable(pack: RulePack, datasets: Any) -> dict:
                 f'{rule.label} does not name adapter = "arrow": it {how}. A run '
                 "over files does not substitute an adapter"
             )
-    for name in sorted(used - set(datasets)):
+    # A caller's keys need not be strings; the rules' names are. Sort by the
+    # text so that such a name is refused, in order, and never raises.
+    for name in sorted(used - set(datasets), key=str):
         problems.append(f"no dataset is given for {name!r}, which a rule needs")
-    for name in sorted(set(datasets) - used):
+    for name in sorted(set(datasets) - used, key=str):
         problems.append(f"a dataset is given for {name!r}, which no rule uses")
     paths = {}
     for name, given in datasets.items():
@@ -310,6 +312,9 @@ def read_dataset(name: str, path: Path):
     Parquet and Arrow IPC keep every type. A CSV keeps none: pyarrow decides
     each column's type, a decimal becomes a double, and a NaN reads back as
     null. JSON must be newline-delimited, and its types are told the same way.
+
+    The dataset is read whole into memory: a run over files is for data that
+    fits in one process.
 
     Raises:
         ImportError: When pyarrow is not installed, naming the extra.
