@@ -212,6 +212,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The whole lock is re-resolved**, with every constraint in `pyproject.toml`
+  unchanged: 41 movements, where updating one dependency at a time had left
+  the transitive ones behind. Great Expectations 1.24.1 → 1.25.0, pandas
+  3.0.5 → 3.1.1, and 38 more, most of them patches. Two packages are now held
+  in two versions, split by Python version, which the lock format allows and
+  an incremental lock never produces: SQLAlchemy is 2.0.58 on Python 3.12,
+  where DQX requires below 2.1, and 2.1.9 on 3.13; protobuf likewise 6.33.6
+  and 7.36.2. The one major movement, `importlib-metadata` 9 → 10, is in the
+  `delta` extra, which no CI lane installs
 - **Every check has its own name, and its own verdict.** The engine
   conformance suite found that the Deequ, Great Expectations, businessrules
   and schema-validation engines reported several checks under one name
