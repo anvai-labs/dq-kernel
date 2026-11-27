@@ -184,6 +184,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference, whose Python is run by a test
 - `polars` and `datafusion` as development dependencies, so the interchange
   tests run in CI instead of skipping
+- **SQL compute adapter** (SPEC-016, ADR-011): `dq.sql_adapter` compiles a
+  counts/v1, groups/v1 or ranges/v1 plan into one aggregate `SELECT` per
+  dataset, has the database run it, and hands the row back to the kernel's
+  own evaluation. The data does not move. A dataset is bound as a
+  `SqlDataset`: a SQLAlchemy table whose columns declare their types, and
+  the `Engine` or `Connection` that reaches it; `adapter = "sql"` on a
+  portable rule names it. DuckDB is the certified lane: the corpus passes
+  there, and the Spark and SQL adapters agree on every metric over the same
+  rows. Every corpus statement is held as a PostgreSQL snapshot, and was run
+  once by hand on a real PostgreSQL 14
+- Everything checkable is refused before any query runs, naming the rule
+  that asked: a column not there exactly; a dialect the adapter does not
+  know; a type it cannot measure; a bound of a text, temporal, binary or
+  UUID column; a float on a dialect that cannot keep NaN out; a parameter of
+  a bound subquery with no value. The order matters because DuckDB has no
+  savepoint and leaves a failed statement's transaction aborted
+- Two DuckDB behaviours the adapter undoes: a decimal read through a typed
+  expression comes back rounded to a double, so the statement is run as
+  text; and PostgreSQL has no `min` or `max` of a boolean, so a boolean's
+  bounds are taken of it cast to an integer there
+- `engine_from_env` builds a bind from a URL the environment holds: a
+  credential never enters a rule pack
+- `duckdb` and `duckdb-engine` as development dependencies, so the lane runs
+  in CI; and a "The SQL adapter" section in the compute-engines reference,
+  whose Python is run by a test
 
 ### Changed
 

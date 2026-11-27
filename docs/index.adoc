@@ -309,9 +309,11 @@ Uniqueness, schema, regex and clocks/timezones remain outside it.
 
 A plan runs on the compute a rule names. `adapter = "spark"`, the default, runs it on
 Spark; `adapter = "arrow"` runs it on the Arrow adapter, inside the Spark facade or with no
-Spark at all. Any other value is refused before data is read. Both adapters are held to the
-same semantic corpus, and xref:#running-over-files[the runner] executes the same run core as
-the facade.
+Spark at all; `adapter = "sql"` runs it where the data already lives, as one aggregate query a
+database answers (SPEC-016, DuckDB the certified lane). Any other value is refused before data
+is read. Every adapter is held to the same semantic corpus, and
+xref:#running-over-files[the runner] executes the same run core as the facade.
+xref:compute-engines.adoc[Compute engines beyond Spark] describes the Arrow and SQL adapters.
 
 Outcomes carry the rule ID, exact numerator/denominator, semantic version, logical
 plan digest and adapter declaration. `build_report` accepts these outcomes, but

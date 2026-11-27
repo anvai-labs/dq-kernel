@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: Accepted — amended 2026-11-27 before implementation, after probing +
+Status: In Progress — every gate is met in code and by its tests; CI on the carrying PR is awaited +
 Date: 2026-11-24 +
 Driven by: ADR-002, ADR-011 +
 Milestone: M3 +
@@ -81,16 +81,39 @@ so the plan compiles to one query per dataset and the data never moves.
 
 == Progress
 
-* [ ] G1 — not started
-* [ ] G2 — not started
-* [ ] G3 — not started
-* [ ] G4 — not started
-* [ ] G5 — not started
-* [ ] G6 — not started
+* [x] G1 — evidence: `dq/tests/test_corpus_sql.py::test_sql_computes_the_documented_metrics`,
+  `::test_sql_decides_every_case_as_the_corpus_documents`,
+  `::test_sql_fails_closed_in_the_words_the_other_adapters_use`,
+  `dq/tests/test_sql_adapter_spark.py::test_both_adapters_compute_the_corpus_metrics_over_the_same_rows`
+  (all 24 cases on DuckDB; and on real Spark the two adapters agree metric
+  for metric over the same rows)
+* [x] G2 — evidence: `dq/tests/test_corpus_sql.py::test_g2_every_corpus_plan_compiles_to_its_postgresql_statement`,
+  `::test_the_snapshot_holds_every_corpus_case_and_nothing_else`,
+  `::test_a_plan_always_compiles_to_the_same_text`,
+  `::test_no_statement_carries_a_parameter_of_its_own`
+* [x] G3 — evidence: `dq/tests/test_sql_adapter.py::test_g3_a_bound_on_a_text_column_is_refused_before_any_query`,
+  `::test_g3_each_family_without_bounds_is_refused_naming_it`,
+  `::test_g3_a_type_the_adapter_does_not_know_is_refused_for_everything`,
+  `::test_g3_a_dialect_the_adapter_does_not_know_is_asked_for_nothing`,
+  `::test_g3_a_float_on_a_dialect_that_cannot_keep_nan_out_is_refused`,
+  `::test_a_column_counted_for_one_metric_is_still_asked_about_for_the_next`
+  (each against a connection that records, and recorded nothing)
+* [x] G4 — evidence: `dq/tests/test_sql_adapter.py::test_g4_one_query_per_dataset_for_a_multi_rule_plan`,
+  `::test_g4_each_semantics_is_one_statement`,
+  `::test_two_groupings_are_one_statement_and_a_group_count_is_not_a_cross_join`,
+  `dq/tests/test_corpus_sql.py::test_the_text_that_is_compiled_is_the_text_that_is_run`
+* [x] G5 — evidence: `dq/tests/test_sql_adapter.py::test_g5_the_module_imports_with_sqlalchemy_absent_and_every_extra_blocked`,
+  `::test_g5_adapter_sql_names_this_module`,
+  `::test_a_portable_rule_on_the_sql_adapter_runs_through_the_engine`
+* [x] G6 — evidence: `dq/tests/test_sql_adapter.py::test_g6_a_bind_is_built_from_the_environment`,
+  `::test_g6_without_a_url_the_variable_is_named_and_nothing_is_built`,
+  `::test_g6_a_url_that_cannot_be_read_is_refused_without_repeating_it`
+  (the last without repeating the URL, which may hold a password)
 
 [NOTE]
 ====
-Amended 2026-11-27, before implementation. These facts were read from
+Amended 2026-11-27, before implementation, and again after it. The first
+facts were read from
 duckdb 2.0.1, duckdb-engine 0.17.0 and SQLAlchemy 2.0.58 and 2.1.9, not from
 memory. Four of the spec's first sentences did not survive them and are
 rewritten above rather than left to be read.
@@ -154,6 +177,43 @@ SQLAlchemy table or subquery whose columns carry types, and the bind.
 * For G1, `duckdb` and `duckdb-engine` become development dependencies; the
   `sqlalchemy` extra already exists (SPEC-007). For G2 the snapshot is a
   file of compiled statements, reviewed by eye once and then held by a test.
+* Amended after implementation. Building it corrected the amendment once and
+  the first implementation three times:
+
+** A decimal read through a *typed* expression comes back rounded. The
+   DuckDB dialect declares that its driver has no native decimal, so
+   SQLAlchemy turns what the driver gave -- an exact `Decimal` -- into a
+   `Decimal` again by way of a float, and one that differs from `0.1` in
+   the twentieth place comes back as `0.1`. Nothing downstream could tell.
+   The corpus's own case about two such decimals is what showed it. So the
+   statement is run as text, and what is logged, snapshot-tested and
+   executed is one text.
+** A `Decimal` bound as a parameter *arrives* rounded, even when the SQL
+   casts the parameter to the column's type. It is bound as text and cast
+   instead -- in the tests' loader, and in the reference.
+** *Corrected:* the statement does carry values, when a bound subquery
+   filters on one. They are written into the text, which stays
+   self-contained. SQLAlchemy writes `NULL` for a parameter that has no
+   value and only warns, so the query would quietly answer about nothing:
+   that is refused with everything else, before any query.
+** PostgreSQL has no `min` or `max` of a boolean. The compile alone looked
+   well; running every corpus statement by hand on a real PostgreSQL 14 is
+   what showed it. A boolean's bounds are 0 and 1 there too, so they are
+   taken of it cast to an integer, once. All 24 cases pass on that server.
+   It is not a CI lane: DuckDB remains the only certified one.
+** A dialect is a small profile -- how it says NaN, whether it bounds a
+   boolean -- and a dialect without one is asked for nothing, not only for
+   no float. The first implementation refused float columns on a dialect it
+   did not know, and measured everything else there.
+** The first implementation resolved a column once and let its later
+   metrics through unasked: the count of a text column passed, and so did
+   its bound, until the query ran. Reviewing the compiled statements showed
+   it -- a case that should have been refused had a statement. Each metric
+   is asked of its column on its own now, and a test holds that.
+** Two of the first amendment's phrases did not survive either: the NaN
+   predicate is chosen by the dialect the statement is *for*, not the one it
+   is bound to (the PostgreSQL snapshot first said `isnan`), and the
+   PostgreSQL NaN literal is part of the text, not a parameter.
 ====
 
 Links: ADR-002; ADR-011; SPEC-007; SPEC-015.

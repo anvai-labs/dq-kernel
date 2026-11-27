@@ -195,9 +195,9 @@ a command, or an observed CI run is not a gate.
 | SPEC-016
 | link:specs/SPEC-016-sql-compute-adapter.adoc[SQL compute adapter]
 | M3
-| Accepted
-| 0/6
-| amended 2026-11-27 before implementation, after probing
+| In Progress
+| 6/6
+| every gate is met in code and by its tests; CI on the carrying PR is awaited
 
 | SPEC-017
 | link:specs/SPEC-017-pandera-engine.adoc[pandera engine]
@@ -264,7 +264,7 @@ a command, or an observed CI run is not a gate.
 * M0: 2/2 specs verified; 14/14 acceptance gates met
 * M1: 4/4 specs verified; 22/22 acceptance gates met
 * M2: 3/3 specs verified; 13/13 acceptance gates met
-* M3: 1/4 specs verified; 6/22 acceptance gates met
+* M3: 1/4 specs verified; 12/22 acceptance gates met
 * M4: 0/4 specs verified; 0/18 acceptance gates met
 * M5: 0/3 specs verified; 0/9 acceptance gates met
 * Shipped: 3/3 specs verified; 7/7 acceptance gates met

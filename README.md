@@ -22,7 +22,8 @@ test results, Great Expectations validation results, or a four-column CSV or JSO
 Portable rules also run with no Spark session at all, over Parquet, Arrow, CSV or JSON
 files, and write the same report: `pip install 'dq-kernel[arrow]'`, then
 `dq-run arrow_rule.conf --dataset orders=orders.parquet --report report.json`. A rule opts
-in with `adapter = "arrow"`.
+in with `adapter = "arrow"`. The same rules also run as one aggregate query on a database the
+data already lives in, through SQLAlchemy (`adapter = "sql"`; DuckDB is the certified lane).
 
 ## Quick start
 
