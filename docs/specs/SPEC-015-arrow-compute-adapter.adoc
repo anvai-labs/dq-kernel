@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: In Progress — every gate is met in code and by its tests; CI on the carrying PR is awaited +
+Status: Verified — CI run 45914457813 green on PR #68: 1976 passed on Python 3.13 (95.23% line, 93.36% branch) and 1982 on 3.12, 565 changed lines at 100% +
 Date: 2026-11-24 +
 Driven by: ADR-010, ADR-002, ADR-014 +
 Milestone: M3 +
