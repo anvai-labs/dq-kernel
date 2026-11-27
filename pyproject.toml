@@ -22,6 +22,10 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 packages = [{include = "dq"}]
+# Not part of what a user installs: the tests need pytest, and the notebooks
+# need a Databricks workspace. Left in, they were 114 of the 198 Python files
+# in the wheel.
+exclude = ["dq/tests", "dq/notebooks"]
 
 # Poetry performance configuration (applied via CLI/env vars)
 

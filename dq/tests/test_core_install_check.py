@@ -158,17 +158,13 @@ def test_only_a_location_inside_the_interpreter_s_own_environment_counts(
 
 
 def package_at(root):
-    """Lay out a package the way the wheel does, tests and notebooks included."""
+    """Lay out a package the way the wheel ships it."""
     for relative in (
         "__init__.py",
         "plan.py",
         "engine/__init__.py",
         "engine/x.py",
         "sdk/fixtures/semantic-cases.json",
-        "tests.py",
-        "tests/__init__.py",
-        "tests/test_x.py",
-        "notebooks/job.py",
     ):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -176,17 +172,27 @@ def package_at(root):
     return SimpleNamespace(__name__="dq", __file__=str(root / "__init__.py"))
 
 
-def test_the_walk_covers_what_a_user_runs_and_nothing_else(tmp_path):
-    """The tests and the notebooks are left out by their directories; a module
-    that merely shares a name with one of them is still walked."""
+def test_the_walk_covers_every_module_the_package_ships(tmp_path):
     package = package_at(tmp_path / "site-packages" / "dq")
-    assert check.modules_of(package) == [
-        "dq",
-        "dq.engine",
-        "dq.engine.x",
-        "dq.plan",
-        "dq.tests",
-    ]
+    assert check.modules_of(package) == ["dq", "dq.engine", "dq.engine.x", "dq.plan"]
+
+
+def test_nothing_a_package_might_ship_is_left_out_of_the_walk(tmp_path):
+    """The wheel no longer ships its tests. Were they built into it again,
+    the walk would import them and the proof would fail, not skip them."""
+    root = tmp_path / "site-packages" / "dq"
+    package = package_at(root)
+    test = root / "tests" / "test_x.py"
+    test.parent.mkdir()
+    test.write_text("", encoding="utf-8")
+    assert "dq.tests.test_x" in check.modules_of(package)
+
+
+def test_the_build_leaves_out_what_needs_another_library():
+    """The tests need pytest and the notebooks a Databricks workspace. The
+    walk above skips nothing, so this is what keeps the bare install bare."""
+    pyproject = tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text())
+    assert {"dq/tests", "dq/notebooks"} <= set(pyproject["tool"]["poetry"]["exclude"])
 
 
 def test_a_module_that_needs_an_extra_to_import_is_a_problem(monkeypatch):

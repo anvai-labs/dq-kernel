@@ -55,11 +55,6 @@ PACKAGE = "dq"
 #: What every command's help promises for a missing dependency.
 EXIT_MISSING_DEPENDENCY = 2
 
-#: Directories of the package that are not part of what a user runs. Both
-#: ship in the wheel today: the tests need pytest, and the notebooks need a
-#: Databricks workspace.
-NOT_RUNTIME = ("tests", "notebooks")
-
 #: The only modules that may need an extra *to import*. Each is a vendor's
 #: own engine code, a sink built on SQLAlchemy, or the Spark expression
 #: helper: these import their library at the top, which the engine guide
@@ -224,14 +219,16 @@ def from_installation(location: Path) -> bool:
 
 
 def modules_of(package) -> list:
-    """Return every module the installed ``package`` ships that a user runs."""
+    """Return every module the installed ``package`` ships.
+
+    The package is all the wheel ships: its tests and its notebooks are
+    left out of the build, so there is nothing here that needs another
+    library to import.
+    """
     root = Path(package.__file__).resolve().parent
     names = []
     for path in sorted(root.rglob("*.py")):
-        relative = path.relative_to(root)
-        if relative.parts[0] in NOT_RUNTIME:  # a directory, not dq/tests.py
-            continue
-        parts = relative.with_suffix("").parts
+        parts = path.relative_to(root).with_suffix("").parts
         if parts[-1] == "__init__":
             parts = parts[:-1]
         names.append(".".join((package.__name__, *parts)))
