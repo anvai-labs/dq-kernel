@@ -209,6 +209,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `duckdb` and `duckdb-engine` as development dependencies, so the lane runs
   in CI; and a "The SQL adapter" section in the compute-engines reference,
   whose Python is run by a test
+- **pandera engine** (SPEC-017, ADR-012): `engine = "pandera"` validates a
+  pandas or a Polars DataFrame against a schema in pandera's own serialized
+  form. A rule's `schema` is the document `DataFrameSchema.to_json()` writes,
+  so a schema already in use travels into a rule pack unchanged. Every check
+  and every enforced column property gets one outcome, passing or failing,
+  carrying pandera's reason and, where pandera counts them, how many rows
+  failed; a check marked `raise_warning` is reported with
+  `criticality: warn`. The engine imports no pandera until it is used. It is
+  the first engine whose frame is not Spark's, so it declares no persistence
+  and refuses a repository
+- What pandera would silently ignore is refused. pandera drops a check or a
+  key it does not recognise, after which the schema validates anything; the
+  engine writes the schema back out and refuses every key of the input that
+  pandera did not keep, naming where it was written. It also refuses what it
+  cannot report on: `coerce`, `strict`, a check over the whole frame,
+  `unique` over several columns
+- A warning-level check is never reported as passed on pandera's word alone.
+  Under lazy validation pandera says nothing about one that fails, so the
+  engine makes every such check strict before it validates, and remembers
+  which they were
+- `pandera` (>=0.36,<0.37) as an optional dependency and an extra: the lock
+  gains three packages and moves none. `examples/pandera_validation.conf`;
+  a "pandera" section in the user guide, whose Python is run by a test; and
+  a row for the engine in the compute-engines reference
+- The validator takes a third kind of engine payload, a document: a mapping,
+  or the text of one
 
 ### Changed
 

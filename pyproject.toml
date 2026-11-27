@@ -61,6 +61,9 @@ pyarrow = {version = ">=16,<27", optional = true}
 # its own SDK, exporter and providers, as OpenTelemetry instrumentation is
 # meant to compose.
 opentelemetry-api = {version = ">=1.25,<2", optional = true}
+# The pandera engine (SPEC-017). pandera alone: the frame's library, pandas
+# or Polars, comes with the frames, as it does for the Arrow adapter.
+pandera = {version = ">=0.36,<0.37", optional = true}
 
 [tool.poetry.extras]
 spark = ["pyspark"]
@@ -74,6 +77,7 @@ dqx = ["databricks-labs-dqx"]
 sqlalchemy = ["sqlalchemy"]
 arrow = ["pyarrow"]
 otel = ["opentelemetry-api"]
+pandera = ["pandera"]
 
 # Minimal development dependencies (only for CI)
 [tool.poetry.group.dev.dependencies]

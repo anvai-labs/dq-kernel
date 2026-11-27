@@ -45,6 +45,7 @@ EXTRAS = {
     "opentelemetry",
     "polars",
     "pandas",
+    "pandera",
 }
 
 

@@ -39,7 +39,9 @@ class EngineSpec:
         class_name: Engine class name inside ``module``.
         payload_key: Required non-empty config payload key; ``None`` means
             the engine declares no built-in payload check.
-        payload_type: ``"list"`` or ``"string"`` (dqdl's ``ruleset``).
+        payload_type: ``"list"`` (the default), ``"string"`` (dqdl's
+            ``ruleset``), or ``"document"``: a mapping, or the text of one
+            (pandera's ``schema``).
         extra: Poetry/pip extra providing the vendor dependency, for
             messages; ``None`` for extra-free engines.
         renamed_from: Deprecated aliases that must be migrated to ``name``.
@@ -115,6 +117,15 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "SchemavalidationEngine",
             "schema",
             extra="deequ",
+        ),
+        EngineSpec(
+            "pandera",
+            "dq.engine.pandera.pandera_engine",
+            "PanderaEngine",
+            "schema",
+            payload_type="document",
+            extra="pandera",
+            vendor_imports=("pandera",),
         ),
     )
 }

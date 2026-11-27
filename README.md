@@ -25,6 +25,9 @@ files, and write the same report: `pip install 'dq-kernel[arrow]'`, then
 in with `adapter = "arrow"`. The same rules also run as one aggregate query on a database the
 data already lives in, through SQLAlchemy (`adapter = "sql"`; DuckDB is the certified lane).
 
+A schema already written for pandera validates a pandas or a Polars frame through the same
+engine contract, and its results reach the same gate: `pip install 'dq-kernel[pandera]'`.
+
 ## Quick start
 
 ```python

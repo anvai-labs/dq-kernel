@@ -53,6 +53,7 @@ def test_built_in_registry_covers_the_known_engines():
         "greatexpectations",
         "portable",
         "schemavalidation",
+        "pandera",
     }
 
 

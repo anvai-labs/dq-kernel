@@ -58,7 +58,8 @@ whose input is not a Spark DataFrame.
   key it does not recognise, and the schema then validates anything. So the
   engine reads the document, writes the schema back out, and refuses every
   key of the input that is missing from pandera's own document at the same
-  place.
+  place. What pandera keeps but the engine cannot report on is refused by
+  name.
 * A result is matched to its check by what the failure carries -- the
   column and the check's name -- never by its position.
 * A warning-level check is never reported as passed on pandera's word
@@ -113,10 +114,13 @@ read.
   `raise_warning`. A `checks` list on a column is not a document pandera
   reads: it raises a bare `KeyError: 'options'`, which the engine turns into
   a refusal. So a column and a check's name identify a check.
-* The two backends spell a check's argument differently. pandas writes
-  `{"min_value": 0}`; Polars writes `{"value": 0}`, and a bare `0` when the
-  statistic is all there is. The comparison the Contracts ask for equates
-  the three, or correct documents would be refused.
+* A check's argument is written bare when the statistic is all there is, on
+  both backends, and as a mapping when the check says more. The two spell
+  the statistic differently: pandas keys it `min_value` and `max_value`,
+  Polars `value`. The comparison the Contracts ask for equates a one-key
+  mapping with the bare value, or correct documents would be refused.
+  (*Corrected after the build:* the first amendment gave the bare form to
+  Polars alone.)
 * *Corrected:* G3 asked for a failing dataframe-level check. One written as
   a Python function cannot be serialized -- pandera warns that only
   registered checks may be serialized and writes `"checks": null` -- and
@@ -124,8 +128,8 @@ read.
   column properties a document does carry instead.
 * Under lazy validation pandera reports nothing for a warning-level check
   that fails. It is absent from `SchemaErrors.schema_errors`, and when only
-  such checks fail, `validate()` returns the frame. The engine validates a
-  copy of the schema in which every warning-level check is made strict, and
+  such checks fail, `validate()` returns the frame. The engine makes every
+  such check strict in the schema it keeps before it validates, and
   remembers which they were.
 * A failure carries `column_name`, `reason_code`, `check` and
   `failure_cases`. `check` is a `Check` for a column check, and a bare name
@@ -152,6 +156,55 @@ read.
   frame, and a pandas or Polars frame has none. A caller with a session can
   still frame the outcomes for a sink, as a harvester's are
   (`dq.engine.dq_engine.outcome_frames`).
+
+Amended again on the same date, after the build, with what building it
+measured. Each is held by a test in `dq/tests/test_pandera.py` or
+`test_pandera_unit.py`.
+
+* A column admits no null and must be present unless the document says
+  otherwise: pandera's defaults are `nullable = false` and `required = true`.
+  So a column with no check still has outcomes -- its dtype and its nulls --
+  and an absent optional column is the one that says `required = false`.
+* A check may carry a `name`. A `Check` keeps the document's key as its
+  `registry_name` and the author's name as its `name`, on both backends, and
+  a failure carries the author's name. A check is reported under the name
+  the document gives it, else under its kind and its column, as every engine
+  names a check. Two outcomes that would share a name are refused.
+* What pandera keeps and the engine refuses by name, and why:
+
+** `coerce` -- pandera validates a cast copy of the column, so the outcome
+   would vouch for data the frame does not hold;
+** `strict` -- an extra column fails as `column_in_schema`, with no column
+   to carry it;
+** a schema-level `checks` list, and `unique` over several columns -- they
+   fail with no column too.
+
+  The first version of the engine reports on a column's checks and its
+  dtype, nullability and uniqueness. Any other key pandera keeps is refused
+  the same way, as not something this engine reports on.
+* A backend whose library is not installed is refused in its own words. The
+  first build asked for the backend inside the `try` that wraps pandera's
+  parser errors, so "could not read the document" came first, which was not
+  what went wrong; a mutation of that line is what showed no test could
+  tell the two apart.
+* A whole column of the wrong dtype is counted on pandas (the values that
+  do not fit) and only named on Polars (the dtype it has). Either way no
+  failing value reaches evidence.
+* Something that is not a frame is raised as it came. pandera's own error
+  is not a validation failure, and the engine reports nothing about it.
+* Importing pandera is not without effect on the process. Where pyspark is
+  installed, its import sets `PYARROW_IGNORE_TIMEZONE` and `SPARK_LOCAL_IP`
+  in the environment, as importing `pyspark.pandas` does; and pyarrow reads
+  the first on every conversion of a Python sequence, any value at all,
+  reading a zoned value's wall time as if it were UTC. Nothing in
+  `dq-kernel` depends on the switch, and its tests are written so that it
+  moves nothing. The full suite showed why that matters: one existing test
+  built an Arrow column from a zoned value, and failed as soon as the
+  pandera tests had been collected. It says its instant in UTC now, and
+  `test_pandera.py` holds the fact itself.
+* pandera 0.36.0 ships more backends than pandas and Polars: of those in the
+  lock, PySpark, Ibis, pyarrow and geopandas. The engine reads a document
+  for `dataframe` and for `polars_dataframe` and nothing else.
 ====
 
 Links: ADR-012; ADR-001; SPEC-011; SPEC-015; SPEC-013.
