@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 245 raise sites across the modules below; the contract
+The framework raises 257 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -565,3 +565,41 @@ The port a run announces itself through (SPEC-014).
 * Fix: give the entry one of those types. The `otel` observer also needs the
   `otel` extra (`pip install dq-kernel[otel]`); without it the run is refused
   the same way, before any rule runs, with a message that names the extra.
+
+== dq/engine/pandera/pandera_check.py
+
+*Content:* 11 `ConfigurationError` sites, and the `ValueError` of
+`dq.engine.checkspec` for a repeated label.
+
+The pandera engine's payload: a schema in pandera's own serialized form,
+read fail closed (SPEC-017).
+
+* Cause (`ConfigurationError`): the rule has no `schema`, or what it has is
+  not a document; the document's `schema_type` names a backend this engine
+  does not read (`dataframe` is pandas, `polars_dataframe` is Polars); it
+  declares no column; pandera cannot read it; or it says something that
+  would not do what it seems to. pandera ignores a key it does not
+  recognise, and the schema then validates anything; and it keeps keys this
+  engine cannot report on -- `coerce` (pandera would validate a cast copy),
+  `strict`, a check over the whole frame, `unique` over several columns.
+  At run time the same error means pandera reported a failure that is no
+  outcome of the schema, or two for one check.
+* Fix: write `schema` as pandera's `DataFrameSchema.to_json()` writes it for
+  the frame's backend, and keep to what the engine reports on: a column's
+  `dtype`, `nullable`, `unique`, `required` and its checks. A refusal names
+  the place (`$.columns.amount.between_the_lines`). A failure that is no
+  outcome of the schema is not caused by the data: it means pandera
+  reported something other than the schema's own checks, and the schema is
+  where to look.
+
+== dq/engine/pandera/pandera_engine.py
+
+*Content:* 1 `ConfigurationError` site.
+
+The pandera engine: a pandas or a Polars frame against a pandera schema.
+
+* Cause (`ConfigurationError`): the backend the schema names cannot be
+  imported, because the library it is for is not installed.
+* Fix: install the library the schema is for -- pandas for a `dataframe`
+  schema, `pip install polars` for a `polars_dataframe` one. The `pandera`
+  extra brings pandera alone; the frame's library comes with the frames.

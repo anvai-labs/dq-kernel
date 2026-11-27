@@ -14,6 +14,7 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import List, Tuple
 from urllib.parse import urlparse
@@ -76,7 +77,19 @@ def _engine_payload_errors(pack: RulePack) -> List[str]:
                 f"Rule {rule.index}: Engine '{rule.engine}' payload '{payload_key}' "
                 "must be a non-empty string"
             )
+        elif payload_type_for(engine_key) == "document" and not _is_document(payload):
+            errors.append(
+                f"Rule {rule.index}: Engine '{rule.engine}' payload '{payload_key}' "
+                "must be a mapping, or the text of one"
+            )
     return errors
+
+
+def _is_document(payload) -> bool:
+    """Return whether a payload is a mapping, or the text of one."""
+    if isinstance(payload, str):
+        return bool(payload.strip())
+    return isinstance(payload, Mapping)
 
 
 def validate_config_document(config_path: str) -> ConfigValidation:

@@ -99,7 +99,7 @@ jobs:
         run: >-
           poetry install --with dev
           -E spark -E deequ -E aws -E databricks -E greatexpectations -E dqx
-          -E sqlalchemy -E arrow -E otel
+          -E sqlalchemy -E arrow -E otel -E pandera
       - name: Download Deequ JAR
         run: |
           mkdir -p lib

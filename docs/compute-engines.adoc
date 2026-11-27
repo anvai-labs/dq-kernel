@@ -48,6 +48,14 @@ Vendor support today (verified against the installed distributions):
 | no
 | no
 
+| pandera (pandera engine)
+| no
+| yes (`pandera.pandas`)
+| yes (`pandera.polars`)
+| no
+| no
+| no
+
 | portable kernel (`portable` engine)
 | yes (Spark adapter)
 | yes (Arrow adapter, through interchange)
@@ -61,6 +69,11 @@ GX has no Polars or DataFusion datasource (zero references in its
 distribution); pandas and SQL are its two non-Spark execution engines.
 DuckDB is not a named GX datasource but works through the generic
 SQLAlchemy path.
+
+pandera ships more backends than the table gives it: of those installed,
+PySpark, Ibis, pyarrow and geopandas beside pandas and Polars. The
+`pandera` engine reads a schema's document for pandas or for Polars and no
+others (SPEC-017); see "pandera" in the user guide.
 
 == The Arrow adapter
 

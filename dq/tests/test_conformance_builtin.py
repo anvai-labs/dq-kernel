@@ -9,7 +9,8 @@ that makes it report one passing and one failing check, and is checked
 with and without a sink, and -- where its checks are a list -- with the
 same checks in another order, so each one is shown to keep its own
 outcome. The great expectations rule is written in an order GX does not
-return its results in.
+return its results in. pandera's frame is a pandas one: it is the first
+engine whose frame is not Spark's.
 """
 
 import importlib
@@ -21,6 +22,11 @@ from pyhocon import ConfigFactory
 from dq.engine.registry import BUILT_IN_ENGINES, missing_vendor_imports
 from dq.sdk.conformance import assert_engine_conforms, conformance_problems
 from dq.sinks import InMemorySink
+from dq.tests.pandera_support import (
+    DOCUMENTS as PANDERA_DOCUMENTS,
+    frame as pandas_frame,
+    reordered as pandera_reordered,
+)
 
 pytestmark = pytest.mark.spark
 
@@ -98,6 +104,7 @@ RULES = {
     "schemavalidation": {
         "schema": {"catalog_type": "spark", "table": "conformance_view"}
     },
+    "pandera": {"schema": PANDERA_DOCUMENTS["pandas"]},
 }
 
 
@@ -113,10 +120,16 @@ REORDERED = {
     "businessrules": {"checks": list(reversed(RULES["businessrules"]["checks"]))},
     # The portable plan travels with the dataset it certifies.
     "portable": dict(RULES["portable"], plan=list(reversed(RULES["portable"]["plan"]))),
+    # A schema is a document: the same one, its columns in another order.
+    "pandera": {"schema": pandera_reordered("pandas")},
 }
 
 
-def frame_for(spark):
+def frame_for(spark, name):
+    """Return the frame ``name`` validates: a Spark one, but a pandas one
+    for the engine that takes no Spark frame."""
+    if name == "pandera":
+        return pandas_frame("pandas")
     frame = spark.createDataFrame(ROWS, COLUMNS)
     frame.createOrReplaceTempView("conformance_view")
     return frame
@@ -171,11 +184,16 @@ NOT_REORDERED = (
 
 @pytest.mark.parametrize("name", built_in_engines())
 def test_every_built_in_engine_conforms(spark, name):
-    frame = frame_for(spark)
+    frame = frame_for(spark, name)
     report = assert_engine_conforms(
         engine_factory(name, frame), frame, InMemorySink, reordered_factory(name, frame)
     )
-    assert "artifacts_carry_the_injected_run_key" in report.checks or name == "dqdl"
+    if name == "pandera":
+        # It persists nothing, so the suite asks it to refuse a repository.
+        assert "persistence_honours_the_capability" in report.checks
+        assert "artifacts_carry_the_injected_run_key" not in report.checks
+    else:
+        assert "artifacts_carry_the_injected_run_key" in report.checks or name == "dqdl"
     if name == "schemavalidation":
         # It checks the frame against its own schema, so it can only pass,
         # and it takes a schema, not checks: there is no other order to try.
@@ -195,7 +213,7 @@ def test_every_built_in_engine_conforms(spark, name):
 
 @pytest.mark.parametrize("name", built_in_engines())
 def test_built_in_engines_conform_without_a_sink_too(spark, name):
-    frame = frame_for(spark)
+    frame = frame_for(spark, name)
     report = conformance_problems(
         engine_factory(name, frame), frame, None, reordered_factory(name, frame)
     )

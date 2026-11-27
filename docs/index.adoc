@@ -365,6 +365,74 @@ installs the extra and certifies live GX Core round trips (`dq/tests/test_greate
 skipped only when the extra is absent); mocked-gx unit contract tests run in
 `dq/tests/test_greatexpectations_unit.py`. See `examples/greatexpectations_validation.conf`.
 
+[[pandera]]
+=== pandera
+
+The `pandera` engine validates a pandas or a Polars DataFrame against a schema in
+pandera's own serialized form (`pandera >=0.36,<0.37`, installed with its optional
+extra: `poetry install -E pandera` in a source checkout, or
+`pip install 'dq-kernel[pandera]'`). The extra brings pandera alone; the frame's
+library comes with the frames. It is the first engine whose frame is not a Spark
+DataFrame. It is called with a frame in hand, and it declares no persistence: the
+framework's artifact path takes a Spark session from the frame. A caller with a
+session can still frame its outcomes for a sink, as a harvester's are.
+
+A rule's `schema` is the document `DataFrameSchema.to_json()` writes, so a schema
+already in use travels into a rule pack unchanged. The document names its backend:
+`schema_type = "dataframe"` is pandas and `"polars_dataframe"` is Polars. A column
+admits no null and must be present unless the document says otherwise, and a check
+marked `raise_warning = true` is reported with criticality `warn`. The engine is
+loaded like any other, and given its frame:
+
+[source,python]
+----
+import pandas as pd
+from pyhocon import ConfigFactory
+
+from dq.engine.engine_loader import EngineLoader
+
+rule = ConfigFactory.from_dict(
+    {
+        "name": "orders",
+        "engine": "pandera",
+        "schema": {
+            "schema_type": "dataframe",
+            "columns": {
+                "id": {"dtype": "int64", "unique": True},
+                "amount": {
+                    "dtype": "float64",
+                    "greater_than_or_equal_to": {"min_value": 0},
+                },
+            },
+        },
+    }
+)
+orders = pd.DataFrame({"id": [1, 2, 2], "amount": [3.0, -1.0, 5.0]})
+outcomes = EngineLoader().load_engine("pandera", rule, 1).apply(orders)
+failed = [outcome["check"] for outcome in outcomes if not outcome["success"]]
+----
+
+Every check and every column property the schema enforces gets one outcome, passing
+or failing. It is named by the name the document gives the check, else by its kind
+and its column (`greater_than_or_equal_to_amount`). An outcome carries pandera's
+reason and, where pandera counts them, how many rows failed -- never a failing
+value. pandera ignores a key it does not recognise, after which the schema
+validates anything; so the engine reads the document, writes the schema back out,
+and refuses every key of the input that pandera did not keep, naming where it was
+written. It also refuses what it cannot report on: `coerce`, `strict`, a check over
+the whole frame, `unique` over several columns. CI installs the extra and runs the
+engine on both backends (`dq/tests/test_pandera.py`, skipped only when the extra is
+absent); the contracts that need no pandera are in `dq/tests/test_pandera_unit.py`.
+See `examples/pandera_validation.conf`.
+
+One thing to know about the dependency itself: where pyspark is installed, importing
+pandera sets `PYARROW_IGNORE_TIMEZONE` and `SPARK_LOCAL_IP` for the whole process, as
+importing `pyspark.pandas` does, and pyarrow then reads a zoned Python datetime's wall
+time as if it were UTC. That is pandera's doing, not the engine's: the engine loads
+pandera when a rule first runs, and nothing in `dq-kernel` depends on the switch. A
+process that converts zoned timestamps through pyarrow beside this engine should set
+the variable itself, to the value it wants.
+
 == Results and repositories
 
 `DQFramework.run()` returns a list of dictionaries containing at least `check`, `success`,

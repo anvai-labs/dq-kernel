@@ -112,6 +112,10 @@ def test_validate_config_accepts_executable_local_rule_set(tmp_path):
         ),
         ("schemavalidation", "schema = { id = { datatype = long } }"),
         (
+            "pandera",
+            'schema = { schema_type = "dataframe", columns = { id = { dtype = "int64" } } }',
+        ),
+        (
             "greatexpectations",
             'expectations = [{ type = "expect_column_to_exist", column = "id" }]',
         ),

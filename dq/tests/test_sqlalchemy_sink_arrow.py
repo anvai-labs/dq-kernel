@@ -139,13 +139,17 @@ def test_values_arrow_hands_back_are_stored_as_strict_json(engine):
     """Arrow gives back a Decimal, a datetime and a NaN as a float: a JSON
     document can hold none of them as they are."""
     pa = pytest.importorskip("pyarrow")
+    # Ten in the morning in Chicago, said as the instant it is. Built from a
+    # zoned value directly, the array would follow the process: where
+    # PYARROW_IGNORE_TIMEZONE is set -- importing pandera, or pyspark.pandas,
+    # sets it -- pyarrow reads the wall time as if it were UTC.
+    utc = pa.array(
+        [datetime(2026, 11, 25, 16, tzinfo=timezone.utc)], pa.timestamp("us", tz="UTC")
+    )
     table = pa.table(
         {
             "amount": pa.array([Decimal("1.50")], pa.decimal128(10, 2)),
-            "at": pa.array(
-                [datetime(2026, 11, 25, 10, tzinfo=timezone(timedelta(hours=-6)))],
-                pa.timestamp("us", tz="America/Chicago"),
-            ),
+            "at": utc.cast(pa.timestamp("us", tz="America/Chicago")),
             "value": pa.array([float("nan")], pa.float64()),
         }
     )

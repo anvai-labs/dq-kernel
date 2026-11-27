@@ -33,7 +33,7 @@ description = "Reusable constraint types to use with typing.Annotated"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version == \"3.13\" and extra == \"greatexpectations\" or python_version == \"3.12\" and (extra == \"dqx\" or extra == \"greatexpectations\")"
+markers = "python_version == \"3.13\" and (extra == \"greatexpectations\" or extra == \"pandera\") or python_version == \"3.12\" and (extra == \"dqx\" or extra == \"greatexpectations\" or extra == \"pandera\")"
 files = [
     {file = "annotated_types-0.8.0-py3-none-any.whl", hash = "sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0"},
     {file = "annotated_types-0.8.0.tar.gz", hash = "sha256:13b2beaad985e05e2d6407ee4c4f35590b11f8d693a258a561055cac8f64cab7"},
@@ -1886,11 +1886,12 @@ version = "1.2.0"
 description = "Type system extensions for programs checked with the mypy type checker."
 optional = false
 python-versions = ">=3.10"
-groups = ["dev"]
+groups = ["main", "dev"]
 files = [
     {file = "mypy_extensions-1.2.0-py3-none-any.whl", hash = "sha256:993e7a20aa5671eb41a7132cf555af30062da99729601601b9a8382b11cae768"},
     {file = "mypy_extensions-1.2.0.tar.gz", hash = "sha256:c6e275a07f1c2fc096b62940452d0eaa3f3af7de45d704787866240a7c6d5a51"},
 ]
+markers = {main = "extra == \"pandera\""}
 
 [[package]]
 name = "narwhals"
@@ -2077,7 +2078,7 @@ files = [
     {file = "packaging-26.4-py3-none-any.whl", hash = "sha256:81383611a09c1bc0b08b76e0fd5829d7c6824c65b27a6aee339da133f4233ea2"},
     {file = "packaging-26.4.tar.gz", hash = "sha256:c4b671c41ddb9bf26e543c37723610d28fb6bf7affc4da17cf048d419d2c062a"},
 ]
-markers = {main = "extra == \"greatexpectations\""}
+markers = {main = "extra == \"greatexpectations\" or extra == \"pandera\""}
 
 [[package]]
 name = "pandas"
@@ -2178,6 +2179,51 @@ sql-other = ["SQLAlchemy (>=2.0.42)", "adbc-driver-postgresql (>=1.7.0)", "adbc-
 test = ["pytest (>=8.3.4)", "pytest-xdist (>=3.6.1)"]
 timezone = ["pytz (>=2020.1)"]
 xml = ["lxml (>=6.0.0)"]
+
+[[package]]
+name = "pandera"
+version = "0.36.0"
+description = "A light-weight and flexible data validation and testing tool for statistical data objects."
+optional = true
+python-versions = ">=3.10"
+groups = ["main"]
+markers = "extra == \"pandera\""
+files = [
+    {file = "pandera-0.36.0-py3-none-any.whl", hash = "sha256:f9ed1191fde25467813cde0ab3f279707c6e05fbb6c61649cfc5b646d1b2a783"},
+    {file = "pandera-0.36.0.tar.gz", hash = "sha256:70194c6c9c8e3e950d62d9018d1fa6ba2b4371d1abc62c124574173f71432d80"},
+]
+
+[package.dependencies]
+packaging = ">=20.0"
+pydantic = "*"
+typeguard = "*"
+typing_extensions = "*"
+typing_inspect = ">=0.6.0"
+
+[package.extras]
+all = ["black", "dask[dataframe]", "distributed", "fastapi", "frictionless (<=4.40.8)", "geopandas", "hypothesis (>=6.92.7)", "ibis-framework (>=9.0.0)", "modin", "narwhals (>=1.26.0)", "narwhals-datafusion (>=0.1.5)", "numpy (>=1.24.4)", "pandas-stubs", "polars (>=1.20.0)", "pyarrow (>=13)", "pyarrow-hotfix", "pyspark[connect] (>=3.2.0)", "pyyaml (>=5.1)", "ray", "rich", "scipy", "scipy-stubs ; python_version >= \"3.10\"", "shapely", "tensordict", "torch", "typer (>=0.12.3)", "xarray (>=2024.10.0)"]
+cli = ["pyyaml (>=5.1)", "rich", "typer (>=0.12.3)"]
+dask = ["dask[dataframe]", "distributed"]
+datafusion = ["narwhals-datafusion (>=0.1.5)"]
+decisions = ["typesafe-sdk"]
+fastapi = ["fastapi"]
+frictionless = ["frictionless (<=4.40.8)"]
+geopandas = ["geopandas", "shapely"]
+hypotheses = ["scipy"]
+ibis = ["ibis-framework (>=9.0.0)", "pyarrow-hotfix"]
+io = ["pyyaml (>=5.1)"]
+modin = ["dask[dataframe]", "distributed", "modin", "ray"]
+modin-dask = ["dask[dataframe]", "distributed", "modin"]
+modin-ray = ["modin", "ray"]
+mypy = ["pandas-stubs", "scipy-stubs ; python_version >= \"3.10\""]
+narwhals = ["narwhals (>=1.26.0)"]
+pandas = ["numpy (>=1.24.4)", "pandas (>=2.1.1)"]
+polars = ["polars (>=1.20.0)"]
+pyarrow = ["narwhals (>=1.26.0)", "pyarrow (>=13)"]
+pyspark = ["pyspark[connect] (>=3.2.0)"]
+strategies = ["hypothesis (>=6.92.7)"]
+torch = ["tensordict", "torch"]
+xarray = ["numpy (>=1.24.4)", "xarray (>=2024.10.0)"]
 
 [[package]]
 name = "pathspec"
@@ -2552,7 +2598,7 @@ description = "Data validation using Python type hints"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version == \"3.13\" and extra == \"greatexpectations\" or python_version == \"3.12\" and (extra == \"dqx\" or extra == \"greatexpectations\")"
+markers = "python_version == \"3.13\" and (extra == \"greatexpectations\" or extra == \"pandera\") or python_version == \"3.12\" and (extra == \"dqx\" or extra == \"greatexpectations\" or extra == \"pandera\")"
 files = [
     {file = "pydantic-2.14.4-py3-none-any.whl", hash = "sha256:653a2ad9f6d8858529c77c72717d0ea991d6c6837fe683246b2f4b2bbfc3fadc"},
     {file = "pydantic-2.14.4.tar.gz", hash = "sha256:7c19f1d46f8accf55a4617a6116e1ade64840870f397b846a2c53fb9019414ba"},
@@ -2575,7 +2621,7 @@ description = "Core functionality for Pydantic validation and serialization"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version == \"3.13\" and extra == \"greatexpectations\" or python_version == \"3.12\" and (extra == \"dqx\" or extra == \"greatexpectations\")"
+markers = "python_version == \"3.13\" and (extra == \"greatexpectations\" or extra == \"pandera\") or python_version == \"3.12\" and (extra == \"dqx\" or extra == \"greatexpectations\" or extra == \"pandera\")"
 files = [
     {file = "pydantic_core-2.50.5-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:302517f9f5589e07ead02d38fbb443947a211461b39b18f46948b20941fa8d98"},
     {file = "pydantic_core-2.50.5-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:55e0d60384a9b14641749d2ba6721f82409248288f066b95d555c6dd484273d2"},
@@ -3722,6 +3768,22 @@ slack = ["envwrap", "slack-sdk"]
 telegram = ["envwrap", "requests"]
 
 [[package]]
+name = "typeguard"
+version = "4.6.1"
+description = "Run-time type checker for Python"
+optional = true
+python-versions = ">=3.10"
+groups = ["main"]
+markers = "extra == \"pandera\""
+files = [
+    {file = "typeguard-4.6.1-py3-none-any.whl", hash = "sha256:aca1f365124873d5325b18aad1a3689d62f7184abe32d899413562cf51729d02"},
+    {file = "typeguard-4.6.1.tar.gz", hash = "sha256:d94fd3552c5feb6bada6e8bb1167d9916c08d7442141aeb041b847ba9bd1afb1"},
+]
+
+[package.dependencies]
+typing_extensions = ">=4.14.0"
+
+[[package]]
 name = "typing-extensions"
 version = "4.16.0"
 description = "Backported and Experimental Type Hints for Python 3.9+"
@@ -3732,7 +3794,24 @@ files = [
     {file = "typing_extensions-4.16.0-py3-none-any.whl", hash = "sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"},
     {file = "typing_extensions-4.16.0.tar.gz", hash = "sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5"},
 ]
-markers = {main = "python_version == \"3.13\" and (extra == \"greatexpectations\" or extra == \"sqlalchemy\" or extra == \"otel\") or python_version == \"3.12\" and (extra == \"greatexpectations\" or extra == \"dqx\" or extra == \"sqlalchemy\" or extra == \"otel\")"}
+markers = {main = "python_version == \"3.13\" and (extra == \"greatexpectations\" or extra == \"pandera\" or extra == \"sqlalchemy\" or extra == \"otel\") or python_version == \"3.12\" and (extra == \"greatexpectations\" or extra == \"pandera\" or extra == \"dqx\" or extra == \"sqlalchemy\" or extra == \"otel\")"}
+
+[[package]]
+name = "typing-inspect"
+version = "0.9.0"
+description = "Runtime inspection utilities for typing module."
+optional = true
+python-versions = "*"
+groups = ["main"]
+markers = "extra == \"pandera\""
+files = [
+    {file = "typing_inspect-0.9.0-py3-none-any.whl", hash = "sha256:9ee6fc59062311ef8547596ab6b955e1b8aa46242d854bfc78f4f6b0eff35f9f"},
+    {file = "typing_inspect-0.9.0.tar.gz", hash = "sha256:b23fc42ff6f6ef6954e4852c1fb512cdd18dbea03134f91f856a95ccc9461f78"},
+]
+
+[package.dependencies]
+mypy-extensions = ">=0.3.0"
+typing-extensions = ">=3.7.4"
 
 [[package]]
 name = "typing-inspection"
@@ -3741,7 +3820,7 @@ description = "Runtime typing introspection tools"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version == \"3.13\" and extra == \"greatexpectations\" or python_version == \"3.12\" and (extra == \"dqx\" or extra == \"greatexpectations\")"
+markers = "python_version == \"3.13\" and (extra == \"greatexpectations\" or extra == \"pandera\") or python_version == \"3.12\" and (extra == \"dqx\" or extra == \"greatexpectations\" or extra == \"pandera\")"
 files = [
     {file = "typing_inspection-0.4.5-py3-none-any.whl", hash = "sha256:bc210535442b39e1bf2805e0c7a17dfd6a4ace760c84c7f7d16245d23a6b1c39"},
     {file = "typing_inspection-0.4.5.tar.gz", hash = "sha256:7f16c411e7930dc79596d42ab44672a3fe5f60eb34b781a1647e7872363120c7"},
@@ -3832,10 +3911,11 @@ delta = ["delta-spark", "pyspark"]
 dqx = ["databricks-labs-dqx"]
 greatexpectations = ["great_expectations"]
 otel = ["opentelemetry-api"]
+pandera = ["pandera"]
 spark = ["pyspark"]
 sqlalchemy = ["sqlalchemy"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "eace03475a80a3636a00632c63b7c31eb095ba916d83749b251126a3d5227b71"
+content-hash = "3560048a62ec0867ca9fb67555df74678b866681ec5d2ab3e696f030d4575fb1"
