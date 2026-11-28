@@ -1,0 +1,208 @@
+= SPEC-025: Column references every engine can honour
+:toc:
+:sectlinks.
+
+Status: Verified — CI run 46136259966 green on PR #77: 2861 passed on Python 3.13 (96.19% line, 94.73% branch) and 2872 on 3.12, 60 changed lines at 100% +
+Date: 2026-11-28 +
+Driven by: ADR-002, ADR-003 +
+Milestone: M1 +
+Depends on: SPEC-010, SPEC-011 +
+
+== Purpose
+
+ADR-002 asks for "dataset and column references with validated
+identifiers". The portable engine keeps that promise; no other engine
+does. Measured on Spark 3.5: a rule on a column called `s.t` -- beside a
+struct `s` with a field `t` -- is refused by the portable engine before
+any data is read, and answered *passed* by DQX and by the business-rules
+engine over data where that column holds a null. Spark read the name as
+the struct's field, and the check measured that. Deequ failed the same
+column when it was clean, and a name with a hyphen in it is a
+subtraction.
+
+A rule pack that is right on one engine and silently wrong on another is
+not a rule pack. This spec makes one promise for all of them.
+
+== In scope
+
+* One rule: a rule asks for a column by a name that is a plain identifier
+  -- letters, digits and underscores, starting with a letter or an
+  underscore, at most 128 characters -- as `dq.identifiers.ColumnName`
+  reads one.
+* Each built-in engine declares where in its payload a column is named
+  (`EngineSpec.column_keys`).
+* The kernel refuses a name that is not one, in `dq-validate` and when an
+  engine is loaded: before the engine's module is imported, and before any
+  data is read.
+* The conformance kit holds an extension engine to the same promise.
+
+== Out of scope
+
+* Expressions an author writes as text: a Deequ `assertion`, DQX's
+  `sql_expression`, a DQDL `ruleset`, a Databricks expectation. There the
+  author quotes a name themselves.
+* A table whose own column is so named: the schema-validation engine reads
+  a table's columns, and what Deequ does with such a name is Deequ's.
+* Column labels that never reach Spark, as pandera's do not.
+
+== Contracts
+
+* Every engine a rule can name a column for refuses, before it runs, a
+  name that is not a plain identifier, in the kernel's one message for an
+  identifier.
+* A plain name changes nothing: what validated before validates now, and
+  runs as it ran.
+* A third-party engine owns its payload. The kit gives it the means to
+  hold itself to the same promise, and the engine guide says so.
+
+== Acceptance gates
+
+* G1 — For each built-in engine whose payload names a column, a rule
+  naming `s.t`, `order id`, `x-y` or ``a`b`` is refused by the loader
+  before the engine's module is imported, and by `dq-validate`, in the
+  kernel's one message.
+* G2 — Each engine's declared keys are the ones its wrapper reads: a
+  drift-guard for each, read from the wrapper and, for DQX, from DQX's own
+  registry.
+* G3 — Measured, and held: a DQX check and a business-rules check on
+  `s.t`, each of which passed over data with a null, are refused.
+* G4 — A plain name changes nothing: every checked-in example still
+  validates, and every engine still passes the conformance suite.
+* G5 — The conformance suite refuses an engine that does not keep the
+  promise, through a factory it is given for the purpose.
+
+== Progress
+
+* [x] G1 — evidence: `dq/tests/test_column_references.py::test_g1_a_name_spark_would_not_read_is_refused_before_the_engine_is_imported`,
+  `::test_g1_a_plain_name_is_not_this_check_s_to_refuse`,
+  `::test_g1_dq_validate_reports_the_name_in_the_same_words`
+  (six engines and four names, with an import hook that fails the test if
+  an engine module is imported to judge a name; the same words from the
+  loader and from `dq-validate`)
+* [x] G2 — evidence: `dq/tests/test_column_references.py::test_g2_the_roster_of_engines_that_name_a_column`,
+  `::test_g2_dqx_declares_what_its_own_check_functions_take`,
+  `::test_g2_great_expectations_declares_what_its_own_expectations_take`,
+  `::test_g2_deequ_declares_what_its_wrapper_reads`,
+  `::test_g2_businessrules_declares_what_its_engine_hands_its_strategies`,
+  `::test_g2_portable_declares_what_its_translation_reads`,
+  `::test_g2_schema_validation_declares_the_keys_it_reads`,
+  `::test_every_declared_key_is_read`
+  (DQX 0.17.2's own registry and Great Expectations 1.25's expectation
+  classes, read on 2026-11-28)
+* [x] G3 — evidence: `dq/tests/test_column_references.py::test_g3_a_check_that_passed_over_a_null_is_refused`
+  (the frame of the measurement, for DQX and for the business-rules
+  engine, with the control that each sees the null when it is asked for
+  the column plainly)
+* [x] G4 — evidence: `dq/tests/test_column_references.py::test_g4_every_checked_in_example_names_plain_columns`,
+  `dq/tests/test_validate.py::test_checked_in_example_is_a_valid_configuration`,
+  `dq/tests/test_conformance_builtin.py::test_every_built_in_engine_conforms`,
+  `::test_built_in_engines_conform_without_a_sink_too`
+* [x] G5 — evidence: `dq/tests/test_conformance_unit.py::test_an_engine_that_does_not_refuse_a_misnamed_column_does_not_conform`,
+  `::test_without_a_misnamed_factory_column_references_are_not_checked`,
+  `::test_a_conforming_engine_passes_every_check`,
+  `dq/tests/test_conformance_builtin.py::test_every_built_in_engine_conforms`
+  (an engine that builds for such a rule, or refuses it another way, does
+  not conform; and every built-in engine is checked with a misnamed
+  factory)
+
+[NOTE]
+====
+Measured on Spark 3.5.9 and PySpark 3.5.9, 2026-11-28, before anything was
+built. A frame of two rows holds, beside one another, a column literally
+called `s.t` and a struct `s` whose field `t` is never null; a column
+called `x-y` beside columns `x` and `y`; a column called `order id`; and
+one called ``a`b``. Each of those columns holds a null in one of the two
+rows, so a not-null check must fail on that frame and pass on the same
+frame without the null. What each engine answered:
+
+[cols="2,3,3,3",options="header"]
+|===
+|Engine |`s.t`, beside a struct `s` |`x-y`, beside `x` and `y` |``a`b``
+
+|portable
+|refused
+|refused
+|refused
+
+|deequ
+|failed a clean column
+|right
+|failed a clean column
+
+|dqx
+|*passed a column with a null*
+|right
+|raised a parse error
+
+|greatexpectations
+|right
+|right
+|failed a clean column
+
+|businessrules
+|*passed a column with a null*
+|right
+|raised an analysis error
+|===
+
+*Why it happens.* Spark reads a name it is handed as an expression.
+`col("s.t")` is the field `t` of a struct column `s` where the frame has
+one, and nothing where it has not; `col("x-y")` is `x` minus `y`; a
+backtick is a quote. In backticks a name is the column and only the
+column. The kernel's own Spark adapter and profilers write a name in
+backticks; a vendor library takes a string, and what it does with the
+string is the vendor's.
+
+*Why refuse rather than quote.* Three engines hand the string to a library
+the kernel does not own, so the kernel cannot quote for them; and an
+engine that happened to be right for one name was wrong for the next --
+Great Expectations for a backtick, Deequ for a dot. A plain identifier is
+the one set of names every engine addresses alike, it is what ADR-002
+asked for, and it is the set the portable engine has required since it
+was built. It is a narrowing for an engine that took more: a rule that
+named such a column on Great Expectations, or on Deequ with a space in
+the name, is now refused at validation, with the reason, where it ran
+before. `dq-suggest` already suggests nothing for such a column.
+
+*Where each engine names a column.* Keys are paths into one entry of the
+engine's payload, or into the payload itself where it is one mapping:
+
+[cols="2,5",options="header"]
+|===
+|Engine |Keys
+
+|portable
+|within its `plan`: `column`, `columns`, `group_by`
+
+|deequ
+|`column`, `columns`
+
+|dqx
+|`check.for_each_column`, and `check.arguments.` followed by each
+parameter of DQX's own check functions that names a column: `column`,
+`columns`, `ref_columns`, `exclude_columns`, `column1`, `column2`,
+`country_column`, `merge_columns`, `condition_column`, `time_column`,
+`ref_column`, `null_safe_column_value_matching`
+
+|greatexpectations
+|`column`, `column_A`, `column_B`, `column_list`, `column_set`, and the
+same under `kwargs.`
+
+|businessrules
+|`columns`, `group_by`, `sort_by`
+
+|schemavalidation
+|`not_null_columns`, `unique_constraints`, `overrides.column`,
+`foreign_key_constraints.src_column`
+
+|dqdl, pandera
+|none: the author writes the expression, or the label never reaches Spark
+|===
+
+The lists for dqx and greatexpectations are read from the vendor's own
+vocabulary, which the kernel pins; tests read DQX's registry and Great
+Expectations' expectation classes and hold the declarations to them. What
+the other engines read is read from their own code.
+====
+
+Links: ADR-002; ADR-003; ADR-012; SPEC-010; SPEC-011.

@@ -89,15 +89,70 @@ def reordered(engine_class, **engine_kwargs):
 # ------------------------------------------------------------- a good engine
 
 
+NOT_MISNAMED = "column references were not checked: no misnamed_factory was given"
+
+
+def refusing():
+    """What an engine does with a rule that names a column by anything but
+    a plain identifier (SPEC-025)."""
+    raise ConfigurationError("column name 's.t' must hold no dot: it names one thing")
+
+
+def test_without_a_misnamed_factory_column_references_are_not_checked():
+    report = problems_of(ExampleEngine)
+    assert "column_names_are_refused" not in report.checks
+    assert NOT_MISNAMED in report.notes
+    assert not any(
+        problem.startswith("column_names_are_refused") for problem in report.problems
+    )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "problem"),
+    [
+        (
+            "builds it",
+            "column_names_are_refused: built an engine for a rule that names a "
+            "column by anything but a plain identifier: Spark reads such a string as "
+            "an expression, and the engine would measure something else",
+        ),
+        (
+            "another way",
+            "column_names_are_refused: refused a rule that names a column by anything "
+            "but a plain identifier with ValueError: no such column; refuse with a "
+            "ConfigurationError, before anything runs",
+        ),
+    ],
+)
+def test_an_engine_that_does_not_refuse_a_misnamed_column_does_not_conform(
+    outcome, problem
+):
+    def wrong():
+        if outcome == "builds it":
+            return ExampleEngine(CONFIG)
+        raise ValueError("no such column")
+
+    report = conformance_problems(
+        factory(ExampleEngine), FRAME, InMemorySink, None, wrong
+    )
+    assert "column_names_are_refused" in report.checks
+    # Among the problems, not alone: without Spark the persistence check
+    # fails for a reason of its own.
+    assert problem in report.problems, report.summary()
+    with pytest.raises(AssertionError, match="column_names_are_refused"):
+        assert_engine_conforms(factory(ExampleEngine), FRAME, InMemorySink, None, wrong)
+
+
 def test_a_conforming_engine_passes_every_check():
     report = assert_engine_conforms(
-        factory(ExampleEngine), FRAME, InMemorySink, reordered(ExampleEngine)
+        factory(ExampleEngine), FRAME, InMemorySink, reordered(ExampleEngine), refusing
     )
     assert isinstance(report, ConformanceReport) and report.conforms
     assert report.problems == () and report.notes == ()
     assert report.checks == (
         "manifest_is_valid",
         "uses_the_template",
+        "column_names_are_refused",
         "outcomes_pass_the_outcome_gate",
         "check_names_are_unique",
         "criticality_is_canonical",
@@ -133,6 +188,7 @@ def test_persistence_is_not_checked_without_a_sink_factory():
     report = conformance_problems(factory(ExampleEngine), FRAME)
     assert report.conforms
     assert report.notes == (
+        NOT_MISNAMED,
         "attribution under reordering was not checked: no reordered_factory was given",
         "persistence was not checked: no sink_factory was given",
     )
@@ -142,7 +198,7 @@ def test_persistence_is_not_checked_without_a_sink_factory():
 def test_a_frame_with_one_verdict_only_is_noted_not_rejected():
     report = problems_of(ExampleEngine, outcomes=[("steady", True, "error")])
     assert report.conforms
-    assert report.notes and "every outcome passed" in report.notes[0]
+    assert any("every outcome passed" in note for note in report.notes)
 
 
 # --------------------------------------- attribution under reordering
@@ -196,6 +252,7 @@ def test_attribution_is_noted_not_checked_without_a_reordered_factory():
     assert report.conforms
     assert "attribution_survives_reordering" not in report.checks
     assert report.notes == (
+        NOT_MISNAMED,
         "attribution under reordering was not checked: no reordered_factory was given",
     )
 
@@ -245,6 +302,7 @@ def test_attribution_is_noted_not_checked_when_the_names_change_with_the_order()
     assert report.problems == ()
     assert "attribution_survives_reordering" not in report.checks
     assert report.notes == (
+        NOT_MISNAMED,
         "attribution under reordering was not checked: the check names changed "
         "with the order; a check named by its position cannot be followed from "
         "one run to the next",
@@ -275,6 +333,7 @@ def test_attribution_is_noted_not_checked_when_the_engine_produces_nothing():
     )
     assert "attribution_survives_reordering" not in report.checks
     assert report.notes == (
+        NOT_MISNAMED,
         "persistence was not checked: the engine produced no valid outcomes",
         "attribution under reordering was not checked: the engine produced no "
         "valid outcomes",
@@ -308,6 +367,7 @@ def test_no_outcomes_at_all_is_rejected():
     assert problem.startswith("outcomes_pass_the_outcome_gate:")
     assert "zero" in problem
     assert report.notes == (
+        NOT_MISNAMED,
         "persistence was not checked: the engine produced no valid outcomes",
     )
 

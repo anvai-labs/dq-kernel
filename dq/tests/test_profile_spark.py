@@ -365,7 +365,8 @@ def test_the_profilers_agree_on_names_that_are_not_identifiers(spark, tmp_path):
 def test_no_draft_names_a_column_no_rule_can_ask_for(spark, tmp_path):
     """The profilers profile a column whatever it is called; a draft is
     written only for one a rule can ask for by name. The control is the
-    kernel's own engine: asked for the other column, it refuses the rule."""
+    kernel's: asked for a rule that names the other column, it refuses the
+    rule when the engine is loaded, before any data is read."""
     import pyarrow as pa
 
     table = pa.table(
@@ -396,8 +397,11 @@ def test_no_draft_names_a_column_no_rule_can_ask_for(spark, tmp_path):
             "level": "Warning",
         }
     )
-    with pytest.raises(ConfigurationError, match="bounded portable identifier"):
-        EngineLoader().load_engine("portable", rule, 1).apply(frame)
+    # For the portable engine and for every other alike (SPEC-025).
+    with pytest.raises(
+        ConfigurationError, match="Spark reads any other string as an expression"
+    ):
+        EngineLoader().load_engine("portable", rule, 1)
 
 
 def test_a_frame_that_names_a_column_twice_is_refused_before_anything_is_measured(

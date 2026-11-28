@@ -203,6 +203,16 @@ run over Arrow with no Spark session -- pandas, Polars and DataFusion frames inc
 xref:compute-engines.adoc[Compute engines beyond Spark] for the Arrow adapter, the vendor
 support matrix and engine recipes.
 
+A rule asks for a column by a name that is a plain identifier: letters, digits and
+underscores, starting with a letter or an underscore, at most 128 characters. Spark reads
+any other string as an expression -- `s.t` is the field `t` of a struct `s`, and `x-y` is a
+subtraction -- and a check would measure something else without a word. So `dq-validate`
+and every engine refuse such a name before any data is read, with the reason. Rename the
+column upstream, or write the check as an expression of your own where an engine takes one:
+a Deequ `assertion`, DQX's `sql_expression`, a DQDL `ruleset`. `dq-profile` profiles a column
+whatever it is called, and `dq-suggest` suggests nothing for one no rule can name
+(SPEC-025).
+
 === Deequ
 
 The `deequ` engine maps supported HOCON constraints to PyDeequ checks and requires the matching

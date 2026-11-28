@@ -19,9 +19,11 @@ import importlib.util
 import pytest
 from pyhocon import ConfigFactory
 
+from dq.engine.engine_loader import EngineLoader
 from dq.engine.registry import BUILT_IN_ENGINES, missing_vendor_imports
 from dq.sdk.conformance import assert_engine_conforms, conformance_problems
 from dq.sinks import InMemorySink
+from dq.tests.columns_support import rule_for
 from dq.tests.pandera_support import (
     DOCUMENTS as PANDERA_DOCUMENTS,
     frame as pandas_frame,
@@ -147,6 +149,16 @@ def reordered_factory(name, frame):
     return _factory(name, REORDERED[name])
 
 
+def misnamed_factory(name):
+    """Build engines through the loader for a rule that names a column by
+    anything but a plain identifier -- or None, where the engine's payload
+    names no column. The loader is where the kernel refuses the name,
+    before the engine is imported (SPEC-025)."""
+    if not BUILT_IN_ENGINES[name].column_keys:
+        return None
+    return lambda: EngineLoader().load_engine(name, rule_for(name, "s.t"), 1)
+
+
 def _factory(name, rules):
     spec = BUILT_IN_ENGINES[name]
     module = importlib.import_module(spec.module)
@@ -180,14 +192,26 @@ def built_in_engines():
 NOT_REORDERED = (
     "attribution under reordering was not checked: no reordered_factory was given"
 )
+NOT_MISNAMED = "column references were not checked: no misnamed_factory was given"
 
 
 @pytest.mark.parametrize("name", built_in_engines())
 def test_every_built_in_engine_conforms(spark, name):
     frame = frame_for(spark, name)
     report = assert_engine_conforms(
-        engine_factory(name, frame), frame, InMemorySink, reordered_factory(name, frame)
+        engine_factory(name, frame),
+        frame,
+        InMemorySink,
+        reordered_factory(name, frame),
+        misnamed_factory(name),
     )
+    if BUILT_IN_ENGINES[name].column_keys:
+        # The engine is asked for a rule that names a column Spark would not
+        # read as a name, and refuses it before it is imported (SPEC-025).
+        assert "column_names_are_refused" in report.checks
+        assert NOT_MISNAMED not in report.notes
+    else:
+        assert NOT_MISNAMED in report.notes
     if name == "pandera":
         # It persists nothing, so the suite asks it to refuse a repository.
         assert "persistence_honours_the_capability" in report.checks
@@ -205,9 +229,10 @@ def test_every_built_in_engine_conforms(spark, name):
         return
     # Every other engine here reports one of each, and keeps every check
     # with its own outcome when its checks are configured in another order.
-    assert (
-        report.notes == ()
-    ), f"{name} should report both a passing and a failing check"
+    assert report.notes in (
+        (),
+        (NOT_MISNAMED,),
+    ), f"{name} should report both a passing and a failing check: {report.summary()}"
     assert "attribution_survives_reordering" in report.checks
 
 

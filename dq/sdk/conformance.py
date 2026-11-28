@@ -36,6 +36,14 @@ check -- ``labels_for_checks`` names a second unnamed check of one kind
 by its position -- nothing sets that apart from a real swap, and the
 suite reports it; give such checks names of their own.
 
+``misnamed_factory`` is optional too; without it column references are
+not checked (SPEC-025). It builds the engine for a rule that names a
+column by anything but a plain identifier -- ``s.t`` beside a struct
+``s``, or ``x-y`` beside columns ``x`` and ``y``. The engine must refuse
+it with a ``ConfigurationError`` before anything runs: Spark reads such a
+string as an expression, and measured on Spark 3.5 two engines answered
+"passed" to a not-null check over data where that column held a null.
+
 Nothing here imports an engine or a vendor library.
 """
 
@@ -109,6 +117,39 @@ def _why(error: BaseException) -> str:
     return f"{type(error).__name__}: {error}"
 
 
+def _misnamed_column_problems(misnamed_factory: Callable[[], DQEngine]) -> List[str]:
+    """Return what is wrong with an engine's answer to a column it cannot honour.
+
+    The factory builds the engine for a rule that names a column by
+    anything but a plain identifier. Refusing with a ``ConfigurationError``
+    is the one right answer; building the engine is the finding, since
+    Spark would read the name as an expression and the engine would
+    measure something else (SPEC-025).
+    """
+    check = "column_names_are_refused"
+    try:
+        misnamed_factory()
+    except ConfigurationError:
+        return []
+    except Exception as error:  # noqa: BLE001 - the refusal is the finding
+        return [
+            _problem(
+                check,
+                f"refused a rule that names a column by anything but a plain "
+                f"identifier with {_why(error)}; refuse with a ConfigurationError, "
+                "before anything runs",
+            )
+        ]
+    return [
+        _problem(
+            check,
+            "built an engine for a rule that names a column by anything but a "
+            "plain identifier: Spark reads such a string as an expression, and "
+            "the engine would measure something else",
+        )
+    ]
+
+
 def _by_label(outcomes: List[dict]) -> dict:
     return {outcome.get("check"): outcome for outcome in outcomes}
 
@@ -173,6 +214,7 @@ def conformance_problems(
     frame,
     sink_factory: Optional[Callable[[], Any]] = None,
     reordered_factory: Optional[EngineFactory] = None,
+    misnamed_factory: Optional[Callable[[], DQEngine]] = None,
 ) -> ConformanceReport:
     """Run an engine through the conformance suite.
 
@@ -188,6 +230,10 @@ def conformance_problems(
             every check keeps its outcome under its own name. The labels
             must mean the same check in both configurations: an explicit
             name, or no two of one kind without a column.
+        misnamed_factory: Builds the engine for a rule that names a column
+            by anything but a plain identifier. Given it, the suite checks
+            that the engine refuses it with a ``ConfigurationError``
+            before anything runs (SPEC-025).
 
     Returns:
         The :class:`ConformanceReport`.
@@ -213,6 +259,14 @@ def conformance_problems(
                 "_execute so the lifecycle is the framework's",
             )
         )
+
+    if misnamed_factory is None:
+        notes.append(
+            "column references were not checked: no misnamed_factory was given"
+        )
+    else:
+        checks.append("column_names_are_refused")
+        problems += _misnamed_column_problems(misnamed_factory)
 
     checks.append("outcomes_pass_the_outcome_gate")
     # An empty batch never gets this far as outcomes: the outcome gate
@@ -398,6 +452,7 @@ def assert_engine_conforms(
     frame,
     sink_factory: Optional[Callable[[], Any]] = None,
     reordered_factory: Optional[EngineFactory] = None,
+    misnamed_factory: Optional[Callable[[], DQEngine]] = None,
 ) -> ConformanceReport:
     """Assert that an engine conforms to the engine contract (ADR-012).
 
@@ -406,7 +461,7 @@ def assert_engine_conforms(
             check that found it.
     """
     report = conformance_problems(
-        engine_factory, frame, sink_factory, reordered_factory
+        engine_factory, frame, sink_factory, reordered_factory, misnamed_factory
     )
     assert report.conforms, f"does not conform:\n{report.summary()}"
     return report

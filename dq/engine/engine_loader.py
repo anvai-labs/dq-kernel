@@ -7,7 +7,9 @@
 import importlib
 import re
 import logging
+from collections.abc import Mapping
 
+from dq.engine.checkspec import column_name_problems
 from dq.engine.registry import find_entry_point, find_spec
 from dq.engine.dq_engine import DQEngine, capability_problems
 from dq.exceptions import ConfigurationError, EngineNotFoundError
@@ -44,6 +46,10 @@ class EngineLoader:
             EngineNotFoundError: If the engine module or class cannot be
                 found (also an ``ImportError`` for existing callers).
             ValueError: If the engine name contains invalid characters.
+            ConfigurationError: If the rule names a column by anything but
+                a plain identifier where the engine's payload names one --
+                refused before the engine is imported (SPEC-025) -- or if
+                the engine declares an invalid ``CAPABILITIES`` manifest.
         """
         name = engine_name.lower()
 
@@ -66,6 +72,19 @@ class EngineLoader:
                 module_path = f"dq.engine.{name}.{name}_engine"
                 class_name = f"{name.capitalize()}Engine"
                 logger.debug("Resolved engine %s via naming convention", name)
+
+        # A rule asks for a column by a plain name. One Spark would not read
+        # as a name is refused here, before the engine is imported and
+        # before any data is read (SPEC-025).
+        if (
+            spec is not None
+            and spec.column_keys
+            and args
+            and isinstance(args[0], Mapping)
+        ):
+            problems = column_name_problems(spec, args[0], f"Engine '{name}': ")
+            if problems:
+                raise ConfigurationError("; ".join(problems))
 
         try:
             module = importlib.import_module(module_path)

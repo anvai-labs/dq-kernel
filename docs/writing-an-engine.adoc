@@ -70,6 +70,41 @@ The `greatexpectations` engine is the cautionary example. GX groups expectations
 
 Two checks a vendor cannot tell apart cannot be attributed at all. Refuse them while the suite is being built, before any data is read, and name both.
 
+=== A column is asked for by a plain name
+
+Spark reads a name it is handed as an expression. `col("s.t")` is the field `t` of a struct column `s` where the frame has one, and nothing where it has not; `col("x-y")` is `x` minus `y`; a backtick is a quote. Measured on Spark 3.5, a not-null check on a column literally called `s.t`, beside a struct `s`, was answered *passed* by DQX and by the business-rules engine over data where that column held a null: the check had measured the struct's field. So a rule asks for a column by a name that is a plain identifier -- letters, digits and underscores, starting with a letter or an underscore, at most 128 characters -- and every engine refuses any other name before it runs (SPEC-025).
+
+A built-in engine declares where its payload names a column, and the kernel refuses the rest for it: in `dq-validate`, and when the engine is loaded, before the engine's module is imported.
+
+[source,python]
+----
+EngineSpec(
+    "soda",
+    "dq.engine.soda.soda_engine",
+    "SodaEngine",
+    "checks",
+    extra="soda",
+    vendor_imports=("soda",),
+    column_keys=("column", "columns"),
+),
+----
+
+A key is a path into one entry of the payload, or into the payload itself where it is one mapping; at a path a value is one name, a list of names, or a list of those. Hold the declaration to what the engine's wrapper reads, as `dq/tests/test_column_references.py` does for each built-in engine -- for DQX and Great Expectations by reading the vendor's own registry. Where the author writes the expression as text, a SQL assertion or a DQDL `ruleset`, or where a column is a label that never reaches Spark, there is nothing to declare.
+
+An engine outside this repository owns its payload, so it judges its own names: refuse with a `ConfigurationError` before anything runs. To have the suite check it, pass a factory that builds the engine for a rule naming such a column:
+
+[source,python]
+----
+assert_engine_conforms(
+    lambda dqts=None: MyEngine(make_config(), dqts=dqts),
+    frame,
+    InMemorySink,
+    misnamed_factory=lambda: MyEngine(make_config(column="s.t")),
+)
+----
+
+The engine must refuse it with a `ConfigurationError`; building it fails `column_names_are_refused`, and so does refusing it any other way. Without the argument the report says column references were not checked.
+
 === Declare what the engine can do
 
 `CAPABILITIES` is a manifest, checked when the engine class is defined and again when it is loaded:

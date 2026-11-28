@@ -20,7 +20,13 @@ from typing import List, Tuple
 from urllib.parse import urlparse
 
 from dq.config import RulePack, parse_rule_pack, rule_pack_problems
-from dq.engine.registry import payload_key_for, payload_type_for, renamed_target
+from dq.engine.checkspec import column_name_problems
+from dq.engine.registry import (
+    find_spec,
+    payload_key_for,
+    payload_type_for,
+    renamed_target,
+)
 from dq.exceptions import ConfigurationError
 from dq.schema import rule_pack_schema_errors
 from dq.utils.config_utils import config_format, load_config
@@ -82,6 +88,14 @@ def _engine_payload_errors(pack: RulePack) -> List[str]:
                 f"Rule {rule.index}: Engine '{rule.engine}' payload '{payload_key}' "
                 "must be a mapping, or the text of one"
             )
+        else:
+            # A column is asked for by a plain name, wherever the engine's
+            # payload names one (SPEC-025).
+            spec = find_spec(engine_key)
+            if spec is not None:
+                errors.extend(
+                    column_name_problems(spec, rule.definition, f"Rule {rule.index}: ")
+                )
     return errors
 
 
@@ -106,8 +120,9 @@ def validate_config_document(
             without it.
 
     Validation proceeds in stages -- syntax, the envelope against the
-    schema, the shape of each rule, then each built-in engine's payload --
-    and reports every problem of the first failing stage.
+    schema, the shape of each rule, then each built-in engine's payload,
+    the names it gives a column among them (SPEC-025) -- and reports every
+    problem of the first failing stage.
 
     Returns:
         The :class:`ConfigValidation`; ``errors`` is empty when the pack is
