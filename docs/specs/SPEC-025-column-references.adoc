@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: Accepted — written 2026-11-28 after measuring what every engine does with such a name +
+Status: Verified — CI run 46136259966 green on PR #77: 2861 passed on Python 3.13 (96.19% line, 94.73% branch) and 2872 on 3.12, 60 changed lines at 100% +
 Date: 2026-11-28 +
 Driven by: ADR-002, ADR-003 +
 Milestone: M1 +
@@ -73,11 +73,37 @@ not a rule pack. This spec makes one promise for all of them.
 
 == Progress
 
-* [ ] G1 — not started
-* [ ] G2 — not started
-* [ ] G3 — not started
-* [ ] G4 — not started
-* [ ] G5 — not started
+* [x] G1 — evidence: `dq/tests/test_column_references.py::test_g1_a_name_spark_would_not_read_is_refused_before_the_engine_is_imported`,
+  `::test_g1_a_plain_name_is_not_this_check_s_to_refuse`,
+  `::test_g1_dq_validate_reports_the_name_in_the_same_words`
+  (six engines and four names, with an import hook that fails the test if
+  an engine module is imported to judge a name; the same words from the
+  loader and from `dq-validate`)
+* [x] G2 — evidence: `dq/tests/test_column_references.py::test_g2_the_roster_of_engines_that_name_a_column`,
+  `::test_g2_dqx_declares_what_its_own_check_functions_take`,
+  `::test_g2_great_expectations_declares_what_its_own_expectations_take`,
+  `::test_g2_deequ_declares_what_its_wrapper_reads`,
+  `::test_g2_businessrules_declares_what_its_engine_hands_its_strategies`,
+  `::test_g2_portable_declares_what_its_translation_reads`,
+  `::test_g2_schema_validation_declares_the_keys_it_reads`,
+  `::test_every_declared_key_is_read`
+  (DQX 0.17.2's own registry and Great Expectations 1.25's expectation
+  classes, read on 2026-11-28)
+* [x] G3 — evidence: `dq/tests/test_column_references.py::test_g3_a_check_that_passed_over_a_null_is_refused`
+  (the frame of the measurement, for DQX and for the business-rules
+  engine, with the control that each sees the null when it is asked for
+  the column plainly)
+* [x] G4 — evidence: `dq/tests/test_column_references.py::test_g4_every_checked_in_example_names_plain_columns`,
+  `dq/tests/test_validate.py::test_checked_in_example_is_a_valid_configuration`,
+  `dq/tests/test_conformance_builtin.py::test_every_built_in_engine_conforms`,
+  `::test_built_in_engines_conform_without_a_sink_too`
+* [x] G5 — evidence: `dq/tests/test_conformance_unit.py::test_an_engine_that_does_not_refuse_a_misnamed_column_does_not_conform`,
+  `::test_without_a_misnamed_factory_column_references_are_not_checked`,
+  `::test_a_conforming_engine_passes_every_check`,
+  `dq/tests/test_conformance_builtin.py::test_every_built_in_engine_conforms`
+  (an engine that builds for such a rule, or refuses it another way, does
+  not conform; and every built-in engine is checked with a misnamed
+  factory)
 
 [NOTE]
 ====
