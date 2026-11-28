@@ -195,6 +195,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
           clean: true
+      # The same check the public lane makes; ci.yml says why it is retried.
       - name: Check documentation links
         env:
           LYCHEE_ARCHIVE_SHA256: 73657a111819a30c47c08352896796f23d64e4eb2b3ed39b6d32149241566fc5
@@ -208,8 +209,12 @@ jobs:
           rm -rf "${install_dir}"
           mkdir -p "${install_dir}"
           tar -xzf "${archive}" --strip-components=1 -C "${install_dir}"
-          "${install_dir}/lychee" --no-progress --root-dir . --max-retries 3 --timeout 30 \
-            --exclude '^file:///(absolute/path|path/to)/' './**/*.md' './**/*.adoc'
+          # The $1, $2 and $3 below are lychee's, not the shell's.
+          # shellcheck disable=SC2016
+          python3 scripts/check_links.py --attempts 4 --wait 30 -- "${install_dir}/lychee" \
+            --no-progress --root-dir . --max-retries 3 --timeout 30 \
+            --exclude '^file:///(absolute/path|path/to)/' './**/*.md' './**/*.adoc' \
+            --remap 'https://github\.com/([^/]+)/([^/]+)/blob/(.+) https://raw.githubusercontent.com/$1/$2/$3'
       - name: Review dependency changes
         uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:

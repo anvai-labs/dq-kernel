@@ -238,6 +238,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The link check no longer goes red on a remote's bad half hour.** It went
+  red three times in one day on a link no pull request had touched. Two
+  things were measured: the checker does not retry a status code, and
+  GitHub's file pages answer 503 to everybody -- a browser included -- for
+  half an hour at a time, while the same file at its raw address answers
+  steadily, 404 included when the file is not there. So
+  `scripts/check_links.py` runs the check again while only such failures
+  remain (a 5xx answer, a refused connection, a timeout), and still fails
+  when they persist; a broken link fails at once. And a GitHub file page is
+  asked for as the file itself. Both lanes download the checker against one
+  pinned checksum and make the same check; the public lane no longer goes
+  through a third-party action to do it
 - **CI proves the wheel needs no extra.** The build job installs the built
   wheel, and nothing else, into an empty environment and runs
   `scripts/check_core_install.py` there. It refuses an environment that holds

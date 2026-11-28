@@ -1029,7 +1029,9 @@ Flake8, Bandit, and pip-audit, builds the package, and proves the wheel needs no
 installs the wheel alone into an empty environment, where every module of the package must
 import except the few declared to need an extra, every command must answer its help, and
 anything asked to work without its extra must name it -- a command by exiting with the code
-its help promises. It reviews dependency changes and checks documentation links.
+its help promises. It reviews dependency changes, and checks documentation links -- trying
+again while only a remote's own failures remain, and asking for a GitHub file page as the
+file itself, since those pages answer 503 to everybody for half an hour at a time.
 
 The coverage floors are a ratchet, kept a few points under what CI measures, so that a real drop
 fails the build. They stood at 55, 57 and 46 from the first release while coverage rose past 93,

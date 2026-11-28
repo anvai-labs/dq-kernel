@@ -226,3 +226,57 @@ def test_build_jobs_prove_the_wheel_needs_no_extra():
         ), "of the wheel alone"
         built = next(i for i, run in enumerate(runs) if "poetry build" in run)
         assert runs.index(check) > built, "the wheel must exist first"
+
+
+#: Where each lane's link check begins, once the checker is downloaded.
+DOWNLOAD = 'archive="${RUNNER_TEMP}/lychee-x86_64-unknown-linux-musl.tar.gz"'
+
+LANES = ("ci.yml", "owner-private-ci.yml")
+
+
+def link_checks():
+    """Return each lane's link-check step, by workflow."""
+    found = {}
+    for workflow in LANES:
+        steps = _load(workflow)["jobs"]["dependency-review"]["steps"]
+        found[workflow] = next(
+            (step for step in steps if "check_links.py" in step.get("run", "")), {}
+        )
+    return found
+
+
+def test_both_lanes_check_the_links_again_while_only_the_remote_s_failures_remain():
+    """The check went red three times in one day on a link no pull request
+    had touched. lychee does not retry a status code, and GitHub's file pages
+    answer 503 to everybody for half an hour at a time, while the same file
+    at its raw address answers steadily."""
+    for workflow, step in link_checks().items():
+        check = step.get("run", "")
+        assert (
+            check
+        ), f"{workflow}: the dependency review must run scripts/check_links.py"
+        assert "check_links.py --attempts" in check, "the check is tried more than once"
+        assert (
+            "sha256sum --check --strict" in check
+        ), "the checker is verified against a pin"
+        pin = step.get("env", {}).get("LYCHEE_ARCHIVE_SHA256", "")
+        assert re.fullmatch(r"[0-9a-f]{64}", pin), f"{workflow}: the pin is a checksum"
+        assert (
+            "--remap" in check and "raw.githubusercontent.com" in check
+        ), "a GitHub file page is asked for as the file itself"
+
+
+def test_both_lanes_make_the_same_link_check():
+    """The owner lane runs instead of the public one on the owner's own pull
+    requests; it must not check less, or differently -- and both must pin the
+    checker to one checksum, so neither lane trusts another download."""
+    checks = link_checks()
+    pins = {
+        step.get("env", {}).get("LYCHEE_ARCHIVE_SHA256") for step in checks.values()
+    }
+    assert len(pins) == 1 and None not in pins, pins
+    public, owner = (
+        step["run"][step["run"].index(DOWNLOAD) :] for step in checks.values()
+    )
+    assert DOWNLOAD in public and DOWNLOAD in owner
+    assert public == owner
