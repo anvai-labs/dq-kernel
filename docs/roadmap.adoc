@@ -209,9 +209,9 @@ a command, or an observed CI run is not a gate.
 | SPEC-018
 | link:specs/SPEC-018-soda-core-engine.adoc[Soda Core engine]
 | M3
-| Accepted
+| Blocked
 | 0/5
-| gated on the live dependency and API check
+| Soda Core's own caps would downgrade two packages for every install, so it cannot be an extra; how to ship it is the owner's decision
 
 | SPEC-019
 | link:specs/SPEC-019-profiling-and-rule-suggestion.adoc[Profiling and rule suggestion]
