@@ -329,6 +329,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CI's own downloads retry what is transient** (SPEC-009). The step that
+  downloads the Deequ JARs tried once, and twice a run went red on an error
+  response from Maven Central, then green on a rerun with nothing changed.
+  It is `curl` now: retrying a timeout or an HTTP 408, 429 or 5xx with
+  backoff for two minutes at most, failing a 404 at once, and never saving
+  an error page as the JAR. A contract test runs each lane's step as
+  written against a local remote that fails
 - **An engine whose library is absent is refused when it is loaded**
   (SPEC-011), where it was loaded and refused when it was first applied to a
   frame; the extra that installs the library is named as before. `dq-engines`

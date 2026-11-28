@@ -154,12 +154,18 @@ jobs:
           -E spark -E deequ -E aws -E databricks -E greatexpectations -E dqx
           -E sqlalchemy -E arrow -E otel -E pandera
 
+      # Maven Central has a bad minute now and then -- an error response, or
+      # a timeout -- and a run that fails on it and passes on a rerun says
+      # nothing about the commit. curl retries what is transient, with
+      # backoff, for two minutes at most; a wrong address is a 404, said at
+      # once; and --fail keeps an error page from being saved as the JAR.
       - name: Download Deequ JAR
         run: |
           mkdir -p lib
-          wget -q -O lib/deequ-2.0.21-spark-3.5.jar \
+          retry=(--fail --location --silent --show-error --retry 8 --retry-max-time 120 --connect-timeout 20 --max-time 300)
+          curl "${retry[@]}" --output lib/deequ-2.0.21-spark-3.5.jar \
             https://repo1.maven.org/maven2/com/amazon/deequ/deequ/2.0.21-spark-3.5/deequ-2.0.21-spark-3.5.jar
-          wget -q -O lib/dqdl-1.0.0.jar \
+          curl "${retry[@]}" --output lib/dqdl-1.0.0.jar \
             https://repo1.maven.org/maven2/software/amazon/glue/dqdl/1.0.0/dqdl-1.0.0.jar
 
       - name: Run tests

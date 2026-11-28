@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: Verified — CI run 45874745384 green on PR #66 +
+Status: Verified — CI run 45874745384 green on PR #66; the lanes' own downloads were made to retry what is transient on 2026-11-28, and verified in their own runs +
 Date: 2026-11-24 +
 Driven by: ADR-009 (CI proves the open repo), SPEC-008 +
 Milestone: M0 +
@@ -141,4 +141,35 @@ protection, so a red `build` does not by itself stop a merge.
   gate's second clause was checked by running `poetry check --lock` on
   `main`'s tree itself.
 ====
+
+[NOTE]
+====
+Amended 2026-11-28, after verification: a lane's own downloads must not be
+what makes it go red.
+
+* The step "Download Deequ JAR" tried once, with `wget`. Twice a run went
+  red on it with wget's exit 8 -- an error response from Maven Central --
+  and was green on `gh run rerun --failed` with nothing changed: the run
+  that carried SPEC-019's Verified commit (46132587838, attempt 1) and a
+  Dependabot run. A run that fails on a remote's bad minute and passes on a
+  rerun says nothing about the commit. The link check had gone the same way
+  three times in one day (PR #74).
+* The download is now `curl`, retrying what curl itself calls transient --
+  a timeout, or HTTP 408, 429, 500, 502, 503, 504 -- with its exponential
+  backoff, for two minutes at most. `--fail`, so an error page is never
+  saved as the JAR; and not `--retry-all-errors`, so a wrong address is a
+  404, said at once.
+* Measured, and held: a contract test runs the step as each lane holds it,
+  against a local remote, changing only the addresses and the cap. Two
+  errors and then the JAR: retried, and the file holds what was answered.
+  A 404: one request, and no file. Down for good: tried again, stopped by
+  the cap, and no file. Four ways the step could regress were run against
+  that test -- no `--fail`, `--retry-all-errors`, one retry, none -- and
+  each fails it.
+* The owner lane takes the same step. It runs instead of the public one on
+  the owner's own pull requests: a download that retried in one lane and
+  not the other would be a lane that fails on a bad minute the other one
+  survives.
+====
+
 Links: ADR-009; ADR-012; SPEC-008; SPEC-003.

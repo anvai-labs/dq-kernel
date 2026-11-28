@@ -148,7 +148,7 @@ a command, or an observed CI run is not a gate.
 | M0
 | Verified
 | 9/9
-| CI run 45874745384 green on PR #66
+| CI run 45874745384 green on PR #66; the lanes' own downloads were made to retry what is transient on 2026-11-28, and verified in their own runs
 
 | SPEC-010
 | link:specs/SPEC-010-rule-pack-configuration.adoc[Rule-pack configuration]

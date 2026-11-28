@@ -11,7 +11,11 @@ unpinned actions. Workflow YAML is code, so it gets contracts too.
 import json
 import os
 import re
+import shutil
 import subprocess
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -281,3 +285,166 @@ def test_both_lanes_make_the_same_link_check():
     )
     assert DOWNLOAD in public and DOWNLOAD in owner
     assert public == owner
+
+
+# ------------------------------------------------- the JARs the test lanes need
+
+#: ``(where the step puts it, where it comes from)`` for each JAR.
+JARS = (
+    (
+        "lib/deequ-2.0.21-spark-3.5.jar",
+        "https://repo1.maven.org/maven2/com/amazon/deequ/deequ/"
+        "2.0.21-spark-3.5/deequ-2.0.21-spark-3.5.jar",
+    ),
+    (
+        "lib/dqdl-1.0.0.jar",
+        "https://repo1.maven.org/maven2/software/amazon/glue/dqdl/1.0.0/dqdl-1.0.0.jar",
+    ),
+)
+#: Where the download step's script begins.
+JAR_DOWNLOAD = "mkdir -p lib\n"
+#: The wait the step allows itself for retries, as the test runs it: the
+#: workflow's own cap is two minutes, which is not waited for in a test.
+CAP_IN_A_TEST = 3
+
+
+def jar_downloads():
+    """Return each lane's JAR-download step, by workflow."""
+    found = {}
+    for workflow in LANES:
+        steps = [
+            step for job in _load(workflow)["jobs"].values() for step in job["steps"]
+        ]
+        found[workflow] = next(
+            (step for step in steps if step.get("name") == "Download Deequ JAR"), {}
+        )
+    return found
+
+
+def test_both_lanes_take_the_same_jar_download():
+    """The step went red twice on Maven Central's bad minute -- a server error
+    wget tried once -- and green on a rerun with nothing changed: wget's exit
+    8 on the SPEC-019 Verified run and on a Dependabot run. A run that fails
+    on a remote and passes on a rerun says nothing about the commit."""
+    scripts = []
+    for workflow, step in jar_downloads().items():
+        script = step.get("run", "")
+        assert JAR_DOWNLOAD in script, f"{workflow}: no step downloads the JARs"
+        assert "wget" not in script, f"{workflow}: wget tries once"
+        assert "--fail" in script, f"{workflow}: an error page saved as a JAR"
+        assert (
+            "--retry-all-errors" not in script
+        ), f"{workflow}: a wrong address is a 404, and is said at once"
+        assert re.search(r"--retry [1-9]", script), f"{workflow}: nothing is retried"
+        assert re.search(
+            r"--retry-max-time [1-9]", script
+        ), f"{workflow}: the retries are not capped in time"
+        for _placed, address in JARS:
+            assert address in script, f"{workflow}: {address} is not downloaded"
+        scripts.append(script[script.index(JAR_DOWNLOAD) :])
+    # The owner lane runs instead of the public one on the owner's own pull
+    # requests: it must download no differently.
+    assert scripts[0] == scripts[1]
+
+
+class _Remote(BaseHTTPRequestHandler):
+    """A remote as Maven Central is on a bad minute. ``/flaky`` answers an
+    error twice for each JAR asked for, then well; ``/missing`` is a 404;
+    ``/down`` answers an error for good. Every hit is counted."""
+
+    hits: dict = {}
+
+    def do_GET(self):
+        _Remote.hits[self.path] = _Remote.hits.get(self.path, 0) + 1
+        seen = _Remote.hits[self.path]
+        if self.path.startswith("/missing"):
+            status = 404
+        elif self.path.startswith("/down") or (
+            self.path.startswith("/flaky") and seen <= 2
+        ):
+            status = 503
+        else:
+            status = 200
+        self.send_response(status)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *arguments):
+        pass
+
+
+@pytest.fixture
+def remote():
+    """Return where a remote with a bad minute is listening, and its hits."""
+    _Remote.hits = {}
+    server = HTTPServer(("127.0.0.1", 0), _Remote)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", _Remote.hits
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def step_script(workflow):
+    """Return a lane's download step as the workflow holds it."""
+    step = jar_downloads()[workflow]["run"]
+    return step[step.index(JAR_DOWNLOAD) :]
+
+
+def download_from(workflow, origin, answer, where):
+    """Run a lane's download step as written, from ``origin`` instead of Maven
+    Central, in ``where``: return its exit code and what it said."""
+    script = step_script(workflow)
+    for placed, address in JARS:
+        script = script.replace(address, f"{origin}/{answer}?jar={placed}")
+    # The workflow waits two minutes at most for retries; a test does not.
+    script = re.sub(
+        r"--retry-max-time \d+", f"--retry-max-time {CAP_IN_A_TEST}", script
+    )
+    # The shell a workflow's step runs in.
+    done = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", script],
+        cwd=where,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    return done.returncode, done.stderr
+
+
+@pytest.mark.skipif(not shutil.which("curl"), reason="the step downloads with curl")
+def test_the_jar_download_retries_what_is_transient_and_only_that(remote, tmp_path):
+    """The step's own options, run: the words above it are held to what they
+    say. Only the addresses and the cap are changed."""
+    origin, hits = remote
+    files = [tmp_path / placed for placed, _address in JARS]
+
+    # A bad minute, then well: retried, and the JARs are what was answered.
+    code, said = download_from("ci.yml", origin, "flaky", tmp_path)
+    assert code == 0, said
+    assert [path.read_text() for path in files] == ["ok", "ok"]
+    assert sorted(hits.values()) == [3, 3], hits  # twice an error, then the JAR
+    assert said.count("returned error: 503") == 4, said
+
+    # A wrong address: said at once, retried none, and nothing is saved.
+    _Remote.hits.clear()
+    for path in files:
+        path.unlink()
+    code, said = download_from("ci.yml", origin, "missing", tmp_path)
+    assert code == 22 and "returned error: 404" in said, said
+    assert sum(hits.values()) == 1, hits  # the step stops at its first failure
+    assert not any(path.exists() for path in files)
+
+    # Down for good: given up within the cap, and nothing is saved.
+    _Remote.hits.clear()
+    started = time.monotonic()
+    code, said = download_from("ci.yml", origin, "down", tmp_path)
+    elapsed = time.monotonic() - started
+    assert code != 0 and "returned error: 503" in said, said
+    # Tried again -- and stopped by the cap, before the count it was allowed.
+    allowed = int(re.search(r"--retry (\d+)", step_script("ci.yml")).group(1))
+    assert 3 <= sum(hits.values()) < allowed + 1, (hits, allowed)
+    assert elapsed < 2 * (2**allowed), elapsed  # not the backoff of them all
+    assert not any(path.exists() for path in files)
