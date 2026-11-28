@@ -334,6 +334,13 @@ Engine resolution: the name guard, and the manifest of the engine it loads.
   write the check as an expression of your own where the engine takes one.
   The same refusal is a problem `dq-validate` reports.
 
+Outside the counted set, the same place refuses an engine it cannot load with
+an `EngineNotFoundError`, and the message says which: a library the engine
+needs is not installed -- with the extras that install it, judged before
+anything is imported; the engine, or its class, is unknown; or its module
+cannot be imported on this machine, with the library's own reason. For the
+first, `dq-kernel` exits 2 without starting Spark.
+
 == dq/envelope.py
 
 *Content:* 1 `ConfigurationError` site.

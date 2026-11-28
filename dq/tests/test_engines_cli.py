@@ -40,8 +40,10 @@ def test_json_output_is_stable_and_complete(capsys):
         "module": "dq.engine.deequ.deequ_engine",
         "class": "DeequEngine",
         "payload_key": "checks",
-        "extra": "deequ",
+        "extras": ["spark", "deequ"],
         "installed": True,
+        "missing": [],
+        "problem": None,
         "install_hint": None,
         "renamed_from": [],
         "capabilities": {
@@ -63,7 +65,7 @@ def test_text_output_is_a_table_with_one_row_per_engine(capsys):
         "Name",
         "Payload",
         "key",
-        "Extra",
+        "Extras",
         "Installed",
         "Criticality",
         "Row",
@@ -87,16 +89,19 @@ def test_an_engine_whose_vendor_library_is_missing_is_reported_not_raised(
     monkeypatch.setattr(
         cli,
         "missing_vendor_imports",
-        lambda spec: ("some.vendor",) if spec.name == "deequ" else (),
+        lambda spec: ("pyspark", "pydeequ") if spec.name == "deequ" else (),
     )
     code, out = run(capsys, ["--format", "json"])
     deequ = {engine["name"]: engine for engine in json.loads(out)["engines"]}["deequ"]
     assert code == 0
     assert deequ["installed"] is False
     assert deequ["capabilities"] is None
-    assert (
-        deequ["install_hint"]
-        == "pip install 'dq-kernel[deequ]'  (or: poetry install -E deequ)"
+    assert deequ["missing"] == ["pyspark", "pydeequ"]
+    assert deequ["problem"] is None
+    # Every extra the engine needs, since no extra of the package pulls in
+    # another: "deequ" alone installs no Spark.
+    assert deequ["install_hint"] == (
+        "pip install 'dq-kernel[spark,deequ]'  (or: poetry install -E spark -E deequ)"
     )
     code, out = run(capsys, [])
     (deequ_row,) = [
@@ -104,33 +109,130 @@ def test_an_engine_whose_vendor_library_is_missing_is_reported_not_raised(
         for line in out.splitlines()
         if line.startswith("deequ")
     ]
-    assert deequ_row[1:4] == ["checks", "deequ", "no"]
+    assert deequ_row[1:4] == ["checks", "spark,deequ", "no"]
     assert deequ_row[4:] == ["-", "-", "-", "-"]  # no manifest could be read
-    assert "  deequ: pip install 'dq-kernel[deequ]'" in out
+    assert "  deequ: pyspark, pydeequ -- pip install 'dq-kernel[spark,deequ]'" in out
 
 
-def test_an_engine_that_fails_to_import_is_reported_as_unavailable(capsys, monkeypatch):
+def test_an_engine_that_fails_to_import_is_reported_with_the_reason(
+    capsys, monkeypatch
+):
+    """Installed, and refusing to be imported: pydeequ does so wherever
+    SPARK_VERSION is not set. An install hint would send the reader to
+    install what is already there; the reason is the library's own words."""
     import importlib
 
     real = importlib.import_module
 
-    def broken(name, *args, **kwargs):
-        if name == "dq.engine.portable.portable_engine":
-            raise RuntimeError("broken import")
+    def refusing(name, *args, **kwargs):
+        if name == "dq.engine.deequ.deequ_engine":
+            raise RuntimeError("SPARK_VERSION environment variable is required")
         return real(name, *args, **kwargs)
 
-    monkeypatch.setattr(cli.importlib, "import_module", broken)
-    _, out = run(capsys, ["--format", "json"])
+    monkeypatch.setattr(cli.importlib, "import_module", refusing)
+    monkeypatch.setattr(
+        cli, "missing_vendor_imports", lambda spec: []  # installed, every one
+    )
+    code, out = run(capsys, ["--format", "json"])
+    deequ = {engine["name"]: engine for engine in json.loads(out)["engines"]}["deequ"]
+    assert code == 0
+    assert deequ["installed"] is False
+    assert deequ["missing"] == []
+    assert deequ["install_hint"] is None
+    assert deequ["capabilities"] is None
+    assert (
+        deequ["problem"]
+        == "RuntimeError: SPARK_VERSION environment variable is required"
+    )
+    code, out = run(capsys, [])
+    assert (
+        "Cannot be used here:\n"
+        "  deequ: RuntimeError: SPARK_VERSION environment variable is required"
+    ) in out
+    # Not sent to install what is already there.
+    assert not [line for line in out.splitlines() if line.startswith("  deequ: pip")]
+
+
+def test_a_library_an_engine_imports_but_does_not_declare_is_named(capsys, monkeypatch):
+    """The declaration missed one, or the engine is from elsewhere: the
+    module that was not found is said, as the loader says it."""
+    import importlib
+
+    real = importlib.import_module
+
+    def undeclared(name, *args, **kwargs):
+        if name == "dq.engine.portable.portable_engine":
+            raise ModuleNotFoundError(
+                "No module named 'some.library'", name="some.library"
+            )
+        return real(name, *args, **kwargs)
+
+    monkeypatch.setattr(cli.importlib, "import_module", undeclared)
+    code, out = run(capsys, ["--format", "json"])
     portable = {engine["name"]: engine for engine in json.loads(out)["engines"]}[
         "portable"
     ]
+    assert code == 0
+    assert portable["installed"] is False
+    assert portable["missing"] == ["some.library"]
+    assert portable["problem"] is None
+    # The engine's extras, as for a declared one: what else would be named.
+    assert portable["install_hint"] == (
+        "pip install 'dq-kernel[arrow,sqlalchemy,spark]'  "
+        "(or: poetry install -E arrow -E sqlalchemy -E spark)"
+    )
+    code, out = run(capsys, [])
+    assert (
+        "  portable: some.library -- pip install 'dq-kernel[arrow,sqlalchemy,spark]'"
+        in out
+    )
+
+
+def test_the_command_answers_even_where_judging_an_engine_fails(capsys, monkeypatch):
+    """ "Which engines can I use here" is asked first, on the machine where
+    nothing runs: whatever goes wrong while answering, it answers."""
+
+    def exploding(spec):
+        raise TypeError("a stand-in in sys.modules")
+
+    monkeypatch.setattr(cli, "missing_vendor_imports", exploding)
+    code, out = run(capsys, ["--format", "json"])
+    listed = {engine["name"]: engine for engine in json.loads(out)["engines"]}
+    assert code == 0
+    assert set(listed) == set(BUILT_IN_ENGINES)
+    assert {engine["problem"] for engine in listed.values()} == {
+        "TypeError: a stand-in in sys.modules"
+    }
+    assert not any(engine["installed"] for engine in listed.values())
+    code, out = run(capsys, [])
+    assert code == 0 and "Cannot be used here:" in out
+
+
+def test_an_engine_whose_class_is_not_in_its_module_is_said_so(capsys, monkeypatch):
+    import importlib
+    from types import SimpleNamespace
+
+    real = importlib.import_module
+
+    def no_class(name, *args, **kwargs):
+        if name == "dq.engine.portable.portable_engine":
+            return SimpleNamespace()  # the module is here; its engine is not
+        return real(name, *args, **kwargs)
+
+    monkeypatch.setattr(cli.importlib, "import_module", no_class)
+    code, out = run(capsys, ["--format", "json"])
+    portable = {engine["name"]: engine for engine in json.loads(out)["engines"]}[
+        "portable"
+    ]
+    assert code == 0
     assert portable["installed"] is False
     assert portable["capabilities"] is None
-    # The remedy names the extra that provides the dependency.
     assert (
-        portable["install_hint"]
-        == "pip install 'dq-kernel[spark]'  (or: poetry install -E spark)"
+        portable["problem"]
+        == "Engine class 'PortableEngine' is not in 'dq.engine.portable.portable_engine'"
     )
+    code, out = run(capsys, [])
+    assert "Cannot be used here:\n  portable: Engine class 'PortableEngine'" in out
 
 
 def _entry_points(*entries):
@@ -163,11 +265,11 @@ def test_third_party_engines_registered_by_entry_point_are_listed(capsys, monkey
     listed = {engine["name"]: engine for engine in json.loads(out)["engines"]}
     soda = listed["soda"]
     assert soda["source"] == "entry-point"
-    assert (soda["module"], soda["class"], soda["payload_key"], soda["extra"]) == (
+    assert (soda["module"], soda["class"], soda["payload_key"], soda["extras"]) == (
         "soda_dq.kernel",
         "SodaEngine",
         None,
-        None,
+        [],
     )
     assert listed["dbt"]["class"] == "DbtEngine"
     assert set(listed) == set(BUILT_IN_ENGINES) | {"soda", "dbt"}

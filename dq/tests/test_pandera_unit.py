@@ -599,8 +599,8 @@ def test_the_registry_declares_the_engine_and_its_extra(monkeypatch):
         "PanderaEngine",
         "schema",
     )
-    assert (spec.extra, spec.vendor_imports, spec.payload_type) == (
-        "pandera",
+    assert (spec.extras, spec.vendor_imports, spec.payload_type) == (
+        ("pandera",),
         ("pandera",),
         "document",
     )
@@ -609,7 +609,13 @@ def test_the_registry_declares_the_engine_and_its_extra(monkeypatch):
     assert missing_vendor_imports(spec) == ("pandera",)
 
 
-def test_the_module_imports_with_pandera_absent_and_every_extra_blocked():
+def test_the_module_imports_with_pandera_absent_and_loading_is_refused():
+    """Importing the module is one thing -- pandera is not so much as looked
+    up -- and being asked for the engine is another. For that, pandera is
+    absent -- a missing module the loader can report -- not forbidden:
+    asking whether a library is installed is a lookup, which the block
+    forbids. The refusal comes at loading, before the engine's work, and
+    names the extra: it used to come when the first frame was applied."""
     code = f"""
 import sys
 
@@ -624,24 +630,25 @@ class Block:
 sys.meta_path.insert(0, Block())
 import dq.engine.pandera.pandera_engine
 from dq.engine.engine_loader import EngineLoader
+from dq.exceptions import EngineNotFoundError
 from pyhocon import ConfigFactory
 
-schema = {{"schema_type": "dataframe", "columns": {{"id": {{"dtype": "int64"}}}}}}
-rule = ConfigFactory.from_dict({{"schema": schema}})
-loaded = EngineLoader().load_engine("pandera", rule, 1)
-assert type(loaded).__name__ == "PanderaEngine"
-assert not [n for n in sys.modules if n.split(".")[0] in BLOCKED]
-
-# Importing is one thing; being asked to work is another. For that, pandera
-# is absent -- a missing module the engine can report -- not forbidden.
 sys.meta_path.pop(0)
 sys.modules["pandera"] = None
+schema = {{"schema_type": "dataframe", "columns": {{"id": {{"dtype": "int64"}}}}}}
+rule = ConfigFactory.from_dict({{"schema": schema}})
 try:
-    loaded.apply(object())
-except ImportError as error:
-    assert "-E pandera" in str(error), error
+    EngineLoader().load_engine("pandera", rule, 1)
+except EngineNotFoundError as error:
+    assert str(error) == (
+        "Engine 'pandera' cannot run here: 'pandera' is not installed. "
+        "Install it with: pip install 'dq-kernel[pandera]'  "
+        "(or: poetry install -E pandera)."
+    ), error
 else:
-    raise AssertionError("asked to work without pandera, it ran")
+    raise AssertionError("asked for without pandera, it was loaded")
+loaded = [n for n, m in sys.modules.items() if m is not None and n.split(".")[0] in BLOCKED]
+assert not loaded, loaded
 print("ok")
 """
     result = run_python(["-c", code], child_env())

@@ -19,8 +19,12 @@ any vendor dependency installed.
 """
 
 import logging
+import sys
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+import importlib.machinery
 import importlib.metadata
+import importlib.util
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -42,13 +46,22 @@ class EngineSpec:
         payload_type: ``"list"`` (the default), ``"string"`` (dqdl's
             ``ruleset``), or ``"document"``: a mapping, or the text of one
             (pandera's ``schema``).
-        extra: Poetry/pip extra providing the vendor dependency, for
-            messages; ``None`` for extra-free engines.
+        extras: Every extra that provides what the engine needs, in the
+            order to install them; empty for an engine the package's own
+            dependencies carry. An engine on Spark names ``spark`` beside
+            its own: no extra of this package pulls in another, so
+            ``deequ`` alone installs no Spark. An engine that can run on
+            more than one backend names them all and declares no
+            ``vendor_imports``; the backend asked for says what it needs.
         renamed_from: Deprecated aliases that must be migrated to ``name``.
         vendor_imports: Modules that must be importable for the engine to
-            run. Engines import their vendor library lazily, so a missing
-            one shows at run time, not at import; this lets a caller tell
-            in advance whether an engine can run here.
+            run -- its vendor library and whatever else the package does
+            not already install, ``pyspark`` for an engine on Spark.
+            Engines import their vendor library lazily, so a missing one
+            showed at run time, not at import; this lets a caller tell in
+            advance whether an engine can run here, and say what to
+            install when it cannot. A test holds each declaration to what
+            the engine's code imports and to the extras it names.
         column_keys: Where the payload names a column that the engine hands
             to Spark by name. Each is a path into one entry of the payload,
             or into the payload itself where it is one mapping; at a path a
@@ -68,7 +81,7 @@ class EngineSpec:
     class_name: str
     payload_key: Optional[str]
     payload_type: str = "list"
-    extra: Optional[str] = None
+    extras: Tuple[str, ...] = ()
     renamed_from: Tuple[str, ...] = ()
     vendor_imports: Tuple[str, ...] = ()
     column_keys: Tuple[str, ...] = ()
@@ -100,7 +113,9 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "dq.engine.businessrules.businessrules_engine",
             "BusinessrulesEngine",
             "checks",
+            extras=("spark",),
             renamed_from=("custom",),
+            vendor_imports=("pyspark",),
             column_keys=("columns", "group_by", "sort_by"),
         ),
         EngineSpec(
@@ -108,8 +123,8 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "dq.engine.deequ.deequ_engine",
             "DeequEngine",
             "checks",
-            extra="deequ",
-            vendor_imports=("pydeequ",),
+            extras=("spark", "deequ"),
+            vendor_imports=("pyspark", "pydeequ"),
             column_keys=("column", "columns"),
         ),
         EngineSpec(
@@ -118,16 +133,16 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "DqdlEngine",
             "ruleset",
             payload_type="string",
-            extra="deequ",
-            vendor_imports=("pydeequ.dqdl",),
+            extras=("spark", "deequ"),
+            vendor_imports=("pyspark", "pydeequ.dqdl"),
         ),
         EngineSpec(
             "dqx",
             "dq.engine.dqx.dqx_engine",
             "DqxEngine",
             "checks",
-            extra="dqx",
-            vendor_imports=("databricks.labs.dqx",),
+            extras=("spark", "dqx"),
+            vendor_imports=("pyspark", "databricks.labs.dqx"),
             column_keys=(
                 "check.for_each_column",
                 *("check.arguments." + name for name in _DQX_COLUMN_ARGUMENTS),
@@ -138,7 +153,9 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "dq.engine.portable.portable_engine",
             "PortableEngine",
             "plan",
-            extra="spark",
+            # One engine, three backends: Arrow over files, SQL over a
+            # connection, Spark. Each says what it needs when it is asked.
+            extras=("arrow", "sqlalchemy", "spark"),
             column_keys=("column", "columns", "group_by"),
         ),
         EngineSpec(
@@ -146,8 +163,8 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "dq.engine.greatexpectations.greatexpectations_engine",
             "GreatexpectationsEngine",
             "expectations",
-            extra="greatexpectations",
-            vendor_imports=("great_expectations",),
+            extras=("spark", "greatexpectations"),
+            vendor_imports=("pyspark", "great_expectations"),
             # Every argument of GX 1.25's expectations that names a column,
             # but ``column_index``, which is a position: a test holds this
             # list to the library.
@@ -168,7 +185,8 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "dq.engine.schemavalidation.schemavalidation_engine",
             "SchemavalidationEngine",
             "schema",
-            extra="deequ",
+            extras=("spark", "deequ"),
+            vendor_imports=("pyspark", "pydeequ"),
             column_keys=(
                 "not_null_columns",
                 "unique_constraints",
@@ -182,7 +200,7 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "PanderaEngine",
             "schema",
             payload_type="document",
-            extra="pandera",
+            extras=("pandera",),
             vendor_imports=("pandera",),
         ),
     )
@@ -195,22 +213,135 @@ _RENAMED_TO: Dict[str, str] = {
 }
 
 
-def importable(module: str) -> bool:
-    """Return whether ``module`` can be imported, without importing it.
+_NOT_HELD = object()
 
-    ``find_spec`` raises when a parent package is missing
-    (``databricks.labs.dqx`` without ``databricks``), which also means the
-    module cannot be imported.
+
+def importable(module: str) -> bool:
+    """Return whether ``module`` is installed here, importing nothing.
+
+    A module is looked up and never run, and neither is the package it is
+    in. ``importlib.util.find_spec`` imports the parent of a dotted name to
+    learn where its submodules live, and a parent may do anything when it
+    is imported -- pydeequ refuses without ``SPARK_VERSION`` set -- so
+    "can this engine run here" cannot be asked through it: asked of the
+    dqdl engine on a machine with pydeequ and no ``SPARK_VERSION``, it
+    raised, and took ``dq-engines`` down with it.
+
+    A module already imported counts as installed. So does one whose
+    import was refused (``None`` in ``sys.modules``): that refusal stands.
     """
     try:
-        return importlib.util.find_spec(module) is not None
-    except (ImportError, ValueError):  # noqa: BLE001 - a missing parent package
+        path = None
+        prefix = ""
+        for part in module.split("."):
+            prefix = part if not prefix else f"{prefix}.{part}"
+            held = sys.modules.get(prefix, _NOT_HELD)
+            if held is not _NOT_HELD:
+                if held is None:
+                    return False
+                path = getattr(held, "__path__", None)
+                continue
+            found = (
+                importlib.util.find_spec(prefix)
+                if path is None
+                else importlib.machinery.PathFinder.find_spec(part, path)
+            )
+            if found is None:
+                return False
+            path = found.submodule_search_locations
+    except (ImportError, ValueError):  # noqa: BLE001 - nothing here can be imported
         return False
+    return True
 
 
 def missing_vendor_imports(spec: EngineSpec) -> Tuple[str, ...]:
-    """Return the vendor modules ``spec`` needs that are not importable."""
+    """Return the modules ``spec`` needs that are not installed here."""
     return tuple(module for module in spec.vendor_imports if not importable(module))
+
+
+def module_itself_is_missing(module: str, error: ModuleNotFoundError) -> bool:
+    """Return whether ``error`` is about ``module`` itself, or a package it is in.
+
+    Anything else a failed import reports is a library the module imports:
+    the two are said differently, since only the second is installed by an
+    extra.
+    """
+    if error.name is None:
+        return False
+    return module == error.name or module.startswith(f"{error.name}.")
+
+
+def install_hint(spec: EngineSpec) -> Optional[str]:
+    """Return how to install what an engine needs, or ``None`` if no extra does.
+
+    One spelling for every caller: the loader, ``dq-engines`` and the
+    bare-install proof all say this, so a reader is never sent to two
+    different lines.
+    """
+    if not spec.extras:
+        return None
+    pip = ",".join(spec.extras)
+    poetry = " ".join(f"-E {extra}" for extra in spec.extras)
+    return f"pip install 'dq-kernel[{pip}]'  (or: poetry install {poetry})"
+
+
+def refusal(name: str, modules: Sequence[str], hint: Optional[str] = None) -> str:
+    """Return why an engine cannot run here: what is missing, and how to install it.
+
+    Args:
+        name: The engine, as a rule names it.
+        modules: What is not installed, in the order the engine declared it.
+        hint: What :func:`install_hint` returns for the engine, if it has
+            an extra to name.
+
+    Returns:
+        The refusal. With nothing to install by, it says only what is
+        missing: the engine's own documentation says the rest.
+    """
+    said = f"Engine '{name}' cannot run here: {_not_installed(modules)}."
+    if hint is None:
+        return said
+    return f"{said} Install {'it' if len(modules) == 1 else 'them'} with: {hint}."
+
+
+def _not_installed(modules: Sequence[str]) -> str:
+    """Return which modules are not installed."""
+    named = [repr(module) for module in modules]
+    if len(named) == 1:
+        return f"{named[0]} is not installed"
+    return f"{', '.join(named[:-1])} and {named[-1]} are not installed"
+
+
+def cannot_run_here(spec: EngineSpec) -> Optional[str]:
+    """Return why ``spec`` cannot run here, or ``None`` when nothing installed stands in its way.
+
+    Only what is installed is judged -- nothing is imported -- so the
+    question costs nothing and can be asked of every engine at once. What
+    it does not judge is whether the engine's library works once imported:
+    that shows when the engine is loaded, and is reported then.
+    """
+    missing = missing_vendor_imports(spec)
+    if not missing:
+        return None
+    return refusal(spec.name, missing, install_hint(spec))
+
+
+def engines_that_cannot_run(names: Iterable[str]) -> List[str]:
+    """Return why each engine in ``names`` cannot run here, in the order named.
+
+    An engine named twice is judged once. One registered by entry point
+    declares nothing, so nothing is judged for it here: the loader says
+    what it meets when the engine is imported.
+    """
+    unmet: List[str] = []
+    for name in dict.fromkeys(str(said).lower() for said in names):
+        spec = find_spec(name)
+        if spec is None:
+            continue
+        refusal_ = cannot_run_here(spec)
+        if refusal_ is not None:
+            unmet.append(refusal_)
+    return unmet
 
 
 def find_spec(name: str) -> Optional[EngineSpec]:

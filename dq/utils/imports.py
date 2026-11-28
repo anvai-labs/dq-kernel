@@ -34,7 +34,9 @@ def require_extra(
         note: Optional trailing caveat (e.g. Python-version or
             extra-conflict constraints).
         kind: What the extra is for, as the error message names it: an
-            ``engine`` (the default), an ``observer`` or an ``adapter``.
+            ``engine`` (the default), an ``observer``, an ``adapter``, a
+            ``runner`` or a ``sink``. Say what the caller is: a sink that
+            called itself an engine sent its reader to the wrong page.
 
     Returns:
         The imported module.

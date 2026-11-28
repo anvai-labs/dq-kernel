@@ -12,6 +12,8 @@ command or an entry point must say when asked to work without one.
 """
 
 import importlib.util
+import json
+import re
 import tomllib
 import zipfile
 from pathlib import Path
@@ -94,13 +96,32 @@ def test_the_requirements_come_from_the_wheel_itself(wheel):
     ]
 
 
+def extras_named(words: str) -> set:
+    """Return every extra a refusal's expected words name."""
+    return set(re.findall(r"-E ([a-z]+)", words))
+
+
 def test_every_extra_a_refusal_must_name_is_declared():
     """Read from the packaging declaration, so the check and the package agree."""
     pyproject = tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text())
     extras = pyproject["tool"]["poetry"]["extras"]
-    named = {extra.removeprefix("-E ") for _, _, extra in check.ASKED_TO_WORK}
-    assert named == {"arrow", "spark", "sqlalchemy", "otel"}
+    named = set().union(*(extras_named(words) for _, _, words in check.ASKED_TO_WORK))
+    assert named == {"arrow", "spark", "sqlalchemy", "otel", "deequ"}
     assert named <= set(extras), "a refusal names an extra the package does not declare"
+
+
+def test_an_engine_on_spark_names_both_of_its_extras():
+    """pydeequ does not depend on pyspark: ``dq-kernel[deequ]`` alone installs
+    no Spark, and a reader sent to install it was sent back for a second."""
+    asked = {name: words for name, _, words in check.ASKED_TO_WORK}
+    assert extras_named(asked["dq.engine.engine_loader"]) == {"spark", "deequ"}
+    assert check.LISTED_MISSING == ["pyspark", "pydeequ"]
+    assert check.LISTED_HINT == (
+        "pip install 'dq-kernel[spark,deequ]'  (or: poetry install -E spark -E deequ)"
+    )
+    # The command, before it starts Spark, says the same.
+    (first,) = [words for _, _, words in check.ASKED_TO_RUN if "-E spark" in words]
+    assert extras_named(first) == {"spark", "deequ"}
 
 
 def test_both_profilers_are_asked_to_work_and_the_profiler_to_run():
@@ -281,8 +302,17 @@ def record_runs(monkeypatch, answers):
     return calls
 
 
+LISTING_PROBLEMS = check.listing_problems
+
+
+def without_a_listing(monkeypatch):
+    """Ask nothing of the engine listing: the test is about other commands."""
+    monkeypatch.setattr(check, "listing_problems", lambda available: [])
+
+
 def without_a_suggester(monkeypatch):
     """Ask nothing of the suggester: the test is about other commands."""
+    without_a_listing(monkeypatch)
     monkeypatch.setattr(check, "suggests_a_draft", lambda available, scratch: [])
 
 
@@ -387,14 +417,14 @@ def kernel_asked_to_run(monkeypatch):
     monkeypatch.setattr(
         check,
         "ASKED_TO_RUN",
-        (("dq-kernel", lambda scratch: [rules], "pip install dq-kernel[spark]"),),
+        (("dq-kernel", lambda scratch: [rules], "-E spark -E deequ"),),
     )
     return rules
 
 
 def test_a_command_that_exits_two_and_says_what_to_install_passes(monkeypatch):
     rules = kernel_asked_to_run(monkeypatch)
-    record_runs(monkeypatch, {rules: (2, "Install: pip install dq-kernel[spark]")})
+    record_runs(monkeypatch, {rules: (2, "Install: -E spark -E deequ")})
     assert check.command_problems(Path("scratch")) == []
 
 
@@ -404,21 +434,23 @@ def test_a_command_that_exits_two_and_says_what_to_install_passes(monkeypatch):
         (
             (1, "Traceback (most recent call last):\nUnboundLocalError: no value"),
             "dq-kernel, asked to run, exits 1 and does not say "
-            "'pip install dq-kernel[spark]': UnboundLocalError: no value",
+            "'-E spark -E deequ': UnboundLocalError: no value",
         ),
         (
-            (1, "Install Spark support with: pip install dq-kernel[spark]"),
-            "dq-kernel, asked to run, exits 1 and does not say "
-            "'pip install dq-kernel[spark]': "
+            # Spark's extra alone, said before this change while the engine
+            # needed a second: right code, and the reader comes back once more.
+            (2, "Install Spark support with: pip install dq-kernel[spark]"),
+            "dq-kernel, asked to run, exits 2 and does not say "
+            "'-E spark -E deequ': "
             "Install Spark support with: pip install dq-kernel[spark]",
         ),
         (
             (2, "error"),
             "dq-kernel, asked to run, exits 2 and does not say "
-            "'pip install dq-kernel[spark]': error",
+            "'-E spark -E deequ': error",
         ),
     ],
-    ids=["crashed", "right-words-wrong-code", "right-code-wrong-words"],
+    ids=["crashed", "sparks-extra-alone", "right-code-wrong-words"],
 )
 def test_a_command_is_judged_by_its_exit_code_and_by_its_words(
     monkeypatch, answer, problem
@@ -504,6 +536,7 @@ def a_suggester(monkeypatch, scratch, *, code=0, text=SUGGESTED):
     )
     monkeypatch.setattr(check, "ASKED_TO_RUN", ())
     monkeypatch.setattr(check, "run", run)
+    without_a_listing(monkeypatch)
     return read
 
 
@@ -548,8 +581,77 @@ def test_a_wheel_that_installs_no_suggester_is_a_problem(monkeypatch, tmp_path):
     monkeypatch.setattr(check, "commands", lambda: dict(COMMANDS))
     monkeypatch.setattr(check, "ASKED_TO_RUN", ())
     record_runs(monkeypatch, {})
+    without_a_listing(monkeypatch)
     assert check.command_problems(tmp_path) == [
         "the wheel installs no command named dq-suggest"
+    ]
+
+
+# ------------------------------------------------------ the engine listing
+
+LISTING = {
+    "engines": [
+        {
+            "name": check.LISTED,
+            "installed": False,
+            "missing": check.LISTED_MISSING,
+            "install_hint": check.LISTED_HINT,
+        }
+    ]
+}
+ENGINES = {"dq-engines": ("dq.engines", "main")}
+
+
+def test_the_listing_is_asked_what_an_engine_lacks(monkeypatch, capsys):
+    """The crash this guards against: with pydeequ installed and no
+    SPARK_VERSION in the environment, the command died with a traceback."""
+    calls = only_commands(
+        monkeypatch, COMMANDS | ENGINES, {"--format": (0, json.dumps(LISTING))}
+    )
+    monkeypatch.setattr(check, "listing_problems", LISTING_PROBLEMS)
+    assert check.command_problems(Path("scratch")) == []
+    assert (("dq.engines", "main"), ["--format", "json"]) in calls
+    assert "dq-engines, asked to list, says deequ needs" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("code", "output"),
+    [
+        (1, "RuntimeError: SPARK_VERSION environment variable is required"),
+        (0, json.dumps({"engines": [{"name": "deequ", "installed": True}]})),
+        (
+            0,
+            json.dumps(
+                {
+                    "engines": [
+                        {
+                            "name": "deequ",
+                            "installed": False,
+                            "missing": ["pydeequ"],
+                            "install_hint": "pip install 'dq-kernel[deequ]'",
+                        }
+                    ]
+                }
+            ),
+        ),
+        (0, "not a document"),
+    ],
+    ids=["crashed", "said-installed", "named-one-extra", "said-nothing-usable"],
+)
+def test_a_listing_that_does_not_say_what_an_engine_lacks_is_a_problem(
+    monkeypatch, code, output
+):
+    only_commands(monkeypatch, COMMANDS | ENGINES, {"--format": (code, output)})
+    monkeypatch.setattr(check, "listing_problems", LISTING_PROBLEMS)
+    (found,) = check.command_problems(Path("scratch"))
+    assert found.startswith(f"dq-engines, asked to list, exits {code} and does not ")
+    assert found.endswith("say deequ lacks pyspark, pydeequ: " + output)
+
+
+def test_a_wheel_that_installs_no_listing_is_a_problem(monkeypatch):
+    monkeypatch.setattr(check, "commands", lambda: {})
+    assert check.listing_problems(check.commands()) == [
+        "the wheel installs no command named dq-engines"
     ]
 
 
@@ -639,10 +741,11 @@ def test_with_the_extras_installed_no_sample_is_refused_for_its_extra():
     packages = {
         "arrow": "pyarrow",
         "spark": "pyspark",
+        "deequ": "pydeequ",
         "sqlalchemy": "sqlalchemy",
         "otel": "opentelemetry",
     }
-    named = {extra.removeprefix("-E ") for _, _, extra in check.ASKED_TO_WORK}
+    named = set().union(*(extras_named(words) for _, _, words in check.ASKED_TO_WORK))
     assert named == set(packages), "a sample names an extra this test does not install"
     for package in packages.values():
         pytest.importorskip(
