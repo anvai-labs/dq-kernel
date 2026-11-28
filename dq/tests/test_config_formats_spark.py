@@ -3,9 +3,11 @@
 
 """End-to-end rule-pack formats: HOCON, YAML and JSON run identically (SPEC-010)."""
 
+import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from dq.dq_framework import DQFramework
 
@@ -107,3 +109,60 @@ def test_a_yaml_rule_pack_with_a_portable_plan(frame, tmp_path):
     results = run(str(pack), frame)
     assert [result["check"] for result in results] == ["id_complete"]
     assert results[0]["success"] is True
+
+
+# --------------------------------------------- a logical name with a dot in it
+
+
+DOTTED = {
+    "dqframework": {
+        "dataframes": {"main.sales.orders": "orders_view"},
+        "dqrules": [
+            {
+                "name": "orders",
+                "engine": "deequ",
+                "dataframes": ["main.sales.orders"],
+                "checks": [
+                    {
+                        "constraint_name": "id_complete",
+                        "constraint": "isComplete",
+                        "column": "id",
+                        "level": "Error",
+                    }
+                ],
+            }
+        ],
+    }
+}
+DOTTED_AS_HOCON = """
+dqframework {
+  dataframes { "main.sales.orders" = "orders_view" }
+  dqrules = [{
+    name = "orders"
+    engine = "deequ"
+    dataframes = ["main.sales.orders"]
+    checks = [{ constraint_name = "id_complete", constraint = "isComplete", column = "id", level = "Error" }]
+  }]
+}
+"""
+
+
+@pytest.mark.parametrize("fmt", ["conf", "yaml", "json"])
+def test_a_dataframe_is_found_by_a_logical_name_with_a_dot_in_it(frame, tmp_path, fmt):
+    """pyhocon keeps a quoted key in quotes; the rule asks for the name as
+    it was written."""
+    frame.createOrReplaceTempView("orders_view")
+    text = {
+        "json": json.dumps(DOTTED),
+        "yaml": yaml.safe_dump(DOTTED, sort_keys=False),
+        "conf": DOTTED_AS_HOCON,
+    }[fmt]
+    path = tmp_path / f"dotted.{fmt}"
+    path.write_text(text)
+
+    framework = DQFramework(frame.sparkSession, str(path))
+
+    assert framework.get_dataframe("main.sales.orders") is not None
+    assert [(result["check"], result["success"]) for result in framework.run()] == [
+        ("id_complete", True)
+    ]

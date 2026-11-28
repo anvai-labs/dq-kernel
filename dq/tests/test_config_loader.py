@@ -406,3 +406,136 @@ def test_an_unrecognized_parse_failure_gets_no_hint(text, tmp_path):
             load_config(reference)
         assert "Hint:" not in str(caught.value)
         assert len(str(caught.value)) < 300
+
+
+# --------------------------------------------------------- a key is one key
+
+
+#: Keys that hold what pyhocon reads as structure: a schema's column labels
+#: and a logical dataframe's name, with a space and an equals sign beside.
+DOTS = {
+    "dqframework": {
+        "dataframes": {"main.sales.orders": "raw_orders"},
+        "dqrules": [
+            {
+                "name": "labels",
+                "engine": "pandera",
+                "dataframes": ["main.sales.orders"],
+                "schema": {
+                    "schema_type": "dataframe",
+                    "columns": {
+                        "order.id": {"dtype": "int64"},
+                        "a b": {"dtype": "int64"},
+                        "x=y": {"dtype": "int64"},
+                        "plain": {"dtype": "int64"},
+                    },
+                },
+            }
+        ],
+    }
+}
+
+DOTS_AS_HOCON = """
+dqframework {
+  dataframes { "main.sales.orders" = "raw_orders" }
+  dqrules = [{
+    name = "labels"
+    engine = "pandera"
+    dataframes = ["main.sales.orders"]
+    schema {
+      schema_type = "dataframe"
+      columns {
+        "order.id" { dtype = "int64" }
+        "a b" { dtype = "int64" }
+        "x=y" { dtype = "int64" }
+        plain { dtype = "int64" }
+      }
+    }
+  }]
+}
+"""
+
+
+def test_a_key_is_one_key_in_every_format(tmp_path):
+    """pyhocon reads a key as a path. From JSON and YAML a key with a dot in
+    it arrived split in two, and from HOCON wrapped in its quotes: a pandera
+    schema's column called order.id was refused, or validated under a name
+    with quotes in it."""
+    for path in (
+        write(tmp_path, "dots.json", json.dumps(DOTS)),
+        write(tmp_path, "dots.yaml", yaml.safe_dump(DOTS, sort_keys=False)),
+        write(tmp_path, "dots.conf", DOTS_AS_HOCON),
+    ):
+        tree = load_config(str(path))
+        assert config_tree_to_python(tree) == DOTS, path.name
+        # The tree still answers by path, as pyhocon spells such a key.
+        assert tree.get("dqframework.dataframes") == tree["dqframework"]["dataframes"]
+        assert tree.get('dqframework.dataframes."main.sales.orders"') == "raw_orders"
+    # And a mapping given in code is read the same way.
+    assert config_tree_to_python(load_config(DOTS)) == DOTS
+
+
+def test_an_unquoted_key_with_a_dot_is_a_path_as_hocon_reads_it(tmp_path):
+    """HOCON's own rule: without its quotes, ``order.id`` names a path."""
+    text = DOTS_AS_HOCON.replace('"order.id" {', "order.id {")
+    tree = load_config(str(write(tmp_path, "path.conf", text)))
+    columns = config_tree_to_python(tree)["dqframework"]["dqrules"][0]["schema"]
+    assert columns["columns"]["order"] == {"id": {"dtype": "int64"}}
+
+
+WITH_STRUCTURE = "a structural character and a double quote"
+WITH_AN_EDGE_QUOTE = "starts or ends with a double quote"
+
+
+@pytest.mark.parametrize(
+    ("key", "refused"),
+    [
+        ('or"der.id', WITH_STRUCTURE),
+        ('"order.id"', WITH_STRUCTURE),
+        ('order.id"', WITH_STRUCTURE),
+        ('"order.id', WITH_STRUCTURE),
+        ('"ab"', WITH_AN_EDGE_QUOTE),
+        ('ab"', WITH_AN_EDGE_QUOTE),
+        ('"ab', WITH_AN_EDGE_QUOTE),
+    ],
+    ids=[
+        "structure-and-a-quote",
+        "a-dotted-name-wrapped-in-quotes",
+        "a-dotted-name-with-a-trailing-quote",
+        "a-dotted-name-with-a-leading-quote",
+        "wrapped-in-quotes",
+        "a-trailing-quote",
+        "a-leading-quote",
+    ],
+)
+def test_a_key_pyhocon_cannot_keep_whole_is_refused_rather_than_misread(
+    tmp_path, key, refused
+):
+    document = {"dqframework": {"dqrules": [], "x": {key: 1}}}
+    for fmt, text in (
+        ("json", json.dumps(document)),
+        ("yaml", yaml.safe_dump(document)),
+    ):
+        path = write(tmp_path, f"bad.{fmt}", text)
+        with pytest.raises(ConfigurationError, match=refused):
+            load_config(str(path))
+    with pytest.raises(ConfigurationError, match=refused):
+        load_config(document)
+
+
+@pytest.mark.parametrize(
+    "text", ["dqframework: {}\n1: x\n", "dqframework: {}\ntrue: x\n"]
+)
+def test_a_yaml_key_that_is_not_text_is_refused_with_a_message(text):
+    """YAML allows a number or a boolean for a key; pyhocon then fails with
+    a traceback of its own."""
+    with pytest.raises(ConfigurationError, match="every key must be text"):
+        parse_config_text(text, "yaml")
+
+
+def test_plain_key_takes_off_what_pyhocon_keeps_on():
+    from dq.utils.config_utils import plain_key
+
+    assert plain_key('"a.b"') == "a.b"
+    assert plain_key("a b") == "a b"
+    assert plain_key('"') == '"'

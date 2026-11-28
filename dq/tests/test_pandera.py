@@ -15,6 +15,7 @@ import warnings
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import yaml
 
 pytest.importorskip("pandera")
 
@@ -40,7 +41,7 @@ from dq.tests.pandera_support import (  # noqa: E402
     reordered,
     rule,
 )
-from dq.utils.config_utils import load_config  # noqa: E402
+from dq.utils.config_utils import config_tree_to_python, load_config  # noqa: E402
 from dq.validate import validate_config  # noqa: E402
 
 #: Only pandera's warning-level check fails here.
@@ -436,3 +437,76 @@ def test_g5_the_example_runs_as_a_rule_pack_is_loaded():
     ]
     assert found["less_than_or_equal_to_amount"] == (False, "warn")
     assert all(result["success"] for result in engine.apply(frame("pandas", CLEAN)))
+
+
+# ------------------------------------------- a column label with a dot in it
+
+
+#: A schema whose column label holds a dot: pyhocon read it as a path from
+#: JSON and YAML, and kept its quotes from HOCON (SPEC-017's promise is that
+#: a schema already in use travels into a rule pack unchanged).
+LABEL_ROWS = {"id": [1, 2, 3], "order.id": [1, None, "x"]}
+LABEL_PACK = {
+    "dqframework": {
+        "dqrules": [
+            {
+                "name": "labels",
+                "engine": "pandera",
+                "dataframes": ["default"],
+                "schema": {
+                    "schema_type": "dataframe",
+                    "columns": {
+                        "id": {"dtype": "int64"},
+                        "order.id": {"dtype": "int64"},
+                    },
+                },
+            }
+        ]
+    }
+}
+LABEL_AS_HOCON = """
+dqframework {
+  dqrules = [{
+    name = "labels"
+    engine = "pandera"
+    dataframes = ["default"]
+    schema {
+      schema_type = "dataframe"
+      columns {
+        id { dtype = "int64" }
+        "order.id" { dtype = "int64" }
+      }
+    }
+  }]
+}
+"""
+LABEL_OUTCOMES = {
+    "dtype_id": True,
+    "not_nullable_id": True,
+    "dtype_order.id": False,  # a null and a text, where integers were declared
+    "not_nullable_order.id": False,
+}
+
+
+@pytest.mark.parametrize("fmt", ["conf", "yaml", "json"])
+def test_g5_a_column_label_with_a_dot_in_it_is_read_as_written(tmp_path, fmt):
+    text = {
+        "json": json.dumps(LABEL_PACK),
+        "yaml": yaml.safe_dump(LABEL_PACK, sort_keys=False),
+        "conf": LABEL_AS_HOCON,
+    }[fmt]
+    path = tmp_path / f"labels.{fmt}"
+    path.write_text(text)
+    assert validate_config(str(path))
+    loaded = load_config(str(path)).get("dqframework").get("dqrules")[0]
+
+    # As the framework hands a rule, a tree; and as a plain mapping.
+    for given in (loaded, config_tree_to_python(loaded)):
+        results = (
+            EngineLoader()
+            .load_engine("pandera", given, 1)
+            .apply(frame("pandas", LABEL_ROWS))
+        )
+        assert {result["check"]: result["success"] for result in results} == (
+            LABEL_OUTCOMES
+        ), fmt

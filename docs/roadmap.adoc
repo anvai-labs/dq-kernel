@@ -155,7 +155,7 @@ a command, or an observed CI run is not a gate.
 | M1
 | Verified
 | 6/6
-| CI run 45519809624 green on PR #59
+| CI run 45519809624 green on PR #59; a defect in G1's promise was fixed on 2026-11-28, and verified in its own run
 
 | SPEC-011
 | link:specs/SPEC-011-engine-sdk-and-conformance.adoc[Engine SDK and conformance kit]

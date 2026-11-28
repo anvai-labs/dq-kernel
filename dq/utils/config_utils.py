@@ -8,6 +8,12 @@ A rule pack may be written in HOCON, YAML or JSON. Every supported source
 URI) and every supported format normalizes to one ``ConfigTree`` here, so
 nothing downstream knows which format or source a pack came from
 (SPEC-010).
+
+A key is one key in every format. pyhocon reads a key as a path, so a
+key holding one of its structural characters has to be kept in quotes
+inside a tree (:func:`literal_key` puts them on, :func:`plain_key` takes
+them off): a pandera schema's column called ``order.id``, or a logical
+dataframe's name.
 """
 
 import json
@@ -35,6 +41,81 @@ CONFIG_FORMATS = {
 }
 
 _CONFIG_SCHEMES = ("s3", "abfss", "file", "http", "https")
+
+#: What pyhocon reads as structure in a key. A key holding one of these is
+#: kept whole in a tree only in quotes -- which is how HOCON quotes a key.
+_STRUCTURE_IN_A_KEY = "$}[]:=+#`^?!@*&."
+
+
+def literal_key(key: Any, where: str = "a rule pack") -> str:
+    """Return ``key`` as pyhocon keeps it whole in a tree.
+
+    A JSON or a YAML pack, and a mapping given in code, become a tree
+    through ``ConfigFactory.from_dict``, which hands every key to pyhocon
+    as a path: a key holding one of pyhocon's structural characters is
+    split -- ``a.b`` becomes ``a``, then ``b`` -- or mangled, and nothing
+    says so. A pandera schema's column called ``order.id`` arrived as a
+    column ``order`` with a property ``id``. In quotes a key is kept as
+    one, as a quoted key is in HOCON; :func:`plain_key` takes the quotes
+    off again when the tree is read.
+
+    Args:
+        key: A key of a JSON or a YAML document, or of a mapping.
+        where: What is being read, for the message.
+
+    Returns:
+        The key as pyhocon keeps it: itself, or itself in double quotes.
+
+    Raises:
+        ConfigurationError: For a key that is not text, that holds a
+            structural character and a double quote, or that starts or
+            ends with a double quote. pyhocon cannot keep such a key
+            whole, and a rule pack is read as it is written or not at all.
+    """
+    if not isinstance(key, str):
+        raise ConfigurationError(f"{where}: every key must be text, got {key!r}")
+    if any(character in key for character in _STRUCTURE_IN_A_KEY):
+        if '"' in key:
+            raise ConfigurationError(
+                f"{where}: the key {key!r} holds both a structural character "
+                "and a double quote, which cannot be kept as one key"
+            )
+        return f'"{key}"'
+    if key.startswith('"') or key.endswith('"'):
+        # pyhocon strips the quotes, or drops the one it cannot pair.
+        raise ConfigurationError(
+            f"{where}: the key {key!r} starts or ends with a double quote, "
+            "which a rule pack reads as the quotes around a key"
+        )
+    return key
+
+
+def plain_key(key: str) -> str:
+    """Return a key as it was written, without the quotes pyhocon keeps a
+    key in a tree.
+
+    pyhocon keeps a key in quotes exactly when it holds one of its
+    structural characters: HOCON's ``"a.b"`` is stored with its quotes,
+    while ``"a b"`` is stored as it reads. Left as pyhocon gives it, the
+    quotes reached whatever read the pack: a schema's column came out
+    called ``"order.id"``.
+    """
+    if len(key) > 1 and key.startswith('"') and key.endswith('"'):
+        return key[1:-1]
+    return key
+
+
+def _with_literal_keys(value: Any, where: str) -> Any:
+    """Return a JSON or a YAML document with every key spelled so that
+    pyhocon keeps it whole."""
+    if isinstance(value, dict):
+        return {
+            literal_key(key, where): _with_literal_keys(item, where)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_with_literal_keys(item, where) for item in value]
+    return value
 
 
 def config_get(config: Any, dotted_key: str, default: Any = None) -> Any:
@@ -90,6 +171,10 @@ def config_tree_to_python(config: Any) -> Any:
 def config_tree_to_dict(config_tree: ConfigTree) -> Dict[str, Any]:
     """Recursively convert a ConfigTree into a regular Python dict.
 
+    A key comes out as it was written: the quotes pyhocon keeps a key in
+    a tree are taken off (:func:`plain_key`), so a quoted key in HOCON
+    and the same key in JSON or YAML read the same.
+
     Args:
         config_tree: HOCON ConfigTree instance.
 
@@ -99,14 +184,15 @@ def config_tree_to_dict(config_tree: ConfigTree) -> Dict[str, Any]:
     result = {}
     for key, value in config_tree.items():
         if isinstance(value, ConfigTree):
-            result[key] = config_tree_to_dict(value)
+            said = config_tree_to_dict(value)
         elif isinstance(value, list):
-            result[key] = [
+            said = [
                 config_tree_to_dict(item) if isinstance(item, ConfigTree) else item
                 for item in value
             ]
         else:
-            result[key] = value
+            said = value
+        result[plain_key(key)] = said
     return result
 
 
@@ -327,7 +413,7 @@ def parse_config_text(
             f"{source}: a {fmt.upper()} rule pack must be a mapping with a top-level "
             "'dqframework' key"
         )
-    return ConfigFactory.from_dict(data)
+    return ConfigFactory.from_dict(_with_literal_keys(data, source))
 
 
 def load_config(config: Any) -> ConfigTree:
@@ -350,7 +436,7 @@ def load_config(config: Any) -> ConfigTree:
     if isinstance(config, ConfigTree):
         return config
     if isinstance(config, Mapping):
-        return ConfigFactory.from_dict(dict(config))
+        return ConfigFactory.from_dict(_with_literal_keys(dict(config), "the mapping"))
     if isinstance(config, os.PathLike):
         config = os.fspath(config)
     if not isinstance(config, str) or not config.strip():
