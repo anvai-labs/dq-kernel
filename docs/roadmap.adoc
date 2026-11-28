@@ -218,7 +218,7 @@ a command, or an observed CI run is not a gate.
 | M4
 | Accepted
 | 0/5
-| 
+| amended 2026-11-28 before any build, with what was measured
 
 | SPEC-020
 | link:specs/SPEC-020-history-and-trend-policy.adoc[History and trend policy pack]

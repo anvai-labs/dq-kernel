@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: Accepted +
+Status: Accepted — amended 2026-11-28 before any build, with what was measured +
 Date: 2026-11-24 +
 Driven by: ADR-007 (ports and packaging, never new engine vocabulary) +
 Milestone: M4 +
@@ -18,44 +18,66 @@ it into draft rules.
 
 == In scope
 
-* A `Profile` value object: strict JSON, one bounded summary per column
-  (type, count, null count, distinct count with an exact-or-approximate
-  flag, minimum and maximum, string length bounds).
-* A `Profiler` port with two implementations: Spark (one aggregate pass) and
-  Arrow. The driver receives the profile and never a raw row.
-* Pure suggesters: `Profile` in, draft rules out, for the kernel's portable
-  subset and for a chosen engine's existing vocabulary (deequ, dqx, gx).
-  No suggester invents a check an engine does not already support.
+* A `Profile` document: strict JSON, versioned `dq-profile/v1`, with one
+  bounded summary per column: its type, how many values are null, how many
+  are distinct and whether that count is exact, its minimum and maximum
+  where the type has an order, and its length bounds where the type has a
+  length.
+* A `Profiler` port with two implementations: Spark (one aggregate pass)
+  and Arrow. The driver receives the profile and never a raw row.
+* Pure suggesters: a `Profile` in, a draft rule pack out, for the kernel's
+  portable subset and for three engines' existing vocabularies -- deequ,
+  dqx and greatexpectations. No suggester invents a check an engine does
+  not already support.
 * `dq-profile`: writes a profile as JSON.
-* `dq-suggest`: turns a profile into a draft rule pack in HOCON or YAML.
+* `dq-suggest`: turns a profile into a draft rule pack in HOCON, YAML or
+  JSON.
 * Every suggested rule is emitted at `warn` criticality.
 
 == Out of scope
 
 * Statistics that need the raw rows (quantiles, histograms of values);
 * machine-learned rule generation;
-* applying suggestions automatically: a draft is a draft.
+* applying suggestions automatically: a draft is a draft;
+* statistics of a nested column beyond its type and its null count.
 
 == Contracts
 
 * A profile is bounded: its size depends on the column count, never on the
-  row count.
+  row count -- and never on a value's length. Text and binary columns
+  report how long their values are, never a least or greatest value.
 * Suggesters are pure functions of the profile; the same profile always
   yields the same draft.
 * A suggested rule that would gate a pipeline is never produced: everything
   is `warn` until a human promotes it.
+* The two profilers mean the same thing by every number, and the profile
+  says what that is (see the note):
+
+** A null is a SQL null. A float that is not a number is a value, counted
+   on its own.
+** Bounds keep a not-a-number out, as the kernel's ranges semantic does.
+** A signed zero is one value.
+** A timestamp with a zone is spelled in UTC; one without, as it stands.
+   A decimal is spelled exactly, as text.
 
 == Acceptance gates
 
 * G1 — Spark and Arrow profilers return equal profiles over the same data
-  for a fixed fixture.
-* G2 — Profiling a wide table materializes no raw row at the driver (asserted
-  with a sentinel column).
-* G3 — Each suggester emits only checks its target engine supports, verified
-  against the registry and the engine's own validator.
-* G4 — Every emitted rule carries `criticality = "warn"`.
+  for a fixed fixture: integers, floats with a null and a not-a-number,
+  decimals, text with nulls and an empty string, booleans, dates,
+  timestamps, binary, and a nested column.
+* G2 — Profiling a wide table materializes no raw row at the driver,
+  asserted with a sentinel column: every result the profiler collects is
+  intercepted, and each must hold one row and none of the table's own
+  columns.
+* G3 — Each suggester emits only checks its target engine supports,
+  verified against the registry and the engine's own validator, and each
+  draft is run by the engine it was written for.
+* G4 — Every emitted rule is a warning, read back from the engine's own
+  result for that rule.
 * G5 — `dq-profile` and `dq-suggest` compose: the draft produced from a
-  profile validates with `dq-validate`.
+  profile validates with `dq-validate`, in each format, and the portable
+  draft passes under `dq-run` on the data it was drawn from.
 
 == Progress
 
@@ -64,5 +86,113 @@ it into draft rules.
 * [ ] G3 — not started
 * [ ] G4 — not started
 * [ ] G5 — not started
+
+[NOTE]
+====
+Amended 2026-11-28, before any build. The contracts and gates above were
+rewritten with what the engines were measured to do; the facts below were
+observed on Arrow 26.0.1 and Spark 3.5.9, and the vocabulary facts were read
+from the installed engines.
+
+* *The profile.* One document, `{"schema_version": "dq-profile/v1",
+  "dataset": {"name", "snapshot_sha256"}, "source", "rows", "columns"}`;
+  `source` is `arrow` or `spark`. A column summary holds `name`, `type`,
+  `nulls`, `distinct`, `distinct_exact`, `min`, `max`, `min_length`,
+  `max_length`, and for a decimal `precision` and `scale`, and for a float
+  `not_a_number`. What a type has no order or no length for is `null`, not
+  omitted, so a reader never has to tell absence from zero.
+* *Measured: the two engines disagree unless the profile rules say
+  otherwise.* Over one fixture of eight rows:
+
+** `count_distinct` in Arrow counted `0.0` and `-0.0` as two values where
+   Spark's `count(Distinct(..))` counted one (6 against 5). The Arrow
+   profiler normalises signed zero first, as `dq.arrow_adapter` does.
+** Spark's `max` over a float column holding a not-a-number returned the
+   not-a-number; Arrow's `min_max` left it out and returned the greatest
+   real number. Both profilers keep it out of the bounds and count it.
+** Arrow's `count_distinct` is not implemented for a list; Spark counts a
+   list column's distinct values. A nested column is therefore typed and
+   counted for nulls by both, and neither bounded nor counted distinct:
+   its `distinct` is `null`.
+** Everything else agreed once the fixture passed through Parquet: an
+   Arrow `timestamp[us]` without a zone is read by Spark as
+   `TIMESTAMP_NTZ`, and both return the same wall time.
+* *Classic PySpark 3.5 builds no DataFrame from an Arrow table* -- that is
+  Spark Connect's `createDataFrame(pyarrow.Table)`; the classic one tries
+  to infer a schema from the table's columns and refuses a `ChunkedArray`.
+  Parquet is the faithful way from one engine to the other, and Spark
+  reads it lazily: a fixture file must outlive its frame.
+* *Types.* The profile names a column's type in its own words -- `integer`,
+  `float`, `decimal`, `text`, `binary`, `boolean`, `date`, `timestamp`,
+  `nested`, `unknown` -- and each profiler maps its engine's types onto
+  them, so Spark's `long` and Arrow's `int64` are both `integer`. A
+  dictionary-encoded Arrow column is decoded first; a column of Arrow's
+  `null` type, and Spark's `NullType`, are `unknown`.
+* *Distinct counts.* Arrow's are exact and hash-based. Spark's are exact
+  (`count(Distinct(..))`) unless the profiler is asked for approximations
+  (`approx_count_distinct`), and then every count in the profile says
+  `distinct_exact: false`. A uniqueness suggestion is made only from an
+  exact count.
+* *One aggregate pass.* The Spark profiler asks one `agg(..)` for the row
+  count and every column's statistics, and collects its single row. For
+  G2 the test intercepts every `collect`, `take`, `head`, `toPandas` and
+  `toLocalIterator` the profiler makes: each must return one row, and no
+  returned schema may carry a column of the table -- the sentinel among
+  them.
+
+What is suggested: three suggestions, each made only when the profile
+warrants it, and only where the target vocabulary has the check.
+
+[cols="2,2,2,2,2",options="header"]
+|===
+|Suggestion, made when |Portable |deequ |dqx |greatexpectations
+
+|A column has no nulls
+|`isComplete`
+|`isComplete`
+|`is_not_null`
+|`expect_column_values_to_not_be_null`
+
+|A column is exactly distinct and has no nulls
+|--
+|`isUnique`
+|`is_unique`
+|`expect_column_values_to_be_unique`
+
+|An integer, decimal or float column's least value is 0 or more
+|`isNonNegative`
+|`isNonNegative`
+|`is_in_range`
+|`expect_column_values_to_be_between`
+|===
+
+The kernel's portable subset has no uniqueness check
+(`dq.portable_config.SUPPORTED_CONSTRAINTS`), so its suggester emits none:
+an engine is never handed a check it does not support. DQX's argument
+names are its registry's: `is_unique(columns=[..])`,
+`is_in_range(column=.., min_limit=0)`. Every suggestion is named
+`<column>_complete`, `<column>_unique` or `<column>_non_negative`, in the
+profile's column order.
+
+* *The snapshot a portable draft certifies.* A portable rule names the
+  snapshot it certifies, and the framework never computes a dataset's
+  digest: an author declares it. `dq-profile` read the data, so it writes
+  the SHA-256 of the bytes it read -- a file's, or every file of a
+  directory in name order -- into the profile, and the portable draft
+  carries it. A profile taken through the Python API has none, and
+  `dq-suggest --snapshot-sha256` supplies it; without either, the portable
+  suggester refuses.
+* *The draft.* `dqframework.dqrules` holds one rule named
+  `<dataset>_draft`, on the dataset of the profile, at
+  `dataframes = ["<dataset>"]`. A portable rule adds `dataset`,
+  `snapshot_sha256` and `adapter = "arrow"`, so `dq-run` can run it over
+  the files. HOCON is written as HOCON (`key = value`), every string
+  quoted; each written draft is read back by the package's own loader and
+  compared with what was suggested.
+* *Left as it is.* `DeequConstraintsBuilder` stays: it runs Deequ's own
+  suggestion rules, which this spec does not replace so much as make
+  unnecessary for the three suggestions above. The notebook that called it
+  is no longer shipped in the wheel (it needs a Databricks workspace).
+====
 
 Links: ADR-007; ADR-012; SPEC-010; SPEC-015.
