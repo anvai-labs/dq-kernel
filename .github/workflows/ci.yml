@@ -139,16 +139,35 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The same download and the same check as the owner lane makes.
       - name: Check documentation links
-        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
-        with:
-          args: >-
-            --root-dir . --max-retries 3 --timeout 30
-            --exclude '^file:///(absolute/path|path/to)/'
-            './**/*.md' './**/*.adoc'
-          fail: true
-          failIfEmpty: false
-          token: ${{ secrets.GITHUB_TOKEN }}
+        # This check went red three times in one day on a link no pull request
+        # had touched, and two things were measured about it. lychee does not
+        # retry a status code; and GitHub's file pages answer 503 to everybody
+        # for half an hour at a time, while the same file at its raw address
+        # answers steadily -- 404 included, when the file is not there.
+        # scripts/check_links.py runs the check again while only such
+        # failures remain (a broken link still fails at once), and --remap
+        # has a GitHub file page asked for as the file itself.
+        env:
+          LYCHEE_ARCHIVE_SHA256: 73657a111819a30c47c08352896796f23d64e4eb2b3ed39b6d32149241566fc5
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/lychee-x86_64-unknown-linux-musl.tar.gz"
+          install_dir="${RUNNER_TEMP}/lychee-v0.24.2"
+          curl --fail --location --retry 3 --output "${archive}" \
+            https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-musl.tar.gz
+          printf '%s  %s\n' "${LYCHEE_ARCHIVE_SHA256}" "${archive}" | sha256sum --check --strict
+          rm -rf "${install_dir}"
+          mkdir -p "${install_dir}"
+          tar -xzf "${archive}" --strip-components=1 -C "${install_dir}"
+          # The $1, $2 and $3 below are lychee's, not the shell's.
+          # shellcheck disable=SC2016
+          python3 scripts/check_links.py --attempts 4 --wait 30 -- "${install_dir}/lychee" \
+            --no-progress --root-dir . --max-retries 3 --timeout 30 \
+            --exclude '^file:///(absolute/path|path/to)/' './**/*.md' './**/*.adoc' \
+            --remap 'https://github\.com/([^/]+)/([^/]+)/blob/(.+) https://raw.githubusercontent.com/$1/$2/$3'
       - name: Review dependency changes
         uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
