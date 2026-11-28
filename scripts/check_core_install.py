@@ -18,8 +18,9 @@ says works with no extra installed.
 - Every module the wheel ships imports, except the ones declared in
   ``NEEDS_AN_EXTRA_TO_IMPORT``; each of those must stop at a missing
   package, so the list cannot go stale.
-- Every command the wheel installs answers ``--help``, and the validator
-  accepts an example.
+- Every command the wheel installs answers ``--help``, the validator
+  accepts an example, and the suggester turns a profile into a draft that
+  validates.
 - Each entry point that needs an extra, asked to work, names it: a library
   by the error it raises, a command by exiting with the code its help
   promises and saying what to install.
@@ -114,6 +115,10 @@ ASKED_TO_WORK = (
         lambda m: m.observer_from_config([{"type": "otel"}]),
         "-E otel",
     ),
+    # A profiler takes the library's own frame: it stops at the missing
+    # package before it looks at what it was given.
+    ("dq.profile.arrow", lambda m: m.profile_table(object(), "orders"), "-E arrow"),
+    ("dq.profile.spark", lambda m: m.profile_frame(object(), "orders"), "-E spark"),
 )
 
 
@@ -130,6 +135,13 @@ def over_files(scratch: Path) -> list:
     ]
 
 
+def over_a_dataset(scratch: Path) -> list:
+    """Return ``dq-profile``'s arguments over a dataset that is there to be read."""
+    dataset = scratch / "orders.parquet"
+    dataset.write_bytes(b"the profiler must stop before it reads this")
+    return ["--dataset", f"orders={dataset}", "--profile", str(scratch / "p.json")]
+
+
 #: ``(command, its arguments given a scratch directory, what its refusal must
 #: say)``. Each must exit with ``EXIT_MISSING_DEPENDENCY``.
 ASKED_TO_RUN = (
@@ -141,7 +153,27 @@ ASKED_TO_RUN = (
         "Configuration validation failed",
     ),
     ("dq-run", over_files, "-E arrow"),
+    ("dq-profile", over_a_dataset, "-E arrow"),
 )
+
+#: A profile as ``dq-profile`` writes one: an integer column, over three
+#: rows, that is complete, exactly distinct and never below zero.
+A_PROFILE = """{
+  "schema_version": "dq-profile/v1",
+  "dataset": {"name": "orders", "snapshot_sha256": null},
+  "source": "arrow",
+  "rows": 3,
+  "columns": [
+    {"name": "id", "type": "integer", "nulls": 0, "distinct": 3,
+     "distinct_exact": true, "min": 1, "max": 3, "min_length": null,
+     "max_length": null, "precision": null, "scale": null,
+     "not_a_number": null}
+  ]
+}
+"""
+
+#: What a draft written for Deequ from that profile says three times over.
+DRAFT_WORDS = ("isComplete", "isUnique", "isNonNegative")
 
 
 def spelled(name: str) -> str:
@@ -343,7 +375,32 @@ def command_problems(scratch: Path) -> list:
                 f"{name}, asked to run, exits {code} and does not say "
                 f"{expected!r}: {last_line(output)}"
             )
+    found += suggests_a_draft(available, scratch)
     return found
+
+
+def suggests_a_draft(available, scratch: Path) -> list:
+    """Return what is wrong with ``dq-suggest`` over a profile, printing what passed.
+
+    The command needs no extra, so it is asked to do its whole work: turn a
+    profile into a draft, written under ``scratch``, that validates.
+    """
+    if "dq-suggest" not in available:
+        return ["the wheel installs no command named dq-suggest"]
+    profile, draft = scratch / "orders.profile.json", scratch / "draft.conf"
+    profile.write_text(A_PROFILE, encoding="utf-8")
+    code, output = run(
+        available["dq-suggest"],
+        [str(profile), "--engine", "deequ", "--output", str(draft)],
+    )
+    written = draft.read_text(encoding="utf-8") if draft.is_file() else ""
+    if code == 0 and all(word in written for word in DRAFT_WORDS):
+        print("dq-suggest turns a profile into a draft that validates")
+        return []
+    return [
+        f"dq-suggest over a profile exits {code} and does not write a draft: "
+        f"{last_line(output)}"
+    ]
 
 
 # ------------------------------------------------------- asked to work

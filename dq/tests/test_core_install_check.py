@@ -99,8 +99,16 @@ def test_every_extra_a_refusal_must_name_is_declared():
     pyproject = tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text())
     extras = pyproject["tool"]["poetry"]["extras"]
     named = {extra.removeprefix("-E ") for _, _, extra in check.ASKED_TO_WORK}
-    assert named == {"arrow", "sqlalchemy", "otel"}
+    assert named == {"arrow", "spark", "sqlalchemy", "otel"}
     assert named <= set(extras), "a refusal names an extra the package does not declare"
+
+
+def test_both_profilers_are_asked_to_work_and_the_profiler_to_run():
+    """Each profiler takes its library's own frame, and stops at the missing
+    package before it looks at what it was given."""
+    asked = {name for name, _, _ in check.ASKED_TO_WORK}
+    assert {"dq.profile.arrow", "dq.profile.spark"} <= asked
+    assert ("dq-profile", check.over_a_dataset, "-E arrow") in check.ASKED_TO_RUN
 
 
 # ------------------------------------------------------- a fit environment
@@ -273,10 +281,16 @@ def record_runs(monkeypatch, answers):
     return calls
 
 
+def without_a_suggester(monkeypatch):
+    """Ask nothing of the suggester: the test is about other commands."""
+    monkeypatch.setattr(check, "suggests_a_draft", lambda available, scratch: [])
+
+
 def only_commands(monkeypatch, commands, answers=()):
-    """Leave the commands to be judged: nothing is asked to run."""
+    """Leave the commands to be judged: nothing is asked to run or to suggest."""
     monkeypatch.setattr(check, "commands", lambda: dict(commands))
     monkeypatch.setattr(check, "ASKED_TO_RUN", ())
+    without_a_suggester(monkeypatch)
     return record_runs(monkeypatch, dict(answers))
 
 
@@ -360,6 +374,7 @@ def test_the_validator_must_be_installed_and_accept_the_shipped_example(monkeypa
 
 def kernel_asked_to_run(monkeypatch):
     """Leave ``dq-kernel`` to be judged over one rule pack; return its path."""
+    without_a_suggester(monkeypatch)
     rules = str(Path("scratch") / "rules.conf")
     monkeypatch.setattr(
         check,
@@ -418,6 +433,7 @@ def test_a_command_is_judged_by_its_exit_code_and_by_its_words(
 
 def test_a_command_the_wheel_does_not_install_is_a_problem(monkeypatch):
     monkeypatch.setattr(check, "commands", lambda: dict(COMMANDS))
+    without_a_suggester(monkeypatch)
     monkeypatch.setattr(
         check, "ASKED_TO_RUN", (("dq-kernel", lambda scratch: [], "spark"),)
     )
@@ -440,6 +456,119 @@ def test_the_run_over_files_hands_the_runner_a_dataset_that_is_there(tmp_path):
         str(tmp_path / "report.json"),
     ]
     assert check.OVER_FILES.is_file() and check.ON_SPARK.is_file()
+
+
+def test_the_profiling_is_asked_to_run_over_a_dataset_that_is_there(tmp_path):
+    """dq-profile digests the bytes before it needs pyarrow: a file that is
+    not there would be refused as missing, naming no extra."""
+    dataset = tmp_path / "orders.parquet"
+    arguments = check.over_a_dataset(tmp_path)
+    assert dataset.is_file()
+    assert arguments == [
+        "--dataset",
+        f"orders={dataset}",
+        "--profile",
+        str(tmp_path / "p.json"),
+    ]
+
+
+# ------------------------------------------------------------- the suggester
+
+#: A draft a stand-in writes: one line a suggestion.
+SUGGESTED = "".join(f"name = {word}\n" for word in check.DRAFT_WORDS)
+
+
+def a_suggester(monkeypatch, scratch, *, code=0, text=SUGGESTED):
+    """Leave ``dq-suggest`` to be judged: the other commands answer, unjudged.
+
+    Asked to run, the stand-in exits with ``code`` and writes ``text`` where
+    the draft goes -- nothing, where ``text`` is ``None``. Returns what it
+    was given to read: the profile's text, or ``None`` where there was none.
+    """
+    read = []
+    draft = scratch / "draft.conf"
+
+    def run(target, arguments):
+        if not any(value.endswith(".json") for value in arguments):
+            return 0, "usage: the other commands answer, and are not judged"
+        profile = next(Path(value) for value in arguments if value.endswith(".json"))
+        read.append(profile.read_text() if profile.is_file() else None)
+        if text is not None:
+            draft.write_text(text)
+        return code, "the draft is written"
+
+    monkeypatch.setattr(
+        check,
+        "commands",
+        lambda: COMMANDS | {"dq-suggest": ("dq.profile.cli", "suggest_main")},
+    )
+    monkeypatch.setattr(check, "ASKED_TO_RUN", ())
+    monkeypatch.setattr(check, "run", run)
+    return read
+
+
+def test_the_suggester_is_asked_to_turn_a_profile_into_a_draft(
+    monkeypatch, tmp_path, capsys
+):
+    read = a_suggester(monkeypatch, tmp_path)
+    assert check.command_problems(tmp_path) == []
+    assert read == [check.A_PROFILE]
+    assert "dq-suggest turns a profile into a draft that validates" in (
+        capsys.readouterr().out
+    )
+
+
+@pytest.mark.parametrize(
+    ("code", "text"),
+    [
+        (1, SUGGESTED),
+        (0, ""),
+        (0, "name = isComplete\n"),
+        (0, None),
+    ],
+    ids=[
+        "its-draft-does-not-validate",
+        "writes-nothing",
+        "a-draft-that-is-not-one",
+        "no-file-at-all",
+    ],
+)
+def test_a_suggester_that_writes_no_draft_is_a_problem(
+    monkeypatch, tmp_path, code, text
+):
+    a_suggester(monkeypatch, tmp_path, code=code, text=text)
+    (found,) = check.command_problems(tmp_path)
+    assert found == (
+        f"dq-suggest over a profile exits {code} and does not write a draft: "
+        "the draft is written"
+    )
+
+
+def test_a_wheel_that_installs_no_suggester_is_a_problem(monkeypatch, tmp_path):
+    monkeypatch.setattr(check, "commands", lambda: dict(COMMANDS))
+    monkeypatch.setattr(check, "ASKED_TO_RUN", ())
+    record_runs(monkeypatch, {})
+    assert check.command_problems(tmp_path) == [
+        "the wheel installs no command named dq-suggest"
+    ]
+
+
+def test_the_profile_the_suggester_is_given_is_one_the_package_reads(tmp_path):
+    """The tests above stand on this constant: it is a profile the package
+    accepts, whose column warrants every suggestion a Deequ draft can hold."""
+    from dq.profile import suggest as suggesting
+    from dq.profile.profile import Profile
+    from dq.profile.suggest import warranted
+
+    profile = Profile.from_json(check.A_PROFILE)
+    assert [suggestion.kind for suggestion in warranted(profile)] == [
+        "complete",
+        "unique",
+        "non_negative",
+    ]
+    draft = tmp_path / "draft.conf"
+    draft.write_text(suggesting.render(suggesting.suggest(profile, "deequ"), "hocon"))
+    assert all(word in draft.read_text() for word in check.DRAFT_WORDS)
 
 
 # ------------------------------------------------------- asked to work
@@ -506,7 +635,16 @@ def test_an_entry_point_that_does_not_name_its_extra_is_a_problem(monkeypatch, c
 def test_with_the_extras_installed_no_sample_is_refused_for_its_extra():
     """A sample that named its extra here would name it in the empty
     environment for the wrong reason."""
-    for package in ("pyarrow", "sqlalchemy", "opentelemetry"):
+    # One package for every extra a sample names, read from the samples.
+    packages = {
+        "arrow": "pyarrow",
+        "spark": "pyspark",
+        "sqlalchemy": "sqlalchemy",
+        "otel": "opentelemetry",
+    }
+    named = {extra.removeprefix("-E ") for _, _, extra in check.ASKED_TO_WORK}
+    assert named == set(packages), "a sample names an extra this test does not install"
+    for package in packages.values():
         pytest.importorskip(
             package, reason="an extra must be installed for this to mean anything"
         )

@@ -119,6 +119,8 @@ dq-validate = "dq.validate:main"
 dq-engines = "dq.engines:main"
 dq-import = "dq.harvest.cli:main"
 dq-run = "dq.runner:main"
+dq-profile = "dq.profile.cli:profile_main"
+dq-suggest = "dq.profile.cli:suggest_main"
 
 [build-system]
 requires = ["poetry-core"]

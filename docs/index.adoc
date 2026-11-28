@@ -924,6 +924,106 @@ the source was rejected.
 
 The checked-in examples under `examples/import/` are imported by the tests.
 
+[[profiling-and-suggestion]]
+=== dq-profile and dq-suggest
+
+Start from the data instead of a blank rule pack: profile it, then turn the
+profile into a draft.
+
+[source,shell]
+----
+dq-profile --dataset orders=orders.parquet --profile orders.profile.json
+dq-suggest orders.profile.json --engine deequ --output orders.deequ.conf
+dq-suggest orders.profile.json --engine portable --output orders.portable.yaml
+dq-run orders.portable.yaml --dataset orders=orders.parquet --report report.json
+----
+
+`dq-profile` summarizes a dataset -- with Arrow by default, or with Spark
+(`--profiler spark`) -- and writes the summary as JSON: one bounded entry per
+column, saying its type, how many values are null and how many are distinct,
+its least and greatest value where the type has an order, and its length
+bounds where it has a length. Its size depends on the column count alone.
+The two profilers mean the same thing by every number: a null is a SQL null; a
+float that is not a number is a value, counted on its own and never a bound; a
+signed zero is one value; a timestamp with a zone is spelled in UTC. No column
+fails a profile: a nested one, or one of a type the profile does not know, is
+typed and counted for nulls.
+
+With Spark the work grows with the column count: 1,000 columns are profiled in
+seconds, where one aggregate holding 1,000 exact counts does not finish. For a
+table too wide or too cardinal for an exact count, `--approximate-distinct`
+has Spark count approximately, and every count in the profile then says
+`distinct_exact: false`. The shape of a profile is published as
+`dq/schemas/profile.schema.json`, which ships in the wheel; what a shape
+cannot say is enforced where a profile is read.
+
+`dq-suggest` turns a profile into a draft rule pack, in HOCON, YAML or JSON,
+written in words its engine already accepts -- `portable`, `deequ`, `dqx` or
+`greatexpectations`. It suggests three things, each only where the profile
+warrants it: that a column with no nulls is complete; that a column exactly
+distinct by an exact count is unique (not for the portable subset, which has
+no uniqueness check); and that a numeric column whose least value is 0 or
+more is non-negative. Every suggested rule is a warning, and the pack names
+the gate policy under which a failed warning is reported and blocks nothing
+(`gate.fail_on = "error"`): a draft never stops a pipeline. To promote a
+rule, raise its criticality; in a rule pack of your own, the gate policy is
+yours to set. The command validates what it wrote, and says so when a
+profile warrants no rule at all.
+
+A column is profiled whatever it is called, but a suggestion is made only
+for one a rule can ask for by name: a name that is a plain identifier. And
+a suggestion is made only where the engine's own check would confirm it on
+the same data. Two cases are measured. The portable `isComplete` counts a
+float that is not a number as missing, where the profile counts it a
+value, so the portable draft says nothing of the completeness of such a
+column. Deequ's `isComplete` refuses a nested column, so its draft says
+nothing of that either. The command names both kinds of column.
+
+A portable rule names the snapshot it certifies, and the framework never
+computes a dataset's digest. `dq-profile` read the bytes, so it writes their
+SHA-256 into the profile and the portable draft carries it -- which is why
+the last line above runs. A profile taken through the Python API has none;
+give it one with `--snapshot-sha256`.
+
+The same two steps from Python:
+
+[source,python]
+----
+import pyarrow as pa
+
+from dq.profile import arrow, suggest
+
+orders = pa.table({"id": [1, 2, 3], "amount": [1.5, None, -3.25]})
+profile = arrow.profile_table(orders, "orders")
+checks = suggest.suggest(profile, "deequ")["dqframework"]["dqrules"][0]["checks"]
+suggested = [(check["constraint"], check["column"]) for check in checks]
+----
+
+The amount column has a null and a value below zero, so nothing is suggested
+for it; the id column is complete, exactly distinct and never below zero. The
+Spark profiler is `dq.profile.spark.profile_frame`, for a DataFrame.
+
+An engine's draft is on the dataset of its profile, by name
+(`dataframes = ["orders"]`), and the framework looks for that frame where it
+looks for any named dataset: a temp view or table called `orders`, or
+`dqframework.dataframes`. A frame passed as `default_dataframe` is not found
+under that name. So the Deequ draft written above is loaded like any other
+rule pack, once the frame is registered:
+
+[source,python]
+----
+from dq.dq_framework import DQFramework
+
+orders = spark.read.parquet("orders.parquet")
+orders.createOrReplaceTempView("orders")
+results = DQFramework(spark, "orders.deequ.conf").run()
+failed = [result["check"] for result in results if not result["success"]]
+----
+
+Over the data the profile was drawn from nothing fails, so `failed` is
+empty. Over a later snapshot a rule may fail: the run reports it, and goes
+on.
+
 == Command-line tools
 
 [source,shell]
@@ -934,6 +1034,8 @@ dq-engines --format json
 dq-import examples/import/run_results.json --dataset-id orders \
     --dataset-sha256 <64 hex digits> --report-json evidence.json
 dq-run examples/arrow_rule.conf --dataset orders=orders.parquet --report report.json
+dq-profile --dataset orders=orders.parquet --profile orders.profile.json
+dq-suggest orders.profile.json --engine deequ --output orders.deequ.conf
 ----
 
 `dq-kernel` creates a Spark session, runs the configured checks, prints a summary, and exits
@@ -950,7 +1052,9 @@ optional dependency is missing, how to install it. `dq-import` reads another
 tool's results as evidence and needs no Spark session: see
 xref:#importing-evidence[Importing evidence]. `dq-run` runs a rule pack over files with
 Arrow and needs no Spark session either: see
-xref:#running-over-files[Running over files, without Spark]. `DQ_LOG_FORMAT=json` makes a run
+xref:#running-over-files[Running over files, without Spark]. `dq-profile` summarizes a dataset
+and `dq-suggest` turns the summary into a draft rule pack of warnings: see
+xref:#profiling-and-suggestion[dq-profile and dq-suggest]. `DQ_LOG_FORMAT=json` makes a run
 log JSON lines: see xref:#observing-a-run[Observing a run].
 
 === Gate policy

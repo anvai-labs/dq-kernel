@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import logging
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -56,6 +57,30 @@ def test_validate_config_accepts_businessrules_engine_with_checks(tmp_path):
         ' checks = [{ constraint = "NoNegativeValues" }] }] }\n',
     )
     assert validate_config(path) is True
+
+
+def test_a_caller_can_ask_for_the_verdict_without_the_report(tmp_path, caplog):
+    """dq-suggest reports the verdict on the draft it wrote in its own words:
+    the validator's line about a file would read as if the user had asked."""
+    caplog.set_level(logging.INFO)
+    whole = (
+        'dqframework { dqrules = [{ engine = "businessrules",'
+        ' checks = [{ constraint = "NoNegativeValues" }] }] }\n'
+    )
+    broken = 'dqframework { dqrules = [{ engine = "deequ", checks = [] }] }\n'
+    before = len(caplog.records)
+
+    assert validate_config_document(write_config(tmp_path, broken), report=False).errors
+    assert validate_config_document(write_config(tmp_path, whole), report=False).valid
+    assert len(caplog.records) == before  # nothing logged, either way
+
+    validate_config_document(write_config(tmp_path, broken))
+    assert len(caplog.records) == before + 1 and caplog.records[-1].levelname == "ERROR"
+    validate_config_document(write_config(tmp_path, whole))
+    assert (
+        caplog.records[-1].levelname == "INFO"
+        and "valid" in caplog.records[-1].getMessage()
+    )
 
 
 def test_validate_config_rejects_businessrules_without_checks(tmp_path):

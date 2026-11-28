@@ -200,14 +200,15 @@ def test_lint_lane_validates_workflow_syntax():
     ), "the actionlint download must be verified against a pinned sha256"
 
 
-def test_build_job_verifies_the_published_schema_is_in_the_wheel():
-    """The rule-pack schema is a published artifact (SPEC-010)."""
+@pytest.mark.parametrize("schema", ["rule-pack.schema.json", "profile.schema.json"])
+def test_build_job_verifies_the_published_schema_is_in_the_wheel(schema):
+    """Each published schema is an artifact: the rule pack's (SPEC-010) and
+    the profile's (SPEC-019)."""
     runs = [step.get("run", "") for step in _load("ci.yml")["jobs"]["build"]["steps"]]
-    check = next((run for run in runs if "rule-pack.schema.json" in run), "")
-    assert (
-        check
-    ), "the build job must verify dq/schemas/rule-pack.schema.json is in the wheel"
+    check = next((run for run in runs if schema in run), "")
+    assert check, f"the build job must verify dq/schemas/{schema} is in the wheel"
     assert "assert" in check and "dist" in check
+    assert f'"dq/schemas/{schema}"' in check  # the path asserted, not mentioned
 
 
 def test_build_jobs_prove_the_wheel_needs_no_extra():

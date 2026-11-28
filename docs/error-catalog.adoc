@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 257 raise sites across the modules below; the contract
+The framework raises 303 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -603,3 +603,100 @@ The pandera engine: a pandas or a Polars frame against a pandera schema.
 * Fix: install the library the schema is for -- pandas for a `dataframe`
   schema, `pip install polars` for a `polars_dataframe` one. The `pandera`
   extra brings pandera alone; the frame's library comes with the frames.
+
+== dq/profile/profile.py
+
+*Content:* 30 `ConfigurationError` sites.
+
+The profile document: what a bounded summary of a dataset may say (SPEC-019).
+
+* Cause (`ConfigurationError`): a document that is not a profile of this
+  version -- no `schema_version`, or another; no dataset, or no name for
+  it; no digest said at all, where `null` says none was read from a file;
+  a snapshot digest that is not 64 lowercase hexadecimal digits; a row
+  count or a
+  column list missing or of the wrong kind; a column named twice; a column
+  with more nulls than the profile has rows; a key nothing knows, at the
+  profile's own level, in its dataset or in a column summary; a `source`
+  that is neither `arrow` nor `spark`; text that is not strict JSON -- a
+  bare `NaN`, `Infinity` or `-Infinity`, where a profile spells an infinite
+  bound as text. Or a column summary that
+  cannot be: a measure it omits, where every key of a profile is always
+  present; a type that is not one of the profile's families; a count that
+  is negative, or a boolean; a bound, a length, a precision or a
+  not-a-number count on a type that has none; a bound not spelled as the
+  type spells it (a decimal as text, a date as `YYYY-MM-DD`, a timestamp
+  without an offset); a least value above its greatest; a scale above its
+  precision; a key nothing knows. At the profiler, the same error means a
+  float bound was a not-a-number: the profilers keep it out of the bounds,
+  so one there is a defect.
+* Fix: a profile is written by `dq-profile`; take one from there rather
+  than by hand, and read the message for the key it names. A digest is 64
+  lowercase hexadecimal digits.
+
+== dq/profile/arrow.py
+
+*Content:* 3 `ConfigurationError` sites.
+
+The Arrow profiler.
+
+* Cause (`ConfigurationError`): what was given is not a pyarrow `Table`;
+  the table names a column twice, which a profile -- one entry per column,
+  read by name -- cannot hold; or Arrow itself cannot count or bound a
+  column of that type.
+* Fix: pass the table `pyarrow` built -- or the one `dq.runner.read_dataset`
+  reads -- under names that are each one column's, and for a column Arrow
+  cannot measure, read the message: it names the column and the type.
+
+== dq/profile/spark.py
+
+*Content:* 2 `ConfigurationError` sites.
+
+The Spark profiler.
+
+* Cause (`ConfigurationError`): the frame names a column twice, which a
+  profile cannot hold; or the aggregate came back as more than one row,
+  which would mean the driver saw data.
+* Fix: a frame that names a column twice cannot be profiled: give the
+  columns names that are each one's own. More than one row is not caused by
+  the data or the frame. It means the frame's `agg(..).collect()` did not
+  behave as an aggregate; check the Spark version -- the profiler is
+  verified on the 3.5 line.
+
+== dq/profile/suggest.py
+
+*Content:* 4 `ConfigurationError` sites.
+
+The suggesters: a profile in, a draft rule pack out.
+
+* Cause (`ConfigurationError`): a vocabulary that is not one of
+  `portable`, `deequ`, `dqx` and `greatexpectations`; a portable rule with
+  no snapshot digest to certify; a format that is not HOCON, YAML or JSON;
+  or a path whose extension names none of them.
+* Fix: name a vocabulary the registry knows, give a portable draft its
+  digest (`--snapshot-sha256`, or a profile from `dq-profile`, which writes
+  the digest of the bytes it read), and write to `.conf`, `.hocon`,
+  `.yaml`, `.yml` or `.json` -- or pass `--format`.
+
+== dq/profile/cli.py
+
+*Content:* 7 `ConfigurationError` sites.
+
+The `dq-profile` and `dq-suggest` commands.
+
+* Cause (`ConfigurationError`): the dataset is not there, or its
+  directory holds no file; an approximation of distinct counts was asked of
+  Arrow, whose counts are always exact; the Spark profiler was asked to
+  read Arrow IPC, or a file whose extension names no format it reads; Spark
+  itself could not read the data -- a corrupt Parquet file, whose footer it
+  cannot read; a `--format` that contradicts the extension of `--output`;
+  or there is no directory to write into.
+* Fix: name a dataset that exists; ask `--approximate-distinct` of Spark
+  only; give the Spark profiler Parquet, CSV or JSON; let the format follow
+  the extension, or name an extension it knows; and write into a directory
+  that is there. What Spark said of data it could not read is the message,
+  by Spark's error class and without its stack trace (`--verbose` shows the
+  trace). Both commands exit 2 for a dataset or a profile they refuse, and
+  1 for a failure that is no stated refusal. `dq-suggest` also exits 1 when
+  the draft it wrote does not validate -- a defect of the command, not of
+  the profile.

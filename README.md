@@ -28,6 +28,11 @@ data already lives in, through SQLAlchemy (`adapter = "sql"`; DuckDB is the cert
 A schema already written for pandera validates a pandas or a Polars frame through the same
 engine contract, and its results reach the same gate: `pip install 'dq-kernel[pandera]'`.
 
+Start from the data instead of a blank rule pack: `dq-profile` summarizes a dataset, with Arrow or
+Spark, and `dq-suggest` turns the summary into a draft rule pack -- for the portable checks, Deequ,
+DQX or Great Expectations, in HOCON, YAML or JSON. Every rule in a draft is a warning under the gate
+policy where a warning blocks nothing, so a draft never stops a pipeline.
+
 ## Quick start
 
 ```python
