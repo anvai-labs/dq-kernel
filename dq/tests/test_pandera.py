@@ -165,7 +165,11 @@ def test_g2_the_engine_conforms_with_its_columns_in_either_order(backend):
         ),
     )
     assert report.conforms, report.summary()
-    assert report.notes == (), report.notes
+    # pandera's columns are a dataframe's labels: no rule hands one to
+    # Spark, so the suite has no misnamed rule to offer it (SPEC-025).
+    assert report.notes == (
+        "column references were not checked: no misnamed_factory was given",
+    ), report.notes
     assert "attribution_survives_reordering" in report.checks
     assert "persistence_honours_the_capability" in report.checks
 

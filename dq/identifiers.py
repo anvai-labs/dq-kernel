@@ -43,6 +43,10 @@ def _validated_parts(value: object, label: str, max_parts: int) -> tuple[str, ..
         raise IdentifierError(f"{label} must be a string, not {type(value).__name__}")
     parts = tuple(value.split("."))
     if not 1 <= len(parts) <= max_parts:
+        if max_parts == 1:
+            raise IdentifierError(
+                f"{label} {value!r} must hold no dot: it names one thing"
+            )
         raise IdentifierError(
             f"{label} must be one to {max_parts} dot-separated parts, not "
             f"{len(parts)}"

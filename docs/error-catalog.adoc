@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 303 raise sites across the modules below; the contract
+The framework raises 305 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -327,7 +327,12 @@ Engine resolution: the name guard, and the manifest of the engine it loads.
 * `ConfigurationError` - the engine declares an invalid `CAPABILITIES`
   manifest: an unknown capability, a `criticality` that is not `native`,
   `derived` or `absent`, or a flag that is not a boolean. The engine author
-  fixes the engine's `CAPABILITIES`.
+  fixes the engine's `CAPABILITIES`. Or the rule names a column by anything
+  but a plain identifier where the engine's payload names one (SPEC-025):
+  `s.t`, `order id`, `x-y`. Spark reads such a string as an expression, so
+  the engine would measure something else. Rename the column upstream, or
+  write the check as an expression of your own where the engine takes one.
+  The same refusal is a problem `dq-validate` reports.
 
 == dq/envelope.py
 
@@ -340,10 +345,12 @@ Engine resolution: the name guard, and the manifest of the engine it loads.
 
 == dq/identifiers.py
 
-*Content:* 3 `IdentifierError` sites.
+*Content:* 4 `IdentifierError` sites.
 
 * Cause: identifier parts outside the bounded `[A-Za-z_][A-Za-z0-9_]*`
-  charset, too many dot-separated parts, or non-string values.
+  charset, too many dot-separated parts, a dot in a name that must be one
+  part, or non-string values. Where a rule names a column so, the kernel
+  refuses the rule before the engine is imported (SPEC-025).
 * Fix: supply bounded alphanumeric parts starting with a letter or
   underscore; see the identifier shapes in the operator reference.
 
@@ -423,7 +430,10 @@ DQX engine wiring: client-mode resolution and DQX-side validation gate.
 == dq/engine/checkspec.py
 
 Engine-neutral rule identity and severity normalization: the shared check
-seam all engines cross for the axes that are truly common.
+seam all engines cross for the axes that are truly common. A fourth axis
+crosses it without raising: `column_name_problems` returns what is wrong
+with the names a rule gives a column (SPEC-025), and the validator and the
+loader refuse by it.
 
 * `ValueError` -- an unknown severity spelling reaches `normalize_criticality`
   (accepted: `error`/`warn`, Deequ's `Error`/`Warning`, and common short

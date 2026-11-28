@@ -329,6 +329,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A rule asks for a column by a plain name** (SPEC-025, ADR-002). Spark
+  reads any other string as an expression: `s.t` is the field `t` of a
+  struct `s`, `x-y` is a subtraction. Measured on Spark 3.5, over data
+  where a column literally called `s.t` held a null beside a struct `s`,
+  a not-null check on it was answered *passed* by DQX and by the
+  business-rules engine; Deequ failed the same column when it was clean;
+  and the portable engine refused the name before any data was read. Now
+  every engine does. Each built-in engine declares where its payload
+  names a column (`EngineSpec.column_keys`), and the kernel refuses a
+  name that is not letters, digits and underscores in `dq-validate` and
+  when the engine is loaded, before the engine is imported. **This
+  narrows engines that happened to take more:** a rule naming such a
+  column on Great Expectations, or on Deequ or DQX with a space in the
+  name, ran before and is refused now, with the reason. Rename the column
+  upstream, or write the check as an expression of your own where an
+  engine takes one. The conformance suite takes a `misnamed_factory` to
+  hold an extension engine to the same promise
 - **The link check no longer goes red on a remote's bad half hour.** It went
   red three times in one day on a link no pull request had touched. Two
   things were measured: the checker does not retry a status code, and

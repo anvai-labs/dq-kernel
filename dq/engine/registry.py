@@ -49,6 +49,18 @@ class EngineSpec:
             run. Engines import their vendor library lazily, so a missing
             one shows at run time, not at import; this lets a caller tell
             in advance whether an engine can run here.
+        column_keys: Where the payload names a column that the engine hands
+            to Spark by name. Each is a path into one entry of the payload,
+            or into the payload itself where it is one mapping; at a path a
+            value is one name, a list of names, or a list of those. A name
+            there must be a plain identifier: Spark reads any other string
+            as an expression -- ``a.b`` is the field ``b`` of a struct
+            ``a``, ``x-y`` is a subtraction -- and the engine would measure
+            something else. The kernel refuses such a name before the
+            engine is imported (SPEC-025). Empty where the engine judges
+            its own (none does today), where the author writes the
+            expression as text (dqdl's ``ruleset``), or where a column is a
+            dataframe label that never reaches Spark (pandera).
     """
 
     name: str
@@ -59,6 +71,25 @@ class EngineSpec:
     extra: Optional[str] = None
     renamed_from: Tuple[str, ...] = ()
     vendor_imports: Tuple[str, ...] = ()
+    column_keys: Tuple[str, ...] = ()
+
+
+#: Every parameter of DQX's own check functions that names a column, read
+#: from its registry on DQX 0.17.2: a test holds this list to the registry.
+_DQX_COLUMN_ARGUMENTS = (
+    "column",
+    "columns",
+    "ref_columns",
+    "exclude_columns",
+    "column1",
+    "column2",
+    "country_column",
+    "merge_columns",
+    "condition_column",
+    "time_column",
+    "ref_column",
+    "null_safe_column_value_matching",
+)
 
 
 BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
@@ -70,6 +101,7 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "BusinessrulesEngine",
             "checks",
             renamed_from=("custom",),
+            column_keys=("columns", "group_by", "sort_by"),
         ),
         EngineSpec(
             "deequ",
@@ -78,6 +110,7 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "checks",
             extra="deequ",
             vendor_imports=("pydeequ",),
+            column_keys=("column", "columns"),
         ),
         EngineSpec(
             "dqdl",
@@ -95,6 +128,10 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "checks",
             extra="dqx",
             vendor_imports=("databricks.labs.dqx",),
+            column_keys=(
+                "check.for_each_column",
+                *("check.arguments." + name for name in _DQX_COLUMN_ARGUMENTS),
+            ),
         ),
         EngineSpec(
             "portable",
@@ -102,6 +139,7 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "PortableEngine",
             "plan",
             extra="spark",
+            column_keys=("column", "columns", "group_by"),
         ),
         EngineSpec(
             "greatexpectations",
@@ -110,6 +148,20 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "expectations",
             extra="greatexpectations",
             vendor_imports=("great_expectations",),
+            # Every argument of GX 1.25's expectations that names a column,
+            # but ``column_index``, which is a position: a test holds this
+            # list to the library.
+            column_keys=tuple(
+                prefix + name
+                for prefix in ("", "kwargs.")
+                for name in (
+                    "column",
+                    "column_A",
+                    "column_B",
+                    "column_list",
+                    "column_set",
+                )
+            ),
         ),
         EngineSpec(
             "schemavalidation",
@@ -117,6 +169,12 @@ BUILT_IN_ENGINES: Dict[str, EngineSpec] = {
             "SchemavalidationEngine",
             "schema",
             extra="deequ",
+            column_keys=(
+                "not_null_columns",
+                "unique_constraints",
+                "overrides.column",
+                "foreign_key_constraints.src_column",
+            ),
         ),
         EngineSpec(
             "pandera",

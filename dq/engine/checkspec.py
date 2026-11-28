@@ -17,10 +17,18 @@ result details), so a universal catalog would couple the kernel to the
 union of three engines' quirks and make every future engine a whole-catalog
 port. Engines pass their native payloads through untouched; only the axes
 that are truly common cross the seam.
+
+A fourth axis crosses it too (SPEC-025): a rule asks for a column by a
+name that is a plain identifier. Where each engine's payload names a
+column is the engine's declaration, ``EngineSpec.column_keys``;
+:func:`column_name_problems` reads a rule by it, for whoever validates a
+rule pack and for whoever loads an engine.
 """
 
 from collections.abc import Mapping
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
+
+from dq.identifiers import ColumnName, IdentifierError
 
 #: Canonical severity spellings accepted across all engines.
 CRITICALITIES = ("error", "warn")
@@ -141,6 +149,78 @@ def require_unique_labels(labels: Iterable[str]) -> None:
                 "not be told apart; give each check a distinct name"
             )
         seen[label] = index
+
+
+def column_name_problems(
+    spec: Any, definition: Mapping[str, Any], where: str = ""
+) -> List[str]:
+    """Return every way a rule names a column by anything but a plain identifier.
+
+    Spark reads a name it is handed as an expression: ``a.b`` is the field
+    ``b`` of a struct ``a`` where the frame has one, ``x-y`` is a
+    subtraction, and a backtick is a quote. Measured on Spark 3.5, a DQX
+    check and a business-rules check on a column called ``s.t`` beside a
+    struct ``s`` answered "passed" over data where that column held a
+    null (SPEC-025). So a rule asks for a column by a plain identifier, as
+    :class:`dq.identifiers.ColumnName` reads one, and this is where the
+    kernel refuses any other name: in ``dq-validate``, and when an engine
+    is loaded, before the engine is imported.
+
+    Where the payload names a column is the engine's declaration,
+    ``spec.column_keys``. A test reads each wrapper -- and DQX's own
+    registry -- and holds the declaration to it.
+
+    Args:
+        spec: The engine's declaration.
+        definition: The rule. The engine's payload is under
+            ``spec.payload_key``.
+        where: A prefix for each problem, naming the rule.
+
+    Returns:
+        Problems as readable strings: empty when every name is plain, when
+        the engine declares no column keys, or when there is no payload to
+        read -- which another check says.
+    """
+    if not spec.column_keys or not isinstance(definition, Mapping):
+        return []
+    payload = definition.get(spec.payload_key, None)
+    if payload is None or spec.payload_type == "string":
+        return []
+    problems: List[str] = []
+    entries = payload if isinstance(payload, (list, tuple)) else [payload]
+    for number, entry in enumerate(entries, start=1):
+        for path in spec.column_keys:
+            for name in _names_at(entry, tuple(path.split("."))):
+                try:
+                    ColumnName.parse(name)
+                except IdentifierError as error:
+                    problems.append(
+                        f"{where}check {number}: {path} = {name!r}: {error} -- and "
+                        "Spark reads any other string as an expression, not as a name"
+                    )
+    return problems
+
+
+def _names_at(value: Any, segments: Tuple[str, ...]) -> Iterator[str]:
+    """Yield every name at a path into ``value``.
+
+    What a path names is one name, a list of names, or a list of those: a
+    list of pairs, or a list of mappings each holding the key. Anything
+    else is not a name, and is left to the engine to judge.
+    """
+    if not segments:
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                yield from _names_at(item, ())
+        return
+    if isinstance(value, Mapping):
+        if segments[0] in value:
+            yield from _names_at(value[segments[0]], segments[1:])
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _names_at(item, segments)
 
 
 def _explicit_name(check: Mapping[str, Any], name_keys) -> Optional[str]:
