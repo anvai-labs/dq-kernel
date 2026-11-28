@@ -162,7 +162,7 @@ a command, or an observed CI run is not a gate.
 | M1
 | Verified
 | 6/6
-| CI run 45739970088 green on PR #62, re-verified after the attribution amendment (first verified in CI run 45604665907 on PR #60)
+| CI run 45739970088 green on PR #62, re-verified after the attribution amendment (first verified in CI run 45604665907 on PR #60); a defect in G5's promise was fixed on 2026-11-28, and verified in its own run
 
 | SPEC-012
 | link:specs/SPEC-012-gate-policy-and-notifier.adoc[Gate policy and notifier conformance]

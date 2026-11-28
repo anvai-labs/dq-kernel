@@ -22,6 +22,23 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.unit)
 
 
+@pytest.fixture
+def the_loader_is_stood_in_for(monkeypatch):
+    """For a test module that stands in for the engine loader: nothing is judged.
+
+    Before the first rule runs, the run core asks whether each engine the
+    pack names can run on this machine. That is the machine's real state --
+    a lane with DQX installed differs from one without -- so a test that
+    fakes the loader, and names engines whose libraries it never imports,
+    must not depend on it::
+
+        pytestmark = pytest.mark.usefixtures("the_loader_is_stood_in_for")
+
+    The judgement itself is held by ``dq/tests/test_engine_requirements.py``.
+    """
+    monkeypatch.setattr("dq.run.engines_that_cannot_run", lambda names: [])
+
+
 @pytest.fixture(scope="session")
 def spark():
     os.environ.setdefault("PYSPARK_PYTHON", sys.executable)

@@ -83,8 +83,8 @@ EngineSpec(
     "dq.engine.soda.soda_engine",
     "SodaEngine",
     "checks",
-    extra="soda",
-    vendor_imports=("soda",),
+    extras=("spark", "soda"),
+    vendor_imports=("pyspark", "soda"),
     column_keys=("column", "columns"),
 ),
 ----
@@ -139,12 +139,24 @@ EngineSpec(
     "dq.engine.soda.soda_engine",
     "SodaEngine",
     "checks",
-    extra="soda",
-    vendor_imports=("soda",),
+    extras=("spark", "soda"),
+    vendor_imports=("pyspark", "soda"),
 ),
 ----
 
 That single entry is what `dq-validate` reads for the required payload key and what the loader reads for the import target. A contract test refuses an engine directory with no registry entry, so the two cannot drift.
+
+=== Say what the engine needs
+
+`vendor_imports` is every module the engine needs that the package's own dependencies do not install, and `extras` every extra that installs them, in the order to install them. An engine on Spark names `pyspark`, and `spark` first among its extras: no extra of this package pulls in another, so `dq-kernel[deequ]` alone installs no Spark. An engine that can run on more than one backend, as the portable engine does, declares no modules; the backend asked for says what it needs. Tests hold each declaration to what the engine's code imports and to the extras named in `pyproject.toml`, so neither can drift.
+
+The declaration is what a machine is told by. Nothing is imported to read it, so every engine can be asked at once, and before any work: `dq-engines` lists what is missing, and the loader, the run core and `dq-kernel` refuse an engine that cannot run here in one wording:
+
+----
+Engine 'deequ' cannot run here: 'pyspark' and 'pydeequ' are not installed. Install them with: pip install 'dq-kernel[spark,deequ]'  (or: poetry install -E spark -E deequ).
+----
+
+`dq-kernel` says it before it starts Spark. A library that is installed and still refuses to be imported -- pydeequ does, wherever `SPARK_VERSION` is not set -- is reported with its own reason (`Cannot be used here` in the listing) and no install hint, since what is there is not to be installed.
 
 === An optional dependency stays optional
 

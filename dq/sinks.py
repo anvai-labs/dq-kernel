@@ -214,7 +214,11 @@ def sink_from_config(repoconfig) -> OutcomeSink | None:
         return RepositorySink(repoconfig)
     if kind == "postgres":
         require_extra(
-            "sqlalchemy", "sqlalchemy", "sqlalchemy", pin="sqlalchemy>=2.0,<2.2"
+            "sqlalchemy",
+            "sqlalchemy",
+            "sqlalchemy",
+            pin="sqlalchemy>=2.0,<2.2",
+            kind="sink",
         )
         from dq.sqlalchemy_sink import SqlAlchemyOutcomeSink
 

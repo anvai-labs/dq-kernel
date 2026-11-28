@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: Verified — CI run 45739970088 green on PR #62, re-verified after the attribution amendment (first verified in CI run 45604665907 on PR #60) +
+Status: Verified — CI run 45739970088 green on PR #62, re-verified after the attribution amendment (first verified in CI run 45604665907 on PR #60); a defect in G5's promise was fixed on 2026-11-28, and verified in its own run +
 Date: 2026-11-24 +
 Driven by: ADR-012, ADR-002 +
 Milestone: M1 +
@@ -194,6 +194,44 @@ Amended 2026-11-25, while starting the evidence importers (SPEC-013).
 * The G1 line said Great Expectations 1.25.0. The lock pins 1.24.1, which is
   what CI runs; 1.25.0 came from a developer environment. The line now says
   what was measured, and where.
+====
+
+[NOTE]
+====
+Fixed 2026-11-28, after verification: an engine that cannot run here says
+so, the same way, everywhere.
+
+* G5 promised that `dq-engines` "reports which extras are installed, with
+  install hints". Measured again on 2026-11-28, on the machines a reader
+  actually has:
+** With pydeequ installed and no `SPARK_VERSION` in the environment -- any
+   shell, by default -- the command died with a traceback. Asking whether
+   `pydeequ.dqdl` is installed went through `importlib.util.find_spec`, which
+   imports the parent of a dotted name, and pydeequ refuses to be imported
+   without the variable.
+** With no library installed, the loader said `Engine module
+   'dq.engine.deequ.deequ_engine' not found: No module named 'pyspark'`:
+   neither the library the engine lacks nor the extra that installs it, and
+   only after Spark had started. The business-rules engine, which needs none
+   of its own, was listed with no hint at all.
+** A hint named one extra where an engine needs two. pydeequ does not depend
+   on pyspark, so `dq-kernel[deequ]` installs no Spark.
+* What is installed is now judged without importing anything. Each engine
+  declares every module it needs and every extra that installs them
+  (`vendor_imports`, `extras`), and one wording serves the listing, the
+  loader, the run core and `dq-kernel`: what is missing, and how to install
+  it. The run core asks before the first rule runs, and `dq-kernel` before it
+  starts Spark. A library that is installed and refuses to be imported is
+  reported with its own reason, and no install hint.
+* A change of contract, said plainly: an engine whose library was absent used
+  to be loaded, and to refuse when it was first applied to a frame. It is
+  refused when it is loaded now, with the same extra named. In the listing's
+  JSON, `extras`, `missing` and `problem` take the place of `extra`.
+* Measured by `dq/tests/test_engine_requirements.py` (the stand-in for a
+  library that refuses to be imported, read end to end in a child process;
+  the declarations held to the engine code and to `pyproject.toml`;
+  the wording; the loader; the run core), `dq/tests/test_engines_cli.py`,
+  `dq/tests/test_cli.py` and `dq/tests/test_core_install_check.py`.
 ====
 
 Links: ADR-012; ADR-002; SPEC-015; SPEC-016; SPEC-017; SPEC-018.

@@ -9,6 +9,10 @@ from dq.dq_framework import DQFramework
 from dq.exceptions import ConfigurationError, DataFrameNotFoundError, ValidationError
 from dq.notifier import InMemoryNotifier
 
+#: The loader is stood in for throughout: whether an engine's library is
+#: installed here is not what these tests measure.
+pytestmark = pytest.mark.usefixtures("the_loader_is_stood_in_for")
+
 
 def framework_with_rules(rules, notifier=None, **extra_config):
     framework = DQFramework.__new__(DQFramework)

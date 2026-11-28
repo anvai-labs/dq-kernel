@@ -27,6 +27,10 @@ from dq.notifier import InMemoryNotifier
 from dq.observability import LOG_FORMAT_VARIABLE, InMemoryObserver, LoggingObserver
 from dq.tests.test_framework_contract import _outcome, framework_with_rules
 
+#: The loader is stood in for throughout: whether an engine's library is
+#: installed here is not what these tests measure.
+pytestmark = pytest.mark.usefixtures("the_loader_is_stood_in_for")
+
 RUN_KEY = 1_700_000_000_000
 RUN_LOGGER = "dq.run_events"
 CORE_LOGGER = "dq.dq_framework"

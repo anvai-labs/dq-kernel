@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import logging
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -11,8 +12,26 @@ from dq import cli
 from dq.exceptions import ConfigurationError, EngineNotFoundError
 from dq.gate import EXIT_CONFIGURATION, EXIT_GATE_FAILED, EXIT_PASSED
 
+#: A rule pack that is valid, for the one engine that needs no library of
+#: its own: what its engines need is judged for real here, before Spark.
+A_PACK = """dqframework {
+  dqrules = [ { engine = portable, plan = {} } ]
+}
+"""
 
-def run_cli(arguments, *, valid=True, results=None, policy="any", run_error=None):
+#: What the loader says where an engine's libraries are not installed.
+UNMET = (
+    "Engine 'deequ' cannot run here: 'pyspark' and 'pydeequ' are not installed. "
+    "Install them with: pip install 'dq-kernel[spark,deequ]'  "
+    "(or: poetry install -E spark -E deequ)."
+)
+
+
+def run_cli(
+    arguments, *, valid=True, results=None, policy="any", run_error=None, unmet=()
+):
+    """Run the command over a rule pack ``valid`` says is valid, whose engines
+    can all run here unless ``unmet`` says otherwise."""
     spark = MagicMock()
     spark.sparkContext.applicationId = "local-test"
     spark.version = "3.5.9"
@@ -23,6 +42,7 @@ def run_cli(arguments, *, valid=True, results=None, policy="any", run_error=None
         patch.object(sys, "argv", ["dq-kernel", *arguments]),
         patch("pyspark.sql.SparkSession") as spark_session,
         patch("dq.validate.validate_config", return_value=valid),
+        patch("dq.engine.registry.engines_that_cannot_run", return_value=list(unmet)),
         patch("dq.dq_framework.DQFramework") as framework,
     ):
         spark_session.builder = builder
@@ -55,11 +75,129 @@ def test_cli_rejects_invalid_config_before_starting_spark(tmp_path):
 
 def test_cli_rejects_zero_outcomes(tmp_path):
     config = tmp_path / "rules.conf"
-    config.write_text("dqframework {}\n", encoding="utf-8")
+    config.write_text(A_PACK, encoding="utf-8")
 
     exit_code, _, _ = run_cli([str(config)], results=[])
 
     assert exit_code == 1
+
+
+def test_cli_says_what_an_engine_lacks_before_starting_spark(tmp_path, caplog):
+    """One refusal for the pack, naming the libraries and every extra that
+    installs them. It used to wait for Spark to start, then say "Engine
+    module ... not found: No module named 'pyspark'" and advise one extra
+    where the engine needs two."""
+    config = tmp_path / "rules.conf"
+    config.write_text(A_PACK, encoding="utf-8")
+
+    with caplog.at_level(logging.ERROR):
+        exit_code, builder, framework = run_cli([str(config)], unmet=[UNMET])
+
+    assert exit_code == EXIT_CONFIGURATION
+    builder.master.assert_not_called()
+    framework.assert_not_called()
+    assert UNMET in caplog.text
+    assert "Install Spark support" not in caplog.text
+
+
+def test_cli_says_the_reason_when_an_engine_cannot_be_imported(tmp_path, caplog):
+    """Installed, and refusing: pydeequ does so wherever SPARK_VERSION is not
+    set. An install hint would send the reader to install what is there."""
+    config = tmp_path / "rules.conf"
+    config.write_text(A_PACK, encoding="utf-8")
+    refused = EngineNotFoundError(
+        "Engine 'deequ' cannot be imported here: RuntimeError: "
+        "SPARK_VERSION environment variable is required"
+    )
+
+    with caplog.at_level(logging.ERROR):
+        exit_code, builder, _ = run_cli([str(config)], run_error=refused)
+
+    assert exit_code == EXIT_CONFIGURATION
+    # Spark was started first; this refusal came once the engine was loaded.
+    builder.master.return_value.appName.return_value.getOrCreate.assert_called_once()
+    assert "SPARK_VERSION environment variable is required" in caplog.text
+    assert "Install Spark support" not in caplog.text
+
+
+def test_cli_does_not_advise_spark_for_another_library(tmp_path, caplog):
+    """A library an engine found it needed as it ran: the message names its
+    extra. The line about Spark used to follow every missing library."""
+    config = tmp_path / "rules.conf"
+    config.write_text(A_PACK, encoding="utf-8")
+    missing = ImportError(
+        "The pandera engine requires the optional pandas package; install it "
+        "with `poetry install -E pandera`"
+    )
+
+    with caplog.at_level(logging.ERROR):
+        exit_code, _, _ = run_cli([str(config)], run_error=missing)
+
+    assert exit_code == EXIT_CONFIGURATION
+    assert "-E pandera" in caplog.text
+    assert "Install Spark support" not in caplog.text
+
+
+def run_cli_without_spark(arguments):
+    """Run the command where Spark cannot be imported; return its exit code
+    and the framework it was to build."""
+    framework = MagicMock()
+    with (
+        patch.object(sys, "argv", ["dq-kernel", *arguments]),
+        patch("dq.validate.validate_config", return_value=True),
+        patch("dq.engine.registry.engines_that_cannot_run", return_value=[]),
+        # Both: a submodule already imported would answer for its parent.
+        patch.dict(sys.modules, {"pyspark": None, "pyspark.sql": None}),
+        patch("dq.dq_framework.DQFramework", framework),
+    ):
+        return cli.main(), framework
+
+
+def test_cli_advises_spark_when_spark_is_what_is_missing(tmp_path, caplog):
+    """The command runs on Spark: where it is not installed, that is said,
+    with its extra, and nothing else runs."""
+    config = tmp_path / "rules.conf"
+    config.write_text(A_PACK, encoding="utf-8")
+
+    with caplog.at_level(logging.ERROR):
+        exit_code, framework = run_cli_without_spark([str(config)])
+
+    assert exit_code == EXIT_CONFIGURATION
+    framework.assert_not_called()
+    assert "Install Spark support with: pip install dq-kernel[spark]" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("extra", "refused"),
+    [
+        (
+            ["--verbose"],
+            ImportError("import of pyspark.sql halted; None in sys.modules"),
+        ),
+        (
+            ["--verbose"],
+            EngineNotFoundError(
+                "Engine 'deequ' cannot be imported here: RuntimeError: x"
+            ),
+        ),
+    ],
+    ids=["spark-missing", "engine-refused"],
+)
+def test_cli_shows_the_traceback_when_asked(tmp_path, capsys, caplog, extra, refused):
+    """Each handler of a missing library prints the traceback when asked:
+    the words say what to install, the traceback says what went wrong. The
+    level is held for the test: ``--verbose`` opens the root logger, which
+    would go on logging into the tests that follow."""
+    config = tmp_path / "rules.conf"
+    config.write_text(A_PACK, encoding="utf-8")
+    with caplog.at_level(logging.ERROR):
+        if isinstance(refused, EngineNotFoundError):
+            exit_code, _, _ = run_cli([str(config), *extra], run_error=refused)
+        else:
+            exit_code, _ = run_cli_without_spark([str(config), *extra])
+
+    assert exit_code == EXIT_CONFIGURATION
+    assert "Traceback (most recent call last)" in capsys.readouterr().err
 
 
 def test_cli_defers_remote_config_loading_to_framework():
@@ -74,7 +212,7 @@ def test_cli_defers_remote_config_loading_to_framework():
 
 def test_cli_writes_failed_evidence_and_returns_failure(tmp_path):
     config = tmp_path / "rules.conf"
-    config.write_text("dqframework { dqrules = [1] }\n", encoding="utf-8")
+    config.write_text(A_PACK, encoding="utf-8")
     destination = tmp_path / "report.json"
 
     exit_code, _, _ = run_cli(
@@ -121,7 +259,7 @@ def test_cli_exit_code_is_configuration_error_for_invalid_config(tmp_path):
 )
 def test_cli_exit_code_follows_the_gate_policy(tmp_path, policy, results, expected):
     config = tmp_path / "rules.conf"
-    config.write_text("dqframework {}\n", encoding="utf-8")
+    config.write_text(A_PACK, encoding="utf-8")
     exit_code, _, framework = run_cli([str(config)], results=results, policy=policy)
     assert exit_code == expected
     framework.assert_called_once()
@@ -129,7 +267,7 @@ def test_cli_exit_code_follows_the_gate_policy(tmp_path, policy, results, expect
 
 def test_cli_passes_the_report_reference_to_the_framework(tmp_path):
     config = tmp_path / "rules.conf"
-    config.write_text("dqframework {}\n", encoding="utf-8")
+    config.write_text(A_PACK, encoding="utf-8")
     destination = tmp_path / "report.json"
     exit_code, _, framework = run_cli(
         [
@@ -157,21 +295,21 @@ def test_cli_passes_the_report_reference_to_the_framework(tmp_path):
 )
 def test_cli_configuration_errors_exit_two(tmp_path, error):
     config = tmp_path / "rules.conf"
-    config.write_text("dqframework {}\n", encoding="utf-8")
+    config.write_text(A_PACK, encoding="utf-8")
     exit_code, _, _ = run_cli([str(config)], run_error=error)
     assert exit_code == EXIT_CONFIGURATION
 
 
 def test_cli_unrelated_errors_still_exit_one(tmp_path):
     config = tmp_path / "rules.conf"
-    config.write_text("dqframework {}\n", encoding="utf-8")
+    config.write_text(A_PACK, encoding="utf-8")
     exit_code, _, _ = run_cli([str(config)], run_error=RuntimeError("executor lost"))
     assert exit_code == EXIT_GATE_FAILED
 
 
 def test_cli_requires_complete_evidence_identity(tmp_path):
     config = tmp_path / "rules.conf"
-    config.write_text("dqframework {}\n", encoding="utf-8")
+    config.write_text(A_PACK, encoding="utf-8")
 
     with patch.object(
         sys,
@@ -186,7 +324,7 @@ def test_cli_requires_complete_evidence_identity(tmp_path):
 
 def test_cli_rejects_dataset_identity_without_report(tmp_path):
     config = tmp_path / "rules.conf"
-    config.write_text("dqframework {}\n", encoding="utf-8")
+    config.write_text(A_PACK, encoding="utf-8")
 
     with patch.object(
         sys,

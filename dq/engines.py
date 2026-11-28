@@ -5,7 +5,9 @@
 
 Answers "which engines can I use here, and what is each capable of" without
 starting Spark. An engine's vendor library is imported only to read its
-capability manifest, and only when that library is installed.
+capability manifest, and only when that library is installed. The command
+answers on any machine, the one that can use no engine included: an engine
+it cannot use is reported, with the reason, never raised.
 """
 
 import argparse
@@ -19,17 +21,10 @@ from dq.engine.registry import (
     ENTRY_POINT_GROUP,
     EngineSpec,
     entry_point_engines,
+    install_hint,
     missing_vendor_imports,
+    module_itself_is_missing,
 )
-
-
-def install_hint(spec: EngineSpec) -> str:
-    """Return how to install an engine's optional dependency, or ``None``."""
-    if not spec.extra:
-        return None
-    return (
-        f"pip install 'dq-kernel[{spec.extra}]'  (or: poetry install -E {spec.extra})"
-    )
 
 
 def describe(spec: EngineSpec, source: str = "built-in") -> Dict[str, Any]:
@@ -40,30 +35,47 @@ def describe(spec: EngineSpec, source: str = "built-in") -> Dict[str, Any]:
         source: ``"built-in"`` or ``"entry-point"``.
 
     Returns:
-        Name, source, import target, payload key, extra, whether its vendor
-        library is installed (and how to install it), and its capability
-        manifest -- ``None`` when the engine cannot be imported here.
+        Name, source, import target, payload key and the extras that provide
+        what the engine needs. ``installed`` says whether the engine can be
+        used here: every module it declares is installed, and its module
+        was imported to read its capability manifest. When one is not,
+        ``missing`` names it and ``install_hint`` says how to install it.
+        When something else stood in the way -- a library that refuses to
+        be imported on this machine -- ``problem`` carries the reason in
+        that library's own words. The manifest is ``None`` whenever the
+        engine could not be imported.
     """
-    missing = list(missing_vendor_imports(spec))
+    missing: List[str] = []
+    problem = None
     capabilities = None
-    if not missing:
-        try:
+    try:
+        missing = list(missing_vendor_imports(spec))
+        if not missing:
             module = importlib.import_module(spec.module)
-            capabilities = dict(
-                getattr(getattr(module, spec.class_name), "CAPABILITIES", {})
-            )
-        except (
-            Exception
-        ):  # noqa: BLE001 - an engine that cannot load is reported, not raised
-            missing = [spec.module]
+            engine_class = getattr(module, spec.class_name, None)
+            if engine_class is None:
+                problem = f"Engine class '{spec.class_name}' is not in '{spec.module}'"
+            else:
+                capabilities = dict(getattr(engine_class, "CAPABILITIES", {}))
+    except ModuleNotFoundError as error:
+        if module_itself_is_missing(spec.module, error):
+            problem = f"{type(error).__name__}: {error}"
+        else:
+            # A library the engine imports is not installed, and one its
+            # declaration did not name: said as the loader says it.
+            missing = [error.name or str(error)]
+    except Exception as error:  # noqa: BLE001 - reported, never raised
+        problem = f"{type(error).__name__}: {error}"
     return {
         "name": spec.name,
         "source": source,
         "module": spec.module,
         "class": spec.class_name,
         "payload_key": spec.payload_key,
-        "extra": spec.extra,
-        "installed": not missing,
+        "extras": list(spec.extras),
+        "installed": not missing and problem is None,
+        "missing": missing,
+        "problem": problem,
         "install_hint": install_hint(spec) if missing else None,
         "renamed_from": list(spec.renamed_from),
         "capabilities": capabilities,
@@ -89,7 +101,7 @@ def known_engines() -> List[Dict[str, Any]]:
 _COLUMNS = (
     "name",
     "payload_key",
-    "extra",
+    "extras",
     "installed",
     "criticality",
     "row_filter",
@@ -98,14 +110,19 @@ _COLUMNS = (
 )
 
 
+def _named(engine: Dict[str, Any]) -> str:
+    """Return an engine's name as the table spells it."""
+    suffix = "" if engine["source"] == "built-in" else " (entry point)"
+    return engine["name"] + suffix
+
+
 def _cell(engine: Dict[str, Any], column: str) -> str:
     capabilities = engine["capabilities"] or {}
     if column == "name":
-        suffix = "" if engine["source"] == "built-in" else " (entry point)"
         former = ", ".join(engine["renamed_from"])
-        return engine["name"] + suffix + (f" (was {former})" if former else "")
-    if column == "extra":
-        return engine["extra"] or "-"
+        return _named(engine) + (f" (was {former})" if former else "")
+    if column == "extras":
+        return ",".join(engine["extras"]) or "-"
     if column == "payload_key":
         return engine["payload_key"] or "-"
     if column == "installed":
@@ -119,7 +136,7 @@ def _cell(engine: Dict[str, Any], column: str) -> str:
 
 
 def render_text(engines: List[Dict[str, Any]]) -> str:
-    """Return the human-readable table of engines."""
+    """Return the human-readable table of engines, and why one cannot be used."""
     headers = [column.replace("_", " ").capitalize() for column in _COLUMNS]
     rows = [[_cell(engine, column) for column in _COLUMNS] for engine in engines]
     widths = [
@@ -139,13 +156,18 @@ def render_text(engines: List[Dict[str, Any]]) -> str:
         for row in rows
     ]
     lines = [line.rstrip() for line in lines]
-    hints = [
-        f"  {engine['name']}: {engine['install_hint']}"
-        for engine in engines
-        if engine["install_hint"]
-    ]
-    if hints:
-        lines += ["", "Not installed here:", *hints]
+    unmet = [engine for engine in engines if engine["missing"]]
+    if unmet:
+        lines += ["", "Not installed here:"]
+        lines += [
+            f"  {_named(engine)}: {', '.join(engine['missing'])}"
+            + (f" -- {engine['install_hint']}" if engine["install_hint"] else "")
+            for engine in unmet
+        ]
+    unusable = [engine for engine in engines if engine["problem"]]
+    if unusable:
+        lines += ["", "Cannot be used here:"]
+        lines += [f"  {_named(engine)}: {engine['problem']}" for engine in unusable]
     lines += [
         "",
         f"Third-party engines register in the '{ENTRY_POINT_GROUP}' entry-point group.",

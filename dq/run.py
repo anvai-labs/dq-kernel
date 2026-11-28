@@ -11,6 +11,11 @@ that in one place is what lets a second runner reuse it rather than copy it
 -- outcome normalization, the run key, notifiers, the gate policy and
 observers kept in two places is the drift the layer redesign removed.
 
+Before the first rule runs, the core asks of each engine the pack names
+whether it can run here, and refuses the run when one cannot: what is
+installed is judged, nothing is imported for the answer, and the refusal
+says what is missing and which extras install it.
+
 A runner binds compute. It supplies two things: how to load an engine for a
 rule, and how to resolve a dataset's logical name to a frame. Everything else
 -- the sink, the observer, the notifier, the policy, the job id, the
@@ -41,6 +46,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional, Sequence
 
 from dq.config import RuleRef
+from dq.engine.registry import engines_that_cannot_run
+from dq.exceptions import EngineNotFoundError, ValidationError
 from dq.gate import GateDecision, evaluate_gate
 from dq.notifier import GateEvent, GateNotifier
 from dq.observability import (
@@ -53,7 +60,6 @@ from dq.observability import (
     elapsed_ms,
 )
 from dq.outcomes import MAX_BATCH_BYTES, MAX_OUTCOMES, CheckOutcome, normalize_outcomes
-from dq.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +127,9 @@ def run_rules(
         The :class:`RunResult`.
 
     Raises:
+        EngineNotFoundError: Before the first rule runs, when an engine the
+            pack names cannot run here. It says what is not installed and
+            the extras that install it, for every such engine at once.
         Exception: Whatever a rule, the sink, or the gate policy raised. The
             run is still announced as finished, with the error, before the
             exception propagates.
@@ -154,6 +163,13 @@ def run_rules(
         ),
     )
     try:
+        # What the pack's engines need is judged before the first rule runs,
+        # as the pack's shape is (ADR-001): an engine that cannot run here
+        # is refused once, for the whole pack, before anything is loaded
+        # and no data is read.
+        unmet = engines_that_cannot_run(rule.engine for rule in rules)
+        if unmet:
+            raise EngineNotFoundError("\n".join(unmet))
         scope = sink.run_scope(run_key) if sink is not None else nullcontext()
         with scope:
             for rule in rules:

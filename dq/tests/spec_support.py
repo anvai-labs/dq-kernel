@@ -10,7 +10,7 @@ tracker table that is *derived* from the spec files by
 two can never disagree for long.
 
 This module is pure stdlib and reads only the working tree, so the contract
-test runs in the unit lane with no extras installed.
+test needs nothing installed beyond the package's own dependencies.
 """
 
 from __future__ import annotations

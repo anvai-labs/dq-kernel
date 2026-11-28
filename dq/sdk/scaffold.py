@@ -229,8 +229,11 @@ Next:
   1. Implement {Class}Engine._evaluate: one build_result() per check.
   2. If the vendor library is optional: add it to pyproject.toml as an
      optional dependency, declare the extra, import it in _prepare through
-     dq.utils.imports.require_extra, and set `extra` and `vendor_imports`
-     on the engine's EngineSpec.
+     dq.utils.imports.require_extra, and set `extras` and `vendor_imports`
+     on the engine's EngineSpec: every module it needs that the package
+     does not install -- pyspark first, for an engine on Spark -- and every
+     extra that installs them. Tests hold both to the code and to
+     pyproject.toml.
   3. Set CAPABILITIES to what the engine really does.
   4. Prove it: run dq.sdk.conformance.assert_engine_conforms against a frame.
   5. Add a section for the engine to docs/index.adoc.

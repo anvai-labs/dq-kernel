@@ -369,9 +369,10 @@ The `businessrules` engine currently implements `DistinctnessByGroup`, `RateOfCh
 === Great Expectations
 
 The `greatexpectations` engine is a first-class engine on GX Core (`great_expectations
->=1.24,<2`), installed with its optional extra (`poetry install -E greatexpectations` in a
-source checkout, or `pip install 'dq-kernel[greatexpectations]'`). It validates a Spark
-DataFrame through the modern GX datasource API — an ephemeral context, a Spark dataframe
+>=1.24,<2`). Its extra brings GX alone (`poetry install -E greatexpectations` in a source
+checkout, or `pip install 'dq-kernel[greatexpectations]'`); it runs on Spark, which no
+extra of this package pulls in, so both together are `pip install
+'dq-kernel[spark,greatexpectations]'`. It validates a Spark DataFrame through the modern GX datasource API — an ephemeral context, a Spark dataframe
 asset, and one `ExpectationSuite` per rule — with the batch definition built once per engine
 and reused across runs. Each expectation entry uses a snake-case `type` resolved against
 `gx.expectations`; unknown or missing types fail closed with `ValueError`. Result payloads
@@ -1063,8 +1064,15 @@ uses `expectations`, DQDL uses `ruleset`, DQX uses `checks`, and the portable en
 Every checked-in example is validated in CI.
 
 `dq-engines` lists the engines this installation can resolve, built-in and
-entry-point, with each engine's capability manifest and, for an engine whose
-optional dependency is missing, how to install it. `dq-import` reads another
+entry-point, with each engine's capability manifest. For an engine whose
+libraries are missing it says which, and every extra that installs them: an
+engine on Spark needs `spark` beside its own, since no extra pulls in another.
+For one that is installed and still cannot be imported -- pydeequ, wherever
+`SPARK_VERSION` is not set -- it gives the library's own reason. It answers on
+any machine. `dq-kernel` says the same before it starts Spark: *Engine 'deequ'
+cannot run here: 'pyspark' and 'pydeequ' are not installed. Install them with:
+pip install 'dq-kernel[spark,deequ]' (or: poetry install -E spark -E deequ)*.
+`dq-import` reads another
 tool's results as evidence and needs no Spark session: see
 xref:#importing-evidence[Importing evidence]. `dq-run` runs a rule pack over files with
 Arrow and needs no Spark session either: see

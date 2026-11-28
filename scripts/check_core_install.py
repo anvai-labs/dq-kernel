@@ -24,6 +24,9 @@ says works with no extra installed.
 - Each entry point that needs an extra, asked to work, names it: a library
   by the error it raises, a command by exiting with the code its help
   promises and saying what to install.
+- The command that lists engines answers with nothing installed, and says
+  what an engine lacks and how to install it: it is what a reader asks
+  first on a machine where nothing runs.
 - A command judges its configuration before it looks for an extra.
 
 Why CI needs this: the development group carries the tests' own tools, and
@@ -42,6 +45,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata as metadata
+import json
 import re
 import subprocess
 import sys
@@ -119,6 +123,23 @@ ASKED_TO_WORK = (
     # package before it looks at what it was given.
     ("dq.profile.arrow", lambda m: m.profile_table(object(), "orders"), "-E arrow"),
     ("dq.profile.spark", lambda m: m.profile_frame(object(), "orders"), "-E spark"),
+    # An engine is asked for, and refused before its module is imported. An
+    # engine on Spark names both extras: no extra of the package pulls in
+    # another, so "deequ" alone installs no Spark.
+    (
+        "dq.engine.engine_loader",
+        lambda m: m.EngineLoader().load_engine("deequ", {}, 1),
+        "-E spark -E deequ",
+    ),
+)
+
+
+#: The engine the listing is read for, what it must say is missing with
+#: nothing installed, and how to install it.
+LISTED = "deequ"
+LISTED_MISSING = ["pyspark", "pydeequ"]
+LISTED_HINT = (
+    "pip install 'dq-kernel[spark,deequ]'  (or: poetry install -E spark -E deequ)"
 )
 
 
@@ -145,7 +166,8 @@ def over_a_dataset(scratch: Path) -> list:
 #: ``(command, its arguments given a scratch directory, what its refusal must
 #: say)``. Each must exit with ``EXIT_MISSING_DEPENDENCY``.
 ASKED_TO_RUN = (
-    ("dq-kernel", lambda scratch: [str(ON_SPARK)], "pip install dq-kernel[spark]"),
+    # What its engine needs is judged before Spark is looked for.
+    ("dq-kernel", lambda scratch: [str(ON_SPARK)], "-E spark -E deequ"),
     (
         # The configuration is judged before Spark is looked for.
         "dq-kernel",
@@ -362,6 +384,8 @@ def command_problems(scratch: Path) -> list:
                 f"dq-validate {ON_SPARK.name} exits {code}: {last_line(output)}"
             )
 
+    found += listing_problems(available)
+
     for name, arguments, expected in ASKED_TO_RUN:
         if name not in available:
             found.append(f"the wheel installs no command named {name}")
@@ -376,6 +400,39 @@ def command_problems(scratch: Path) -> list:
                 f"{expected!r}: {last_line(output)}"
             )
     found += suggests_a_draft(available, scratch)
+    return found
+
+
+def listing_problems(available) -> list:
+    """Return what is wrong with the engine listing, printing what passed.
+
+    It answers "which engines can I use here" on the machine that can use
+    none -- the one a reader asks first -- so it must answer there, and say
+    what an engine lacks and how to install it. Measured before this was
+    written: with a vendor library installed and its environment variable
+    not set, the listing crashed with a traceback.
+    """
+    found = []
+    if "dq-engines" not in available:
+        return ["the wheel installs no command named dq-engines"]
+    code, output = run(available["dq-engines"], ["--format", "json"])
+    try:
+        listing = json.loads(output).get("engines", []) if code == 0 else []
+    except ValueError:
+        listing = []
+    engine = {listed.get("name"): listed for listed in listing}.get(LISTED, {})
+    if (
+        code == 0
+        and engine.get("installed") is False
+        and engine.get("missing") == LISTED_MISSING
+        and engine.get("install_hint") == LISTED_HINT
+    ):
+        print(f"dq-engines, asked to list, says {LISTED} needs: {LISTED_HINT}")
+    else:
+        found.append(
+            f"dq-engines, asked to list, exits {code} and does not say "
+            f"{LISTED} lacks {', '.join(LISTED_MISSING)}: {last_line(output)}"
+        )
     return found
 
 

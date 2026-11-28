@@ -75,21 +75,45 @@ Examples:
 
     # Bound before the try: the handlers below return these, and an import
     # inside it is what fails where Spark is not installed.
-    from dq.exceptions import ConfigurationError
+    from dq.exceptions import ConfigurationError, EngineNotFoundError
     from dq.gate import EXIT_CONFIGURATION, EXIT_GATE_FAILED, EXIT_PASSED, evaluate_gate
 
     try:
+        from dq.config import parse_rule_pack
         from dq.dq_framework import DQFramework
+        from dq.engine.registry import engines_that_cannot_run
         from dq.report import build_report, sha256_file_reference, write_report
+        from dq.utils.config_utils import load_config
         from dq.validate import is_local_config_reference, validate_config
 
         # Judged before Spark is looked for, so the verdict on a rule pack is
         # the same with or without Spark installed.
-        if is_local_config_reference(args.config) and not validate_config(args.config):
-            logger.error("Configuration validation failed; Spark was not started")
-            return EXIT_CONFIGURATION
+        if is_local_config_reference(args.config):
+            if not validate_config(args.config):
+                logger.error("Configuration validation failed; Spark was not started")
+                return EXIT_CONFIGURATION
+            # What its engines need is judged here too: a library that is
+            # not installed is said so once, with the extras that install
+            # it, and starting Spark is not spent on finding out.
+            unmet = engines_that_cannot_run(
+                parse_rule_pack(load_config(args.config)).engines
+            )
+            if unmet:
+                for refusal in unmet:
+                    logger.error(refusal)
+                return EXIT_CONFIGURATION
 
-        from pyspark.sql import SparkSession
+        try:
+            from pyspark.sql import SparkSession
+        except ImportError as e:
+            # Spark itself, which this command runs on, is not installed.
+            logger.error(f"Missing dependency: {e}")
+            logger.error("Install Spark support with: pip install dq-kernel[spark]")
+            if args.verbose:
+                import traceback
+
+                traceback.print_exc()
+            return EXIT_CONFIGURATION
 
         logger.info(f"Initializing Spark session with master: {args.spark_master}")
         spark = (
@@ -149,11 +173,23 @@ Examples:
             print(f"  - {name}")
         return decision.exit_code
 
+    except EngineNotFoundError as e:
+        # An engine that cannot be loaded: an unknown one, or one whose
+        # library is not installed or cannot be imported here. A
+        # configuration problem, fixed by a commit rather than by the data,
+        # and the loader has said what to install where an extra does.
+        logger.error(str(e))
+        if args.verbose:
+            import traceback
+
+            traceback.print_exc()
+        return EXIT_CONFIGURATION
     except ImportError as e:
-        # EngineNotFoundError is an ImportError too: an unknown engine is a
-        # configuration problem, fixed by a commit rather than by the data.
-        logger.error(f"Missing dependency or engine: {e}")
-        logger.error("Install Spark support with: pip install dq-kernel[spark]")
+        # A library an engine found it needed as it ran. What the engines
+        # declare is judged before anything is imported, so this is the
+        # rest -- a frame's own library, for one -- and the message names
+        # the extra that installs it.
+        logger.error(f"Missing dependency: {e}")
         if args.verbose:
             import traceback
 

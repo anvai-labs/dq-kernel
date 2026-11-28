@@ -10,8 +10,15 @@ import logging
 from collections.abc import Mapping
 
 from dq.engine.checkspec import column_name_problems
-from dq.engine.registry import find_entry_point, find_spec
 from dq.engine.dq_engine import DQEngine, capability_problems
+from dq.engine.registry import (
+    cannot_run_here,
+    find_entry_point,
+    find_spec,
+    install_hint,
+    module_itself_is_missing,
+    refusal,
+)
 from dq.exceptions import ConfigurationError, EngineNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -43,8 +50,12 @@ class EngineLoader:
             An instantiated engine object.
 
         Raises:
-            EngineNotFoundError: If the engine module or class cannot be
-                found (also an ``ImportError`` for existing callers).
+            EngineNotFoundError: If the engine cannot be loaded, saying
+                why: a library it needs is not installed (with the extras
+                that install it, judged before anything is imported), its
+                module or class cannot be found, or its module cannot be
+                imported here. Also an ``ImportError``, for existing
+                callers.
             ValueError: If the engine name contains invalid characters.
             ConfigurationError: If the rule names a column by anything but
                 a plain identifier where the engine's payload names one --
@@ -86,30 +97,52 @@ class EngineLoader:
             if problems:
                 raise ConfigurationError("; ".join(problems))
 
+        # What the engine needs is judged before anything is imported. A
+        # library that is not installed is said so, with the extras that
+        # install it -- not as an engine module that cannot be found.
+        if spec is not None:
+            unmet = cannot_run_here(spec)
+            if unmet is not None:
+                raise EngineNotFoundError(unmet)
+
         try:
             module = importlib.import_module(module_path)
-            engine_class = getattr(module, class_name, None)
-            if engine_class is None:
-                raise AttributeError(
-                    f"Engine class '{class_name}' not found in module "
-                    f"'{module_path}': {module_path}"
-                )
-            problems = capability_problems(getattr(engine_class, "CAPABILITIES", None))
-            if problems:
-                # Refuse the engine before it runs: an invalid manifest
-                # would make every capability-based decision downstream a
-                # guess.
-                raise ConfigurationError(
-                    f"Engine '{name}' declares an invalid CAPABILITIES manifest: "
-                    + "; ".join(problems)
-                )
-            logger.debug("Loaded engine %s from %s", class_name, module_path)
-            return engine_class(*args, **kwargs)
-
         except ModuleNotFoundError as e:
+            if module_itself_is_missing(module_path, e):
+                raise EngineNotFoundError(
+                    f"Engine module '{module_path}' not found: {e}"
+                ) from e
+            # The engine's own module is here; a library it imports is not.
+            # A built-in engine declares what it needs, so this is one the
+            # declaration missed, and an engine from elsewhere.
             raise EngineNotFoundError(
-                f"Engine module '{module_path}' not found: {e}"
+                refusal(
+                    name,
+                    (e.name or str(e),),
+                    install_hint(spec) if spec is not None else None,
+                )
+            ) from e
+        except Exception as e:
+            # Installed, and refusing to be imported: a vendor library
+            # checks its own environment on import (pydeequ asks for
+            # SPARK_VERSION). The reason is the library's own words.
+            raise EngineNotFoundError(
+                f"Engine '{name}' cannot be imported here: {type(e).__name__}: {e}"
             ) from e
 
-        except AttributeError as e:
-            raise EngineNotFoundError(str(e)) from e
+        engine_class = getattr(module, class_name, None)
+        if engine_class is None:
+            raise EngineNotFoundError(
+                f"Engine class '{class_name}' not found in module '{module_path}'"
+            )
+        problems = capability_problems(getattr(engine_class, "CAPABILITIES", None))
+        if problems:
+            # Refuse the engine before it runs: an invalid manifest
+            # would make every capability-based decision downstream a
+            # guess.
+            raise ConfigurationError(
+                f"Engine '{name}' declares an invalid CAPABILITIES manifest: "
+                + "; ".join(problems)
+            )
+        logger.debug("Loaded engine %s from %s", class_name, module_path)
+        return engine_class(*args, **kwargs)

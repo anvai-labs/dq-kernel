@@ -329,6 +329,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **An engine whose library is absent is refused when it is loaded**
+  (SPEC-011), where it was loaded and refused when it was first applied to a
+  frame; the extra that installs the library is named as before. `dq-engines`
+  JSON reports `extras` (every extra an engine needs), `missing` (the modules
+  that are not installed) and `problem` (why an installed engine could not be
+  imported) in place of `extra`
 - **A rule asks for a column by a plain name** (SPEC-025, ADR-002). Spark
   reads any other string as an expression: `s.t` is the field `t` of a
   struct `s`, `x-y` is a subtraction. Measured on Spark 3.5, over data
@@ -526,6 +532,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An engine that cannot run here says so, the same way, everywhere**
+  (SPEC-011). `dq-engines` crashed with a traceback on a machine with pydeequ
+  installed and no `SPARK_VERSION` set -- asking whether a library is
+  installed imported its parent package; nothing is imported to answer now.
+  Where no library is installed, the loader said an engine module could not
+  be found, after Spark had started; it now names what is missing and every
+  extra that installs it, before anything is imported, and `dq-kernel` says
+  it before it starts Spark. An engine on Spark names `spark` beside its own
+  extra, since no extra pulls in another. The business-rules engine is listed
+  with a hint; a library that is installed and still cannot be imported is
+  reported with its own reason; the PostgreSQL sink no longer calls itself an
+  engine; `dq-kernel` advises installing Spark only when Spark is what is
+  missing
 - **A key is one key in every rule-pack format** (SPEC-010). pyhocon reads
   a key as a path, so a JSON or YAML key holding one of its structural
   characters -- a dot above all -- was split on its way into the tree,

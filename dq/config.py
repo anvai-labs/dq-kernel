@@ -59,6 +59,11 @@ class RulePack:
     config: Any = field(repr=False)
 
     @property
+    def engines(self) -> Tuple[str, ...]:
+        """The engines the rules name, each once, in rule order."""
+        return tuple(dict.fromkeys(rule.engine for rule in self.rules))
+
+    @property
     def gate_policy(self) -> str:
         """The gate policy (``dqframework.gate.fail_on``)."""
         return policy_from_config(self.config)
