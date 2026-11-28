@@ -252,6 +252,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the OpenTelemetry SDK brings the OpenTelemetry API), and every lane has
   Spark. The lint lane's step that used to claim it is now named for what it
   does, validating an example in a development install
+- **The wheel and the source distribution no longer carry the tests and the
+  notebooks.** Nothing a user installs needed them: the tests want pytest and
+  the notebooks a Databricks workspace, and together they were 114 of the 198
+  Python files in the wheel. The wheel is 224 KB where it was 531. The check
+  above walks the whole package now and skips nothing: were they built in
+  again, it would import them and fail
 - **The whole lock is re-resolved**, with every constraint in `pyproject.toml`
   unchanged: 41 movements, where updating one dependency at a time had left
   the transitive ones behind. Great Expectations 1.24.1 → 1.25.0, pandas
