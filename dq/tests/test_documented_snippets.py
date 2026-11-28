@@ -9,6 +9,10 @@ one was written into the operator reference binding a frame without a
 column its plan needed, and only running it showed that; another showed a
 SQL table "declared" with no columns at all. Each Python block named here
 is read out of its document and executed, so it cannot go stale unnoticed.
+
+The one block that needs a Spark session -- running an engine's draft, in
+the profiling section -- is read and run the same way by
+test_profile_spark.py.
 """
 
 import re
@@ -55,6 +59,17 @@ def checks_that_failed(*labels):
     return check
 
 
+def deequ_suggestions(expected):
+    """Check that ``suggested`` is exactly ``expected``, each check a warning."""
+
+    def check(namespace):
+        checks = namespace["checks"]
+        assert namespace["suggested"] == expected
+        assert all(check["level"] == "Warning" for check in checks)
+
+    return check
+
+
 #: What the adapters' snippets need beyond their own extra.
 ADAPTERS = ("sqlalchemy", "duckdb")
 
@@ -95,6 +110,15 @@ SNIPPETS = (
         "failed",
         checks_that_failed("unique_id", "greater_than_or_equal_to_amount"),
         ("pandera",),
+    ),
+    (
+        "index.adoc",
+        "The same two steps from Python:",
+        "suggested",
+        deequ_suggestions(
+            [("isComplete", "id"), ("isUnique", "id"), ("isNonNegative", "id")]
+        ),
+        ("pyarrow",),
     ),
 )
 

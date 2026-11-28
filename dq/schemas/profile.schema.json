@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/anvai-labs/dq-kernel/blob/main/dq/schemas/profile.schema.json",
+  "title": "dq-kernel profile",
+  "description": "A profile of one dataset, dq-profile/v1, as dq-profile writes it: a bounded summary whose size depends on the column count alone, with one entry per column. Its shape is stated here. What a shape cannot say is enforced where it is read, in dq/profile/profile.py: which measures a type has (a bound only for a type with an order, a length only for text and binary, a precision and a scale only for a decimal, a not-a-number count only for a float), that bounds come in pairs, and that a least value is not above its greatest. A reader refuses a key or a version it does not know rather than misread it, so anything added here is a new version.",
+  "type": "object",
+  "required": ["schema_version", "dataset", "source", "rows", "columns"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "dq-profile/v1"
+    },
+    "dataset": {
+      "type": "object",
+      "required": ["name", "snapshot_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "The dataset's name: not blank."
+        },
+        "snapshot_sha256": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          ],
+          "description": "The SHA-256 of the bytes the profiler read, where it read them from files: a file's own, or every file of a directory in name order. Null for a profile taken through the Python API, which read no files."
+        }
+      }
+    },
+    "source": {
+      "enum": ["arrow", "spark"],
+      "description": "Which profiler measured."
+    },
+    "rows": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many rows the dataset holds."
+    },
+    "columns": {
+      "type": "array",
+      "description": "One entry per column, in the dataset's order. A dataset that names a column twice is not profiled.",
+      "items": { "$ref": "#/$defs/column" }
+    }
+  },
+  "$defs": {
+    "column": {
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "nulls",
+        "distinct",
+        "distinct_exact",
+        "min",
+        "max",
+        "min_length",
+        "max_length",
+        "precision",
+        "scale",
+        "not_a_number"
+      ],
+      "additionalProperties": false,
+      "description": "One column's summary. Every key is always present: a measure the column's type has no meaning for is null, never omitted, so a reader never has to tell absence from none.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "The column's name: not blank, whatever characters it holds."
+        },
+        "type": {
+          "enum": [
+            "integer",
+            "float",
+            "decimal",
+            "text",
+            "binary",
+            "boolean",
+            "date",
+            "timestamp",
+            "nested",
+            "unknown"
+          ],
+          "description": "The column's type in the profile's words, whatever engine spelled it. A nested column, and one of a type the profile does not know, is counted for nulls and nothing more."
+        },
+        "nulls": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many values are SQL nulls. A float that is not a number is a value."
+        },
+        "distinct": {
+          "$ref": "#/$defs/count",
+          "description": "How many values are distinct, nulls left out; null where the profiler does not count them."
+        },
+        "distinct_exact": {
+          "type": "boolean",
+          "description": "Whether the distinct count is exact."
+        },
+        "min": {
+          "$ref": "#/$defs/bound",
+          "description": "The least value, spelled as its type spells it: an integer, a float, the text of a decimal, a date as YYYY-MM-DD, a timestamp as ISO 8601 without an offset. Null where the type has no order or every value is null. A float that is not a number is never a bound; an infinite one is spelled \"Infinity\" or \"-Infinity\"."
+        },
+        "max": {
+          "$ref": "#/$defs/bound",
+          "description": "The greatest value, spelled as min is."
+        },
+        "min_length": {
+          "$ref": "#/$defs/count",
+          "description": "The least length of a text or binary value; null for every other type."
+        },
+        "max_length": {
+          "$ref": "#/$defs/count",
+          "description": "The greatest length of a text or binary value; null for every other type."
+        },
+        "precision": {
+          "$ref": "#/$defs/precision",
+          "description": "A decimal's precision; null for every other type."
+        },
+        "scale": {
+          "$ref": "#/$defs/scale",
+          "description": "A decimal's scale, which may be negative; null for every other type."
+        },
+        "not_a_number": {
+          "$ref": "#/$defs/count",
+          "description": "How many values of a float column are not a number; null for every other type."
+        }
+      }
+    },
+    "bound": {
+      "type": ["null", "integer", "number", "string"],
+      "description": "Null, or a value as its type spells it. A type listed, not alternatives: an integer is a number too, and would match two."
+    },
+    "count": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "integer", "minimum": 0 }
+      ]
+    },
+    "precision": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "integer", "minimum": 1, "maximum": 76 }
+      ]
+    },
+    "scale": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "integer", "minimum": -76, "maximum": 76 }
+      ]
+    }
+  }
+}

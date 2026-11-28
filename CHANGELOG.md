@@ -235,6 +235,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a row for the engine in the compute-engines reference
 - The validator takes a third kind of engine payload, a document: a mapping,
   or the text of one
+- **Profiling and rule suggestion** (SPEC-019, ADR-007): start from the
+  data instead of a blank rule pack. `dq-profile` summarizes a dataset --
+  with the Arrow profiler by default, or with the Spark one
+  (`--profiler spark`) -- and writes the summary as JSON: `dq-profile/v1`,
+  one bounded entry per column, saying its
+  type, how many values are null and how many are distinct, its least and
+  greatest value where the type has an order, and its length bounds where
+  it has a length. Its size depends on the column count alone. It makes the
+  notebook-only `DeequConstraintsBuilder` unnecessary for the three
+  suggestions below; that class stays
+- The two profilers mean the same thing by every number, measured over the
+  same rows: Spark and Arrow return equal profiles for integers, floats,
+  decimals, text, booleans, dates, timestamps (zoned and not), binary and a
+  nested column. The rules that make it so: a null is a SQL null, and a
+  float that is not a number is a value, counted on its own and never a
+  bound; a signed zero is one value; a timestamp with a zone is spelled in
+  UTC, and one without as it stands; a decimal is spelled exactly, in plain
+  notation to its own scale. A nested column, or one of a type the profile
+  does not know, is typed and counted for nulls and nothing more: no column
+  fails a profile. Where the two engines do not read one Parquet file alike
+  -- a null type, an unsigned long, a duration -- each says what its own
+  engine was handed
+- A column is the column whatever its name is. The Spark profiler asks for
+  it by its name in backticks: measured, Spark reads `col("s.t")` as the
+  field `t` of a struct column `s` where the frame has one -- and profiles
+  that field, without a word, beside a column actually called `s.t` -- and
+  as nothing at all where the frame has not. The two profilers agree on a
+  name with a dot, a backtick or a space in it. A dataset that names a
+  column twice is refused by both, before anything is measured
+- `dq-profile` refuses alike, on both engines, what cannot be read: a file
+  Arrow cannot read, and data Spark itself cannot -- a corrupt Parquet file
+  -- reported by Spark's own error class in one line, without its stack
+  trace. Anything else is exit 1, which is no verdict on the data
+- The Spark profiler asks one job, and the driver sees one row: a test
+  intercepts its `collect`, `take`, `head`, `first`, `toPandas` and
+  `toLocalIterator`, and each returns one row that holds no column of the
+  table. The job's plan grows with the column count. Measured on 20,000
+  rows: an aggregate holding N exact distinct counts copies every row N + 1
+  times and judges every count on every copy -- 8.5 seconds for 60 columns,
+  22 for 120, and no answer in five minutes for 240 -- where the profiler
+  lays every value beside its column's number and counts it once, taking
+  2.3 seconds for 60 columns, 5.8 for 1,000 and 60 for 5,000. A test holds
+  the plan to no such copy. `--approximate-distinct` takes the same plan
+  without the exact counting
+- A profile's shape is published as `dq/schemas/profile.schema.json`, which
+  ships in the wheel beside the rule pack's. It is held to its reader: every
+  profile the profilers write is valid against it, and on a document's
+  shape the two agree. Every key is always present, null where there is
+  none; a reader refuses a key or a version it does not know, so anything
+  added is a new version. `validate_config_document` takes `report=False`
+  to give a verdict without logging it, which `dq-suggest` uses to report
+  the draft it wrote in its own words
+- `dq-suggest` turns a profile into a draft rule pack in HOCON, YAML or
+  JSON, for `portable`, `deequ`, `dqx` or `greatexpectations`, written in
+  words its engine already accepts. Three suggestions, each only where the
+  profile warrants it: that a column with no nulls is complete; that a
+  column exactly distinct by an exact count is unique (not for the portable
+  subset, which has no such check); and that an integer, decimal or float
+  column whose least value is 0 or more is non-negative. The command
+  validates what it wrote, a printed draft as much as a written one
+- Every suggested rule is a warning, and the pack names the gate policy
+  under which a failed warning is reported and blocks nothing
+  (`gate.fail_on = "error"`). Measured: the default policy blocks on a
+  failed warning as on any other, so each engine's draft, without that
+  line, stopped a pipeline over data that broke it. An engine's draft is on
+  the dataset of its profile by name, and runs through the framework once
+  that frame is registered
+- A draft passes on the data it was drawn from -- a test asks it of every
+  vocabulary over a corpus of corner tables -- and three measurements made
+  that true:
+  - No suggestion is made for a column whose name is not a plain
+    identifier, which is how a rule asks for a column. Such a rule was
+    refused by the portable engine, raised in Deequ, and failed every row
+    in DQX
+  - The portable `isComplete` counts a float that is not a number as
+    missing, where the profile counts it a value, so the portable draft
+    says nothing of the completeness of such a column
+  - Deequ's `isComplete` refuses a nested column, so its draft says nothing
+    of that either
+
+  The command names each column it leaves out
+- The portable draft holds one rule per semantic version and carries the
+  snapshot it certifies -- the digest of the bytes `dq-profile` read -- so
+  `dq-run` runs it over the same files
+- CI's bare install asks more of the wheel: each profiler, asked to work,
+  names its extra; `dq-profile` exits 2 and says which to install; and
+  `dq-suggest`, which needs none, turns a profile into a draft that
+  validates
+- From Python: `dq.profile.profile.Profile`, the Arrow profiler
+  `dq.profile.arrow.profile_table`, the Spark profiler
+  `dq.profile.spark.profile_frame`, and `dq.profile.suggest.suggest`
 
 ### Changed
 

@@ -92,12 +92,18 @@ def _is_document(payload) -> bool:
     return isinstance(payload, Mapping)
 
 
-def validate_config_document(config_path: str) -> ConfigValidation:
+def validate_config_document(
+    config_path: str, *, report: bool = True
+) -> ConfigValidation:
     """Validate a rule pack and report every problem found.
 
     Args:
         config_path: A local path (with or without ``file://``) or inline
             HOCON text, in any supported format.
+        report: To log each problem, and the verdict when there is none. A
+            caller that reports the verdict in its own words, as
+            ``dq-suggest`` does of the draft it wrote, asks for the verdict
+            without it.
 
     Validation proceeds in stages -- syntax, the envelope against the
     schema, the shape of each rule, then each built-in engine's payload --
@@ -140,10 +146,11 @@ def validate_config_document(config_path: str) -> ConfigValidation:
                 if not shape_problems:
                     errors.extend(_engine_payload_errors(parse_rule_pack(config)))
 
-    for error in errors:
-        logger.error(error)
-    if not errors:
-        logger.info("Configuration is valid")
+    if report:
+        for error in errors:
+            logger.error(error)
+        if not errors:
+            logger.info("Configuration is valid")
     return ConfigValidation(reference=config_path, format=fmt, errors=tuple(errors))
 
 

@@ -1,12 +1,17 @@
 # Copyright 2024 Data Quality Framework Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Validate a rule pack against its published JSON Schema (SPEC-010).
+"""Validate a rule pack, or a profile, against its published JSON Schema.
 
-The schema describes the rule-pack *envelope*: the keys every rule pack
-shares regardless of engine. Engine payloads stay open on purpose --
-each engine owns its vocabulary (ADR-012), and the key an engine requires
-is declared once in the registry.
+The rule-pack schema (SPEC-010) describes the *envelope*: the keys every
+rule pack shares regardless of engine. Engine payloads stay open on
+purpose -- each engine owns its vocabulary (ADR-012), and the key an
+engine requires is declared once in the registry.
+
+The profile schema (SPEC-019) describes a ``dq-profile/v1`` document: its
+shape, which is what a schema can say. What the shape cannot say -- which
+measures a type has, and that a least value is not above its greatest --
+is enforced where a profile is read, in :mod:`dq.profile.profile`.
 
 This is a small JSON Schema validator covering the keywords that schema
 uses, rather than a dependency on a validation library: the core package
@@ -23,6 +28,7 @@ from pathlib import Path
 from typing import Any, List
 
 SCHEMA_PATH = Path(__file__).with_name("schemas") / "rule-pack.schema.json"
+PROFILE_SCHEMA_PATH = Path(__file__).with_name("schemas") / "profile.schema.json"
 
 #: Keywords this validator understands. The schema file is itself checked
 #: against this set, so an unsupported keyword cannot slip in unnoticed.
@@ -58,6 +64,12 @@ SUPPORTED_KEYWORDS = frozenset(
 def rule_pack_schema() -> dict:
     """Return the published rule-pack schema."""
     return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+
+
+@lru_cache(maxsize=1)
+def profile_schema() -> dict:
+    """Return the published profile schema (``dq-profile/v1``)."""
+    return json.loads(PROFILE_SCHEMA_PATH.read_text(encoding="utf-8"))
 
 
 def _is_type(value: Any, name: str) -> bool:
@@ -241,3 +253,15 @@ def rule_pack_schema_errors(config: Any) -> List[str]:
     from dq.utils.config_utils import config_tree_to_python
 
     return validate_against_schema(config_tree_to_python(config), rule_pack_schema())
+
+
+def profile_schema_errors(profile: Any) -> List[str]:
+    """Validate a profile document against its schema.
+
+    Args:
+        profile: A profile as a mapping, as a ``Profile.to_document()`` gives.
+
+    Returns:
+        Violations as readable strings; empty when the profile is valid.
+    """
+    return validate_against_schema(profile, profile_schema())

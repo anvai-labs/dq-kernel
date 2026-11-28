@@ -224,18 +224,21 @@ jobs:
         run: pip install poetry==2.5.2
       - name: Build package
         run: poetry build
-      - name: Verify the published rule-pack schema ships in the wheel
+      - name: Verify the published schemas ship in the wheel
         run: |
           python - <<'PY'
           import glob
           import zipfile
 
           wheel = sorted(glob.glob("dist/dq_kernel-*.whl"))[-1]
-          required = "dq/schemas/rule-pack.schema.json"
           with zipfile.ZipFile(wheel) as archive:
               names = archive.namelist()
-          assert required in names, f"{required} is missing from {wheel}"
-          print(f"{wheel} carries {required}")
+          for required in (
+              "dq/schemas/rule-pack.schema.json",
+              "dq/schemas/profile.schema.json",
+          ):
+              assert required in names, f"{required} is missing from {wheel}"
+              print(f"{wheel} carries {required}")
           PY
       - name: Prove the wheel needs no extra
         # The dev group carries three extras' packages (datafusion brings
