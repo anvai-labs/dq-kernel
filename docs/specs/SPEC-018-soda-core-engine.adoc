@@ -2,16 +2,17 @@
 :toc:
 :sectlinks.
 
-Status: Accepted — gated on the live dependency and API check +
+Status: Blocked — Soda Core's own caps would downgrade two packages for every
+  install, so it cannot be an extra; how to ship it is the owner's decision +
 Date: 2026-11-24 +
 Driven by: ADR-012, ADR-011 +
 Milestone: M3 +
 Depends on: SPEC-011 +
-Gate: before any build, install the pinned version in an isolated
-  environment together with the other extras, confirm they resolve, and
-  record the verified API calls here. Soda Core brings its own dependency
-  surface; if it cannot coexist with the existing extras, this spec becomes
-  Blocked with the conflict recorded, and is not forced. +
+Gate: met on its dependency half on 2026-11-27, and repeated on 2026-11-28,
+  with the result this spec foresaw: Soda Core cannot coexist with the other
+  extras without downgrading two of their packages. The conflict is recorded
+  under G1 and in the note below. The API half was not run: nothing is built
+  until the conflict is resolved. +
 
 == Purpose
 
@@ -27,7 +28,9 @@ everything else.
 * Results: one outcome per check with its outcome, the measured value where
   Soda reports one, and a bounded diagnostic.
 * An optional `soda` extra and live tests against DuckDB in the main test
-  lane.
+  lane. *This is the line the gate stopped:* as an extra, Soda Core moves
+  two packages for every install. Whether it ships another way is the
+  owner's decision (see the note).
 
 == Out of scope
 
@@ -56,13 +59,52 @@ everything else.
 
 == Progress
 
-* [ ] G1 — PyPI checked 2026-11-24: soda-core 4.31.0, Python >=3.10, depends
-  on opentelemetry-api, an OTLP exporter, pydantic, python-dotenv, requests,
-  ruamel.yaml, sqlglot, tabulate (it no longer requires dbt). The live check
-  has not been run
+* [ ] G1 — the dependency half, observed 2026-11-27 and 2026-11-28: soda-core
+  4.32.0, the newest release, requires `ruamel.yaml<0.19` and
+  `requests<2.34.0`; the lock holds 0.19.1 and 2.34.2, so an extra would
+  downgrade both for every install. The API half has not been run: see the
+  note
 * [ ] G2 — not started
 * [ ] G3 — not started
 * [ ] G4 — not started
 * [ ] G5 — not started
+
+[NOTE]
+====
+Amended 2026-11-28. The Gate said what to do if Soda Core could not coexist
+with the other extras: become Blocked with the conflict recorded, and not
+force it. That is what happened, and this is the record.
+
+* **What was measured.** soda-core's newest release is 4.32.0 (2026-11-25;
+  the spec first recorded 4.31.0), Python >=3.10. Of its eight requirements,
+  two are caps: `ruamel.yaml<0.19,>=0.18.17` and `requests<2.34.0,>=2.32.3`.
+  The lock holds ruamel-yaml 0.19.1 and requests 2.34.2. Read from PyPI's
+  own metadata on 2026-11-27 and again on 2026-11-28.
+* **Why it is everyone's downgrade.** Poetry resolves one version of a
+  package for the union of all extras. So a `soda` extra would not stay
+  inside itself: in the trial lock of 2026-11-27, `requests` went
+  2.34.2 → 2.33.1 and `ruamel-yaml` 0.19.1 → 0.18.17 for every install,
+  whatever extras it asked for. It also brought twelve packages, among them
+  an OpenTelemetry exporter and sqlglot.
+* **The caps may lift.** Soda Core releases about weekly (4.30.0 on
+  2026-11-05, 4.31.0 on 2026-11-17, 4.32.0 on 2026-11-25). Re-read
+  `requires_dist` on PyPI before this spec is unblocked.
+* **Not measured, and not to be read as such:** the API half of the gate.
+  No Soda package was installed and no call of it was verified.
+
+*The owner's decision, on 2026-11-27:* to go on to M4 and to mark this spec
+truthfully meanwhile. What remains theirs is how, or whether, to ship it:
+
+. **Install alongside, with no extra and nothing in the lock** (the
+   recommendation). The engine would load Soda where it finds it. Its live
+   tests would run only where Soda is installed, so no CI lane would certify
+   it unless one installed Soda outside the lock, and the shipped wheel
+   would say only that the engine is there.
+. **Accept the two downgrades for every install.** They are patch-level and
+   inside Soda's own caps, but they are not this project's to choose for a
+   user who never asked for Soda.
+. **Defer** until Soda lifts its caps, and revisit at the next release.
+
+====
 
 Links: ADR-012; ADR-011; SPEC-011; SPEC-016; SPEC-014.
