@@ -216,9 +216,9 @@ a command, or an observed CI run is not a gate.
 | SPEC-019
 | link:specs/SPEC-019-profiling-and-rule-suggestion.adoc[Profiling and rule suggestion]
 | M4
-| Accepted
-| 0/5
-| amended 2026-11-28 before any build, and once more while it was built, each time with what was measured
+| Verified
+| 5/5
+| CI run 46131852898 green on PR #76: 2806 passed on Python 3.13 (96.16% line, 94.69% branch) and 2815 on 3.12, 836 changed lines at 100%
 
 | SPEC-020
 | link:specs/SPEC-020-history-and-trend-policy.adoc[History and trend policy pack]
@@ -265,7 +265,7 @@ a command, or an observed CI run is not a gate.
 * M1: 4/4 specs verified; 22/22 acceptance gates met
 * M2: 3/3 specs verified; 13/13 acceptance gates met
 * M3: 3/4 specs verified; 17/22 acceptance gates met
-* M4: 0/4 specs verified; 0/18 acceptance gates met
+* M4: 1/4 specs verified; 5/18 acceptance gates met
 * M5: 0/3 specs verified; 0/9 acceptance gates met
 * Shipped: 3/3 specs verified; 7/7 acceptance gates met
 * No milestone: 0/1 specs verified; 0/3 acceptance gates met

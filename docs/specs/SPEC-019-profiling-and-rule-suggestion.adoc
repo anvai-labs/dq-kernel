@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: Accepted — amended 2026-11-28 before any build, and once more while it was built, each time with what was measured +
+Status: Verified — CI run 46131852898 green on PR #76: 2806 passed on Python 3.13 (96.16% line, 94.69% branch) and 2815 on 3.12, 836 changed lines at 100% +
 Date: 2026-11-24 +
 Driven by: ADR-007 (ports and packaging, never new engine vocabulary) +
 Milestone: M4 +
@@ -97,11 +97,44 @@ it into draft rules.
 
 == Progress
 
-* [ ] G1 — not started
-* [ ] G2 — not started
-* [ ] G3 — not started
-* [ ] G4 — not started
-* [ ] G5 — not started
+* [x] G1 — evidence: `dq/tests/test_profile_spark.py::test_spark_and_arrow_return_equal_profiles_over_the_same_data`,
+  `::test_a_timestamp_with_a_zone_is_spelled_in_utc_whatever_the_session_s_zone`,
+  `::test_the_profilers_agree_on_names_that_are_not_identifiers`,
+  `::test_a_draft_passes_on_the_data_it_was_drawn_from`,
+  `dq/tests/test_profile_arrow.py::test_the_fixture_says_what_was_measured`,
+  `::test_a_zoned_timestamp_is_the_same_moment_whatever_the_process_s_switch`
+  (the fixture through Parquet, then every corner table of the corpus in
+  `dq/tests/profile_support.py`; where the two engines read one file
+  differently is outside the gate, and held so by
+  `dq/tests/test_profile_spark.py::test_what_the_engines_read_differently_is_outside_g1`)
+* [x] G2 — evidence: `dq/tests/test_profile_spark.py::test_profiling_a_wide_table_brings_one_row_to_the_driver_and_no_column_of_the_table`,
+  `::test_the_watch_sees_a_raw_row_when_one_is_taken`,
+  `::test_a_frame_whose_aggregate_came_back_as_more_than_one_row_is_refused`,
+  `::test_an_exact_count_never_copies_a_row_once_per_column`
+  (a 60 × 4000 table with a sentinel column, every way a DataFrame reaches
+  the driver intercepted; and the plan held to no Expand)
+* [x] G3 — evidence: `dq/tests/test_profile_spark.py::test_each_engine_runs_its_draft_and_reports_every_rule_as_a_warning`,
+  `::test_no_draft_names_a_column_no_rule_can_ask_for`,
+  `dq/tests/test_profile_unit.py::test_nothing_is_suggested_for_a_column_no_rule_can_name`,
+  `::test_the_portable_subset_says_nothing_of_completeness_where_it_counts_a_not_a_number_missing`,
+  `::test_deequ_says_nothing_of_completeness_of_a_nested_column`
+  (each engine's draft validated by `dq-validate` and then run by that
+  engine)
+* [x] G4 — evidence: `dq/tests/test_profile_spark.py::test_the_framework_runs_each_draft_and_a_failed_warning_blocks_nothing`,
+  `::test_the_portable_draft_runs_on_spark_and_reports_every_rule_as_a_warning`,
+  `dq/tests/test_profile_arrow.py::test_a_portable_draft_s_failed_warning_leaves_the_gate_open`,
+  `dq/tests/test_profile_unit.py::test_a_draft_is_written_under_the_gate_policy_where_a_warning_blocks_nothing`
+  (over data that breaks the draft: through the framework for Deequ, DQX
+  and Great Expectations, and under `dq-run` for the portable subset; with
+  the control that the same draft without its gate policy stops the
+  pipeline)
+* [x] G5 — evidence: `dq/tests/test_profile_arrow.py::test_dq_profile_and_dq_suggest_compose_into_a_draft_that_validates`,
+  `::test_the_portable_draft_passes_under_dq_run_on_the_data_it_was_drawn_from`,
+  `::test_the_portable_draft_of_every_corner_passes_under_dq_run`,
+  `dq/tests/test_profile_spark.py::test_the_guide_s_way_of_running_an_engine_draft_runs`
+  (four vocabularies in three formats, the user guide's own Python run;
+  and the published shape held to its reader by
+  `dq/tests/test_profile_schema.py::test_every_profile_the_arrow_profiler_writes_is_valid`)
 
 [NOTE]
 ====
