@@ -2,7 +2,7 @@
 :toc:
 :sectlinks.
 
-Status: Verified — CI run 45519809624 green on PR #59 +
+Status: Verified — CI run 45519809624 green on PR #59; a defect in G1's promise was fixed on 2026-11-28, and verified in its own run +
 Date: 2026-11-24 +
 Driven by: ADR-001, SPEC-004 +
 Milestone: M1 +
@@ -97,6 +97,19 @@ Amended 2026-11-24, during implementation, from what the code and pyhocon
   implementation whenever that library is installed.
 * `dq-validate` validates in stages and reports every problem of the first
   failing stage. In parallel, one problem produced two messages.
+* *Fixed 2026-11-28, after verification: a key is one key in every
+  format.* pyhocon reads a key as a path, so a JSON or YAML key holding
+  one of its structural characters -- a dot above all -- was split in two
+  on its way into the tree, and a quoted HOCON key came back out with its
+  quotes. A pandera schema's column called `order.id` was therefore
+  refused from every format, or validated under a name with quotes in
+  it, against SPEC-017's promise that a schema in use travels into a rule
+  pack unchanged. The loader now spells such a key as pyhocon keeps it
+  whole, and takes the quotes off when the tree is read; a key pyhocon
+  cannot keep whole -- not text, a structural character and a double
+  quote, a double quote at an edge -- is refused rather than misread.
+  Measured by `dq/tests/test_config_loader.py::test_a_key_is_one_key_in_every_format`
+  and `dq/tests/test_pandera.py::test_g5_a_column_label_with_a_dot_in_it_is_read_as_written`.
 ====
 
 Links: ADR-001; ADR-012; SPEC-004; SPEC-011.

@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from dq.engine import checkspec
 from dq.exceptions import ConfigurationError
+from dq.utils.config_utils import config_tree_to_python
 from dq.utils.sanitization import to_strict_json
 
 #: What a document's ``schema_type`` names: the pandera module that reads it.
@@ -136,8 +137,13 @@ def _text_of(payload) -> str:
             "The pandera engine requires a 'schema': the document pandera's "
             "to_json() writes"
         )
+    if isinstance(payload, str):
+        return payload
     try:
-        return payload if isinstance(payload, str) else json.dumps(payload)
+        # Through the package's own reader: pyhocon keeps a quoted key in
+        # its quotes, and a column called "order.id" must reach pandera as
+        # order.id.
+        return json.dumps(config_tree_to_python(payload))
     except (TypeError, ValueError) as error:
         raise ConfigurationError(
             f"The pandera engine's 'schema' cannot be written as a document: {error}"

@@ -526,6 +526,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A key is one key in every rule-pack format** (SPEC-010). pyhocon reads
+  a key as a path, so a JSON or YAML key holding one of its structural
+  characters -- a dot above all -- was split on its way into the tree,
+  and a quoted HOCON key came back out with its quotes. A pandera
+  schema's column called `order.id` was refused from every format, or
+  validated under a name with quotes in it. The loader now keeps such a
+  key whole, and refuses one it cannot keep: not text, a structural
+  character and a double quote, a double quote at an edge. A YAML key
+  that is a number or a boolean is refused with a message, where pyhocon
+  raised a traceback of its own
 - The `greatexpectations` engine attributed GX's results to checks by
   position. GX groups expectations by column and returns results in that
   order, not the order they were defined in, so in any rule that mixed

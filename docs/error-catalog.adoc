@@ -6,7 +6,7 @@ Status: Maintained by contract test (U7/TD-PROD-5) +
 Date: 2026-09-21
 
 This catalog maps every fail-closed boundary to its cause and remediation.
-The framework raises 305 raise sites across the modules below; the contract
+The framework raises 308 raise sites across the modules below; the contract
 test `dq/tests/test_error_catalog.py` keeps module coverage and exception
 types in sync with the code. Spec: SPEC-004.
 
@@ -488,15 +488,20 @@ runs (SPEC-010).
 
 The format-neutral rule-pack loader (SPEC-010).
 
-*Content:* 11 `ConfigurationError` sites.
+*Content:* 14 `ConfigurationError` sites.
 
 * Cause: the configuration is empty or not a string, mapping, or tree; an
   unsupported URI scheme; a local file that does not exist or cannot be
   read; a remote source that cannot be fetched; or text that is not valid
-  HOCON, YAML or JSON (a YAML or JSON pack must be a mapping).
+  HOCON, YAML or JSON (a YAML or JSON pack must be a mapping). Or a key of
+  a JSON or YAML pack, or of a mapping, that cannot be kept whole: not
+  text, holding both one of pyhocon's structural characters and a double
+  quote, or starting or ending with a double quote.
 * Fix: the message names the source and, for a parse error, the line and
   column. A bare path must name an existing file; inline HOCON must contain
-  a key separator, braces, or a line break.
+  a key separator, braces, or a line break. For a key, write it as text
+  without a double quote at an edge: a key with a dot in it needs no
+  quotes in JSON or YAML, and is quoted in HOCON.
 
 == dq/schema.py
 

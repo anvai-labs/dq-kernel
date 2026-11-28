@@ -10,7 +10,7 @@ import time
 from dq.config import parse_rule_pack
 from dq.engine.engine_loader import EngineLoader
 from dq.catalog.catalog_factory import CatalogFactory
-from dq.utils.config_utils import load_config
+from dq.utils.config_utils import load_config, plain_key
 from dq.exceptions import DataFrameNotFoundError
 from dq.gate import policy_from_config
 from dq.identifiers import IdentifierError, TableName
@@ -147,7 +147,9 @@ class DQFramework:
         dataframes = {}
         config_dataframes = self._config.get("dqframework.dataframes", {})
 
-        for df_name, table_ref in config_dataframes.items():
+        for said, table_ref in config_dataframes.items():
+            # pyhocon keeps a quoted key in quotes; the name is what was written.
+            df_name = plain_key(said)
             # An explicitly injected default is already the authoritative source for
             # the logical "default" dataset. Avoid resolving a shadowed catalog
             # reference (commonly a placeholder in reusable rule configurations).

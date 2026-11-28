@@ -126,6 +126,12 @@ scripted.
 Writing HOCON: pyhocon reads one `key = value` per line inside `{ ... }`. Several keys on one line
 is a parse error, and the loader names the line and the file to fix.
 
+A key is one key in every format. A key that holds a dot -- a pandera column called `order.id`, or
+a logical dataframe's name -- is written in quotes in HOCON, where a key with a dot in it would
+otherwise be read as a path; in JSON and YAML it needs none. A key that cannot be kept whole is
+refused rather than misread: one that is not text, one that holds both a structural character and a
+double quote, and one that starts or ends with a double quote.
+
 Overlays: use one entry file per environment that includes a shared pack and overrides keys.
 
 [source,hocon]
